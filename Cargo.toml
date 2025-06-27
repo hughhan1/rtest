@@ -1,0 +1,20 @@
+[package]
+name = "rustic"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rustic"
+path = "src/main.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+glob = "0.3"
+regex = "1.10"
+ruff_python_parser = { path = "ruff/crates/ruff_python_parser" }
+ruff_python_ast = { path = "ruff/crates/ruff_python_ast" }
+
+[dev-dependencies]
+tempfile = "3.0"
