@@ -15,6 +15,7 @@ glob = "0.3"
 regex = "1.10"
 ruff_python_parser = { path = "ruff/crates/ruff_python_parser" }
 ruff_python_ast = { path = "ruff/crates/ruff_python_ast" }
+num_cpus = "1.0"
 
 [dev-dependencies]
 tempfile = "3.0"
