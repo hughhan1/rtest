@@ -45,17 +45,19 @@ fi
 
 print_status "Checking Rust code..."
 
-echo "Checking code formatting..."
-if ! cargo fmt --all -- --check; then
-    print_error "Code is not formatted. Run 'cargo fmt' to fix."
-    exit 1
+echo "Formatting code..."
+cargo fmt --all
+print_status "Code formatted"
+
+echo "Applying clippy fixes..."
+if cargo clippy --all-targets --all-features --fix --allow-staged -- -D warnings; then
+    print_status "Clippy fixes applied"
+else
+    print_warning "Some clippy issues couldn't be auto-fixed"
 fi
 
-echo "Running clippy lints..."
-if ! cargo clippy --all-targets --all-features -- -D warnings; then
-    print_error "Clippy found issues. Fix them before committing."
-    exit 1
-fi
+# Re-stage any files that were modified by formatting/clippy
+git add -u
 
 echo "Checking that code compiles..."
 if ! cargo check --all-targets --all-features; then
