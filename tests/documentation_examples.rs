@@ -12,7 +12,7 @@ fn test_basic_usage_examples() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage: rustic"));
+    assert!(stdout.contains("Usage: rtest"));
 }
 
 #[test]

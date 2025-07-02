@@ -8,18 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2025-07-03
 
 ### Added
-- **Resilient Test Collection**: Unlike pytest which stops execution when collection errors occur, Rustic continues running tests even when some files fail to collect, providing partial test results while fixing syntax errors
+- **Resilient Test Collection**: Unlike pytest which stops execution when collection errors occur, RTest continues running tests even when some files fail to collect, providing partial test results while fixing syntax errors
 - **Python Package Integration**: Auto-detection of current Python environment with seamless pytest integration
 - **Parallel Test Execution**: pytest-xdist style parallel test execution for improved performance
 - **Comprehensive Error Handling**: Collect all syntax errors instead of failing fast, allowing developers to see all issues at once
 - **Smart Test Filtering**: Outputs collected tests and filters test files with intelligent pattern matching
-- **Python Module and CLI Support**: Can be used both as a Python module (`from rustic import run_tests`) and as a CLI tool (`rustic`)
+- **Python Module and CLI Support**: Can be used both as a Python module (`from rtest import run_tests`) and as a CLI tool (`rtest`)
 - **Fatal Error Handling**: Robust handling of Python parse errors and collection failures
-
-### Features
-- Fast Python test runner built with Rust for superior performance
-- Maintains compatibility with existing pytest workflows and arguments
-- Supports Python 3.9+ with comprehensive type checking via mypy
-- MIT licensed with modern Python packaging using maturin
 
 ## [Unreleased]

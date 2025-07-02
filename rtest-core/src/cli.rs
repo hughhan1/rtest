@@ -3,10 +3,6 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Package manager to use (e.g., 'uv', 'pipenv', 'poetry')
-    #[arg(long, default_value = "python")]
-    pub package_manager: String,
-
     /// Environment variables to set for pytest (e.g., 'KEY=VALUE')
     #[arg(long, short, num_args = 0..)]
     pub env: Vec<String>,
@@ -23,9 +19,9 @@ pub struct Args {
     #[arg(long, default_value = "load")]
     pub dist: String,
 
-    /// Arguments to pass directly to pytest
-    #[arg(last = true)]
-    pub pytest_args: Vec<String>,
+    /// Collect tests only, don't run them
+    #[arg(long)]
+    pub collect_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -61,55 +57,27 @@ mod tests {
 
     #[test]
     fn test_cli_parsing_defaults() {
-        let args = Args::parse_from(["rustic"]);
+        let args = Args::parse_from(["rtest"]);
 
-        assert_eq!(args.package_manager, "python");
         assert!(args.env.is_empty());
-        assert!(args.pytest_args.is_empty());
         assert!(args.numprocesses.is_none());
         assert!(args.maxprocesses.is_none());
         assert_eq!(args.dist, "load");
-    }
-
-    #[test]
-    fn test_cli_parsing_with_package_manager() {
-        let args = Args::parse_from(["rustic", "--package-manager", "uv"]);
-
-        assert_eq!(args.package_manager, "uv");
+        assert!(!args.collect_only);
     }
 
     #[test]
     fn test_cli_parsing_with_env_vars() {
-        let args = Args::parse_from(["rustic", "--env", "DEBUG=1", "--env", "TEST=true"]);
+        let args = Args::parse_from(["rtest", "--env", "DEBUG=1", "--env", "TEST=true"]);
 
         assert_eq!(args.env, vec!["DEBUG=1", "TEST=true"]);
     }
 
     #[test]
-    fn test_cli_parsing_with_pytest_args() {
-        let args = Args::parse_from(["rustic", "--", "-v", "--tb=short", "test_file.py"]);
-
-        assert_eq!(args.pytest_args, vec!["-v", "--tb=short", "test_file.py"]);
-    }
-
-    #[test]
     fn test_cli_parsing_all_options() {
-        let args = Args::parse_from([
-            "rustic",
-            "--package-manager",
-            "poetry",
-            "--env",
-            "DEBUG=1",
-            "--env",
-            "ENV=test",
-            "--",
-            "-v",
-            "test_file.py",
-        ]);
+        let args = Args::parse_from(["rtest", "--env", "DEBUG=1", "--env", "ENV=test"]);
 
-        assert_eq!(args.package_manager, "poetry");
         assert_eq!(args.env, vec!["DEBUG=1", "ENV=test"]);
-        assert_eq!(args.pytest_args, vec!["-v", "test_file.py"]);
     }
 
     #[test]
@@ -117,59 +85,66 @@ mod tests {
         let mut cmd = Args::command();
         let help = cmd.render_help();
 
-        assert!(help.to_string().contains("package-manager"));
         assert!(help.to_string().contains("env"));
-        assert!(help.to_string().contains("PYTEST_ARGS"));
     }
 
     #[test]
     fn test_cli_parsing_with_numprocesses() {
-        let args = Args::parse_from(["rustic", "-n", "4"]);
+        let args = Args::parse_from(["rtest", "-n", "4"]);
         assert_eq!(args.numprocesses, Some("4".to_string()));
 
-        let args = Args::parse_from(["rustic", "--numprocesses", "auto"]);
+        let args = Args::parse_from(["rtest", "--numprocesses", "auto"]);
         assert_eq!(args.numprocesses, Some("auto".to_string()));
     }
 
     #[test]
     fn test_cli_parsing_with_maxprocesses() {
-        let args = Args::parse_from(["rustic", "--maxprocesses", "8"]);
+        let args = Args::parse_from(["rtest", "--maxprocesses", "8"]);
         assert_eq!(args.maxprocesses, Some(8));
     }
 
     #[test]
     fn test_cli_parsing_with_dist() {
-        let args = Args::parse_from(["rustic", "--dist", "load"]);
+        let args = Args::parse_from(["rtest", "--dist", "load"]);
         assert_eq!(args.dist, "load");
     }
 
     #[test]
     fn test_get_num_processes() {
-        let args = Args::parse_from(["rustic", "-n", "auto"]);
+        let args = Args::parse_from(["rtest", "-n", "auto"]);
         assert!(matches!(args.get_num_processes(), Some(NumProcesses::Auto)));
 
-        let args = Args::parse_from(["rustic", "-n", "logical"]);
+        let args = Args::parse_from(["rtest", "-n", "logical"]);
         assert!(matches!(
             args.get_num_processes(),
             Some(NumProcesses::Logical)
         ));
 
-        let args = Args::parse_from(["rustic", "-n", "4"]);
+        let args = Args::parse_from(["rtest", "-n", "4"]);
         assert!(matches!(
             args.get_num_processes(),
             Some(NumProcesses::Count(4))
         ));
 
-        let args = Args::parse_from(["rustic"]);
+        let args = Args::parse_from(["rtest"]);
         assert!(args.get_num_processes().is_none());
     }
 
     #[test]
     fn test_validate_dist() {
-        let args = Args::parse_from(["rustic", "--dist", "load"]);
+        let args = Args::parse_from(["rtest", "--dist", "load"]);
         assert!(args.validate_dist().is_ok());
 
-        let args = Args::parse_from(["rustic", "--dist", "loadfile"]);
+        let args = Args::parse_from(["rtest", "--dist", "loadfile"]);
         assert!(args.validate_dist().is_err());
+    }
+
+    #[test]
+    fn test_cli_parsing_with_collect_only() {
+        let args = Args::parse_from(["rtest", "--collect-only"]);
+        assert!(args.collect_only);
+
+        let args = Args::parse_from(["rtest"]);
+        assert!(!args.collect_only);
     }
 }

@@ -121,5 +121,5 @@ fn test_cli_version_still_works() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should show version information
-    assert!(stdout.contains("rustic") || stdout.contains("0.1.0"));
+    assert!(stdout.contains("rtest") || stdout.contains("0.1.0"));
 }

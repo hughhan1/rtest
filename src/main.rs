@@ -1,26 +1,13 @@
-//! Main entry point for the rustic application.
-
-mod cli;
-mod collection;
-mod collection_integration;
-mod pytest_executor;
-mod python_discovery;
-mod runner;
-mod scheduler;
-mod utils;
-mod worker;
+//! Main entry point for the rtest application.
 
 use clap::Parser;
-use cli::Args;
-use collection_integration::{collect_tests_rust, display_collection_results};
-use pytest_executor::execute_tests;
-use runner::PytestRunner;
-use scheduler::{create_scheduler, DistributionMode};
+use rtest_core::{
+    cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
+    display_collection_results, execute_tests, DistributionMode, PytestRunner, WorkerPool,
+};
 use std::env;
-use utils::determine_worker_count;
-use worker::WorkerPool;
 
-fn main() {
+pub fn main() {
     let args = Args::parse();
 
     if let Err(e) = args.validate_dist() {
@@ -30,10 +17,10 @@ fn main() {
 
     let worker_count = determine_worker_count(args.get_num_processes(), args.maxprocesses);
 
-    let runner = PytestRunner::new(args.package_manager, args.env);
+    let runner = PytestRunner::new(args.env);
 
     let rootpath = env::current_dir().expect("Failed to get current directory");
-    let (test_nodes, errors) = match collect_tests_rust(rootpath, &args.pytest_args) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath, &[]) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -53,19 +40,18 @@ fn main() {
         std::process::exit(0);
     }
 
+    // Exit after collection if --collect-only flag is set
+    if args.collect_only {
+        std::process::exit(0);
+    }
+
     if worker_count == 1 {
-        execute_tests(
-            &runner.program,
-            &runner.initial_args,
-            test_nodes,
-            args.pytest_args,
-        );
+        execute_tests(&runner.program, &runner.initial_args, test_nodes, vec![]);
     } else {
         execute_tests_parallel(
             &runner.program,
             &runner.initial_args,
             test_nodes,
-            args.pytest_args,
             worker_count,
             &args.dist,
         );
@@ -76,7 +62,6 @@ fn execute_tests_parallel(
     program: &str,
     initial_args: &[String],
     test_nodes: Vec<String>,
-    pytest_args: Vec<String>,
     worker_count: usize,
     dist_mode: &str,
 ) {
@@ -100,7 +85,7 @@ fn execute_tests_parallel(
                 program.to_string(),
                 initial_args.to_vec(),
                 tests,
-                pytest_args.clone(),
+                vec![],
             );
         }
     }
