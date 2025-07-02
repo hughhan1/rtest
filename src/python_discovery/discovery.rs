@@ -109,4 +109,27 @@ class NotATestClass:
         assert!(tests[1].is_method);
         assert_eq!(tests[1].class_name, Some("TestClass".to_string()));
     }
+
+    #[test]
+    fn test_skip_classes_with_init() {
+        let source = r#"
+class TestWithInit:
+    def __init__(self):
+        pass
+        
+    def test_should_be_skipped(self):
+        pass
+
+class TestWithoutInit:
+    def test_should_be_collected(self):
+        pass
+"#;
+
+        let config = TestDiscoveryConfig::default();
+        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "test_should_be_collected");
+        assert_eq!(tests[0].class_name, Some("TestWithoutInit".to_string()));
+    }
 }
