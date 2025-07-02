@@ -27,7 +27,7 @@ impl Default for TestDiscoveryConfig {
     fn default() -> Self {
         Self {
             python_classes: vec!["Test*".to_string()],
-            python_functions: vec!["test_*".to_string()],
+            python_functions: vec!["test*".to_string()],
         }
     }
 }
@@ -131,5 +131,41 @@ class TestWithoutInit:
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_should_be_collected");
         assert_eq!(tests[0].class_name, Some("TestWithoutInit".to_string()));
+    }
+
+    #[test]
+    fn test_camel_case_functions() {
+        let source = r#"
+def test_snake_case():
+    pass
+
+def testCamelCase():
+    pass
+
+def testThisIsAlsoATest():
+    pass
+
+class TestClass:
+    def test_method_snake_case(self):
+        pass
+    
+    def testMethodCamelCase(self):
+        pass
+
+def not_a_test():
+    pass
+"#;
+
+        let config = TestDiscoveryConfig::default();
+        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+
+        assert_eq!(tests.len(), 5);
+
+        let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+        assert!(test_names.contains(&"test_snake_case"));
+        assert!(test_names.contains(&"testCamelCase"));
+        assert!(test_names.contains(&"testThisIsAlsoATest"));
+        assert!(test_names.contains(&"test_method_snake_case"));
+        assert!(test_names.contains(&"testMethodCamelCase"));
     }
 }
