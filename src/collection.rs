@@ -125,7 +125,7 @@ impl Default for CollectionConfig {
             testpaths: vec![],
             python_files: vec!["test_*.py".to_string(), "*_test.py".to_string()],
             python_classes: vec!["Test*".to_string()],
-            python_functions: vec!["test_*".to_string()],
+            python_functions: vec!["test*".to_string()],
         }
     }
 }

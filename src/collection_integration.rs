@@ -97,12 +97,39 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
         );
     }
 
-    if test_nodes.is_empty() && errors.errors.is_empty() {
+    let item_count = test_nodes.len();
+    let error_count = errors.errors.len();
+
+    if item_count == 0 && error_count == 0 {
         println!("No tests collected.");
-    } else if !test_nodes.is_empty() {
-        println!("Collected {} items:", test_nodes.len());
-        for node in test_nodes {
-            println!("  {node}");
+    } else {
+        let mut summary_parts = Vec::new();
+
+        if item_count > 0 {
+            summary_parts.push(format!(
+                "collected {} item{}",
+                item_count,
+                if item_count == 1 { "" } else { "s" }
+            ));
+        }
+
+        if error_count > 0 {
+            summary_parts.push(format!(
+                "{} error{}",
+                error_count,
+                if error_count == 1 { "" } else { "s" }
+            ));
+        }
+
+        if !summary_parts.is_empty() {
+            println!("{}", summary_parts.join(" / "));
+        }
+
+        if !test_nodes.is_empty() {
+            println!();
+            for node in test_nodes {
+                println!("  {node}");
+            }
         }
     }
 }
