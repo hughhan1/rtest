@@ -33,15 +33,15 @@ fn main() {
     let runner = PytestRunner::new(args.package_manager, args.env);
 
     let rootpath = env::current_dir().expect("Failed to get current directory");
-    let test_nodes = match collect_tests_rust(rootpath, &args.pytest_args) {
-        Ok(nodes) => nodes,
+    let (test_nodes, errors) = match collect_tests_rust(rootpath, &args.pytest_args) {
+        Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
             std::process::exit(1);
         }
     };
 
-    display_collection_results(&test_nodes);
+    display_collection_results(&test_nodes, &errors);
 
     if test_nodes.is_empty() {
         println!("No tests found.");
