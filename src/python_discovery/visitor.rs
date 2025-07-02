@@ -54,7 +54,7 @@ impl TestDiscoveryVisitor {
 
     fn visit_class(&mut self, class: &StmtClassDef) {
         let name = class.name.as_str();
-        if self.is_test_class(name) {
+        if self.is_test_class(name) && !self.class_has_init(class) {
             let prev_class = self.current_class.clone();
             self.current_class = Some(name.to_string());
 
@@ -80,6 +80,17 @@ impl TestDiscoveryVisitor {
         for pattern in &self.config.python_classes {
             if pattern::matches(pattern, name) {
                 return true;
+            }
+        }
+        false
+    }
+
+    fn class_has_init(&self, class: &StmtClassDef) -> bool {
+        for stmt in &class.body {
+            if let Stmt::FunctionDef(func) = stmt {
+                if func.name.as_str() == "__init__" {
+                    return true;
+                }
             }
         }
         false
