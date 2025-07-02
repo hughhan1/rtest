@@ -1,0 +1,62 @@
+name: Test Release
+
+on:
+  push:
+    branches:
+      - develop
+      - test-release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  test-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install python-semantic-release
+        run: pip install python-semantic-release
+
+      - name: Check what would be released
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release version --noop
+
+      - name: Build wheels for testing
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          manylinux: auto
+
+      - name: Upload to TestPyPI
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/test-release'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          skip-existing: true
+
+      - name: Test install from TestPyPI
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/test-release'
+        run: |
+          sleep 60  # Wait for TestPyPI to process
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rustic
+          python -c "import rustic; print('Test install successful')"

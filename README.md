@@ -18,7 +18,7 @@ collected 22 items / 3 errors
 **rustic behavior:**
 ```
 collected 22 items / 3 errors
-!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!! Warning: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!
 ================================== test session starts ===================================
 # Continues to run the 22 successfully collected tests
 ```

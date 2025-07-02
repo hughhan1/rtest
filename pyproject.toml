@@ -88,3 +88,16 @@ dev = [
     "maturin>=1.9.0",
 ]
 
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+changelog_file = "CHANGELOG.md"
+upload_to_repository = true
+upload_to_release = true
+hvcs = "github"
+branches = { main = "main", prerelease = "develop" }
+
+[tool.semantic_release.remote]
+type = "github"
+
+[tool.semantic_release.publish]
+dist_glob_patterns = ["dist/*"]
