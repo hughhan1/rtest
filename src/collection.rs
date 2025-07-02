@@ -411,6 +411,7 @@ pub struct CollectReport {
     pub nodeid: String,
     pub outcome: CollectionOutcome,
     pub longrepr: Option<String>,
+    pub error_type: Option<CollectionError>,
     pub result: Vec<Box<dyn Collector>>,
 }
 
@@ -419,12 +420,14 @@ impl CollectReport {
         nodeid: String,
         outcome: CollectionOutcome,
         longrepr: Option<String>,
+        error_type: Option<CollectionError>,
         result: Vec<Box<dyn Collector>>,
     ) -> Self {
         Self {
             nodeid,
             outcome,
             longrepr,
+            error_type,
             result,
         }
     }
@@ -459,12 +462,14 @@ pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
             collector.nodeid().to_string(),
             CollectionOutcome::Passed,
             None,
+            None,
             result,
         ),
         Err(e) => CollectReport::new(
             collector.nodeid().to_string(),
             CollectionOutcome::Failed,
             Some(e.to_string()),
+            Some(e),
             vec![],
         ),
     }
