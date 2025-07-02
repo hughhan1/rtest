@@ -92,7 +92,7 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
             }
         }
         println!(
-            "!!!!!!!!!!!!!!!!!!!!! Interrupted: {} errors during collection !!!!!!!!!!!!!!!!!!!!!",
+            "!!!!!!!!!!!!!!!!!!!!! Warning: {} errors during collection !!!!!!!!!!!!!!!!!!!!!",
             errors.errors.len()
         );
     }
