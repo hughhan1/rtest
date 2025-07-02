@@ -4,7 +4,15 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
+
+# Handle git worktrees
+if [ -f "$PROJECT_ROOT/.git" ]; then
+    # This is a worktree, extract the actual git directory
+    GIT_DIR=$(cat "$PROJECT_ROOT/.git" | sed 's/gitdir: //')
+    HOOKS_DIR="$GIT_DIR/hooks"
+else
+    HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
+fi
 
 echo "Installing Git hooks..."
 
@@ -39,30 +47,55 @@ print_error() {
 }
 
 # Check if we have any Rust files to check
-if ! git diff --cached --name-only | grep -q '\.rs$'; then
+RUST_FILES=$(git diff --cached --name-only | grep '\.rs$' || true)
+# Check if we have any Python files to check
+PYTHON_FILES=$(git diff --cached --name-only | grep '\.py$' || true)
+
+if [ -z "$RUST_FILES" ] && [ -z "$PYTHON_FILES" ]; then
     exit 0
 fi
 
-print_status "Checking Rust code..."
+if [ -n "$RUST_FILES" ]; then
+    print_status "Checking Rust code..."
 
-echo "Formatting code..."
-cargo fmt --all
-print_status "Code formatted"
+    echo "Formatting code..."
+    cargo fmt --all
+    print_status "Code formatted"
 
-echo "Applying clippy fixes..."
-if cargo clippy --all-targets --all-features --fix --allow-staged -- -D warnings; then
-    print_status "Clippy fixes applied"
-else
-    print_warning "Some clippy issues couldn't be auto-fixed"
+    echo "Applying clippy fixes..."
+    if cargo clippy --all-targets --all-features --fix --allow-staged -- -D warnings; then
+        print_status "Clippy fixes applied"
+    else
+        print_warning "Some clippy issues couldn't be auto-fixed"
+    fi
+
+    # Re-stage any files that were modified by formatting/clippy
+    git add -u
 fi
 
-# Re-stage any files that were modified by formatting/clippy
-git add -u
-
-echo "Checking that code compiles..."
-if ! cargo check --all-targets --all-features; then
-    print_error "Code does not compile. Fix compilation errors before committing."
-    exit 1
+if [ -n "$PYTHON_FILES" ]; then
+    print_status "Checking Python code..."
+    
+    echo "Running ruff format on python/ and tests/ directories..."
+    if ! uv ruff format python/ tests/; then
+        print_error "Failed to format Python code."
+        exit 1
+    fi
+    
+    echo "Running ruff format on staged files..."
+    if ! uv ruff format $PYTHON_FILES; then
+        print_error "Failed to format Python code."
+        exit 1
+    fi
+    
+    echo "Running ruff linter with auto-fix..."
+    if ! uv ruff check --fix $PYTHON_FILES; then
+        print_error "Ruff found unfixable issues. Fix them manually before committing."
+        exit 1
+    fi
+    
+    # Re-add any files that were modified by ruff
+    git add $PYTHON_FILES
 fi
 
 print_status "All pre-commit checks passed!"

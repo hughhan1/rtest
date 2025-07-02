@@ -1,0 +1,7 @@
+"""Type stubs for the Rust module."""
+
+from typing import List, Optional
+
+def run_tests(pytest_args: Optional[List[str]] = ...) -> None:
+    """Run tests using the Rust implementation."""
+    ...

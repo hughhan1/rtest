@@ -153,7 +153,16 @@ impl Session {
             }
         } else {
             // Parse arguments into paths
-            args.iter().map(|arg| self.rootpath.join(arg)).collect()
+            args.iter()
+                .map(|arg| {
+                    let path = PathBuf::from(arg);
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        self.rootpath.join(arg)
+                    }
+                })
+                .collect()
         };
 
         let mut items = Vec::new();
