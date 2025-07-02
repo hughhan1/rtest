@@ -354,10 +354,13 @@ impl Collector for Module {
             python_functions: self.session().config.python_functions.clone(),
         };
 
-        // Discover tests in the file
-        let tests = discover_tests(&self.path, &source, &discovery_config)?;
+        let tests = match discover_tests(&self.path, &source, &discovery_config) {
+            Ok(tests) => tests,
+            Err(e) => {
+                return Err(e);
+            }
+        };
 
-        // Convert test info to Function collectors
         let mut items: Vec<Box<dyn Collector>> = Vec::new();
         for test in tests {
             let function = test_info_to_function(&test, &self.path, &self.nodeid);

@@ -11,7 +11,8 @@ fn test_rust_collection_finds_all_tests() {
     let (_temp_dir, project_path) = common::create_test_project();
 
     // Collect tests from the temporary project
-    let test_nodes = collect_tests_rust(project_path, &[]).expect("Collection should succeed");
+    let (test_nodes, _errors) =
+        collect_tests_rust(project_path, &[]).expect("Collection should succeed");
 
     // Should find tests from both test_sample.py and test_math.py
     assert!(!test_nodes.is_empty(), "Should find some tests");
@@ -73,7 +74,8 @@ class RegularClass:
     let file_path = project_path.join("regular.py");
     fs::write(&file_path, content).expect("Failed to write file");
 
-    let test_nodes = collect_tests_rust(project_path, &[]).expect("Collection should succeed");
+    let (test_nodes, _errors) =
+        collect_tests_rust(project_path, &[]).expect("Collection should succeed");
 
     assert!(
         test_nodes.is_empty(),
@@ -84,21 +86,25 @@ class RegularClass:
 /// Test that display_collection_results doesn't panic
 #[test]
 fn test_display_collection_results() {
+    use rustic::collection_integration::CollectionErrors;
+
     let test_nodes = vec![
         "test_file.py::test_function".to_string(),
         "test_file.py::TestClass::test_method".to_string(),
     ];
 
+    let errors = CollectionErrors { errors: Vec::new() };
+
     // This should not panic
-    display_collection_results(&test_nodes);
+    display_collection_results(&test_nodes, &errors);
 
     // Test with empty list
-    display_collection_results(&[]);
+    display_collection_results(&[], &errors);
 }
 
 /// Test collection with malformed Python files
 #[test]
-fn test_collection_with_syntax_errors_returns_error() {
+fn test_collection_with_syntax_errors_collects_errors() {
     use std::fs;
     use tempfile::TempDir;
 
@@ -114,11 +120,18 @@ fn test_collection_with_syntax_errors_returns_error() {
 
     let result = collect_tests_rust(project_path, &[file_path.to_str().unwrap().to_string()]);
     assert!(
-        result.is_err(),
-        "Should return error for malformed Python files"
+        result.is_ok(),
+        "Should not fail immediately on syntax errors"
     );
 
-    let error = result.unwrap_err();
+    let (test_nodes, errors) = result.unwrap();
+    assert!(
+        test_nodes.is_empty(),
+        "Should not find any tests in malformed file"
+    );
+    assert!(!errors.errors.is_empty(), "Should collect parse errors");
+
+    let (_nodeid, error) = &errors.errors[0];
     assert!(
         matches!(error, CollectionError::ParseError(_)),
         "Should be a parse error"
@@ -148,9 +161,19 @@ def test_broken():
     fs::write(&file_path, content).expect("Failed to write file");
 
     let result = collect_tests_rust(project_path, &[file_path.to_str().unwrap().to_string()]);
-    assert!(result.is_err(), "Should return error for syntax error");
+    assert!(
+        result.is_ok(),
+        "Should not fail immediately on syntax error"
+    );
 
-    let error = result.unwrap_err();
+    let (test_nodes, errors) = result.unwrap();
+    assert!(
+        test_nodes.is_empty(),
+        "Should not find any tests in file with syntax error"
+    );
+    assert!(!errors.errors.is_empty(), "Should collect the syntax error");
+
+    let (_nodeid, error) = &errors.errors[0];
     assert!(
         matches!(error, CollectionError::ParseError(_)),
         "Should be a parse error"
@@ -177,11 +200,18 @@ fn test_collection_while_stmt_missing_condition() {
 
     let result = collect_tests_rust(project_path, &[file_path.to_str().unwrap().to_string()]);
     assert!(
-        result.is_err(),
-        "Should return error for while statement syntax error"
+        result.is_ok(),
+        "Should not fail immediately on while statement syntax error"
     );
 
-    let error = result.unwrap_err();
+    let (test_nodes, errors) = result.unwrap();
+    assert!(
+        test_nodes.is_empty(),
+        "Should not find any tests in file with syntax error"
+    );
+    assert!(!errors.errors.is_empty(), "Should collect the syntax error");
+
+    let (_nodeid, error) = &errors.errors[0];
     assert!(
         matches!(error, CollectionError::ParseError(_)),
         "Should be a parse error"

@@ -59,7 +59,8 @@ def process_data(data):
     fs::write(&test_file_path, real_pytest_content).expect("Failed to write test file");
 
     // Collect tests
-    let test_nodes = collect_tests_rust(project_path, &[]).expect("Collection should succeed");
+    let (test_nodes, _errors) =
+        collect_tests_rust(project_path, &[]).expect("Collection should succeed");
 
     println!("Found {} test nodes:", test_nodes.len());
     for node in &test_nodes {
