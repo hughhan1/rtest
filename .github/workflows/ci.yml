@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04, macos-13, macos-14]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install maturin
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          pip install maturin
+        else
+          pip install maturin[patchelf]
+        fi
+      shell: bash
+    
+    - name: Install ziglang (Linux only)
+      if: runner.os == 'Linux'
+      run: pip install ziglang
+    
+    - name: Build wheel
+      run: |
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          maturin build --release --out dist --zig
+        else
+          maturin build --release --out dist
+        fi
+      shell: bash
+    
+    - name: Install built wheel
+      run: pip install --find-links dist rustic
+    
+    - name: Test import
+      run: python -c "import rustic; print('Import successful')"
+    
+    - name: Run Python integration tests
+      run: python -m unittest discover tests/ -v
+    
+    - name: Run Rust tests
+      run: cargo test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    
+    - name: Install Python dev dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -e ".[dev]"
+    
+    - name: Run ruff format check
+      run: ruff format --check python/ tests/
+    
+    - name: Run ruff lint
+      run: ruff check python/ tests/
+    
+    - name: Run mypy
+      run: mypy python/
+    
+    - name: Check Rust formatting
+      run: cargo fmt -- --check
+    
+    - name: Run clippy
+      run: cargo clippy -- -D warnings

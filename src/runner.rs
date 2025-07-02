@@ -1,9 +1,31 @@
+use log::debug;
+use pyo3::prelude::*;
+
 pub struct PytestRunner {
     pub program: String,
     pub initial_args: Vec<String>,
 }
 
 impl PytestRunner {
+    /// Used by Python bindings in [`crate::run_tests`]
+    #[allow(dead_code)]
+    pub fn from_current_python(py: Python) -> Self {
+        // Use the same Python executable that's running this program
+        let python_path = py
+            .import_bound("sys")
+            .and_then(|sys| sys.getattr("executable"))
+            .and_then(|exe| exe.extract::<String>())
+            .unwrap_or_else(|_| "python3".to_string());
+
+        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
+        debug!("Running {} {}", python_path, initial_args.join(" "));
+
+        Self {
+            program: python_path,
+            initial_args,
+        }
+    }
+
     pub fn new(package_manager: String, env_vars: Vec<String>) -> Self {
         let mut program = "python3".to_string();
         let mut initial_args = vec!["-m".to_string(), "pytest".to_string()];
