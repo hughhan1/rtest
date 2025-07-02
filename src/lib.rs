@@ -1,21 +1,34 @@
-//! Rustic library for Python test collection and execution.
+//! Python bindings for rtest-core library.
 
+use clap::Parser;
 use pyo3::prelude::*;
+use rtest_core::{
+    cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
+    display_collection_results, execute_tests, DistributionMode, WorkerPool,
+};
 use std::env;
 
-pub mod cli;
-pub mod collection;
-pub mod collection_integration;
-pub mod pytest_executor;
-pub mod python_discovery;
-pub mod runner;
-pub mod scheduler;
-pub mod utils;
-pub mod worker;
+pub struct PytestRunner {
+    pub program: String,
+    pub initial_args: Vec<String>,
+}
 
-use collection_integration::{collect_tests_rust, display_collection_results};
-use pytest_executor::execute_tests;
-use runner::PytestRunner;
+impl PytestRunner {
+    pub fn from_current_python(py: Python) -> Self {
+        let python_path = py
+            .import("sys")
+            .and_then(|sys| sys.getattr("executable"))
+            .and_then(|exe| exe.extract::<String>())
+            .unwrap_or_else(|_| "python3".to_string());
+
+        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
+
+        Self {
+            program: python_path,
+            initial_args,
+        }
+    }
+}
 
 #[pyfunction]
 #[pyo3(signature = (pytest_args=None))]
@@ -51,8 +64,116 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
     );
 }
 
+#[pyfunction]
+fn main_cli_with_args(py: Python, argv: Vec<String>) {
+    // Prepend program name for clap parsing
+    let mut full_args = vec!["rtest".to_string()];
+    full_args.extend(argv);
+    let args = Args::parse_from(full_args);
+
+    if let Err(e) = args.validate_dist() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
+
+    let worker_count = determine_worker_count(args.get_num_processes(), args.maxprocesses);
+
+    let runner = PytestRunner::from_current_python(py);
+
+    let rootpath = env::current_dir().expect("Failed to get current directory");
+    let (test_nodes, errors) = match collect_tests_rust(rootpath, &[]) {
+        Ok((nodes, errors)) => (nodes, errors),
+        Err(e) => {
+            eprintln!("FATAL: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    display_collection_results(&test_nodes, &errors);
+
+    // Exit early if there are collection errors to prevent test execution
+    if !errors.errors.is_empty() {
+        std::process::exit(1);
+    }
+
+    if test_nodes.is_empty() {
+        println!("No tests found.");
+        std::process::exit(0);
+    }
+
+    // Exit after collection if --collect-only flag is set
+    if args.collect_only {
+        std::process::exit(0);
+    }
+
+    if worker_count == 1 {
+        execute_tests(&runner.program, &runner.initial_args, test_nodes, vec![]);
+    } else {
+        execute_tests_parallel(
+            &runner.program,
+            &runner.initial_args,
+            test_nodes,
+            worker_count,
+            &args.dist,
+        );
+    }
+}
+
+fn execute_tests_parallel(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    worker_count: usize,
+    dist_mode: &str,
+) {
+    println!("Running tests with {worker_count} workers using {dist_mode} distribution");
+
+    let distribution_mode = dist_mode.parse::<DistributionMode>().unwrap();
+    let scheduler = create_scheduler(distribution_mode);
+    let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
+
+    if test_batches.is_empty() {
+        println!("No test batches to execute.");
+        std::process::exit(0);
+    }
+
+    let mut worker_pool = WorkerPool::new();
+
+    for (worker_id, tests) in test_batches.into_iter().enumerate() {
+        if !tests.is_empty() {
+            worker_pool.spawn_worker(
+                worker_id,
+                program.to_string(),
+                initial_args.to_vec(),
+                tests,
+                vec![],
+            );
+        }
+    }
+
+    let results = worker_pool.wait_for_all();
+
+    let mut overall_exit_code = 0;
+    for result in results {
+        println!("=== Worker {} ===", result.worker_id);
+        if !result.stdout.is_empty() {
+            print!("{}", result.stdout);
+        }
+        if !result.stderr.is_empty() {
+            eprint!("{}", result.stderr);
+        }
+
+        if result.exit_code != 0 {
+            overall_exit_code = result.exit_code;
+        }
+    }
+
+    std::process::exit(overall_exit_code);
+}
+
 #[pymodule]
-fn _rustic(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _rtest(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_tests, m)?)?;
+    m.add_function(wrap_pyfunction!(main_cli_with_args, m)?)?;
     Ok(())
 }

@@ -3,8 +3,7 @@ name: Test Release
 on:
   push:
     branches:
-      - develop
-      - test-release
+      - beta
   workflow_dispatch:
 
 permissions:
@@ -21,6 +20,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,7 +36,7 @@ jobs:
       - name: Check what would be released
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: semantic-release version --noop
+        run: semantic-release version --no-push
 
       - name: Build wheels for testing
         uses: PyO3/maturin-action@v1
@@ -47,7 +47,7 @@ jobs:
           manylinux: auto
 
       - name: Upload to TestPyPI
-        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/test-release'
+        if: github.ref == 'refs/heads/beta'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
@@ -55,8 +55,8 @@ jobs:
           skip-existing: true
 
       - name: Test install from TestPyPI
-        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/test-release'
+        if: github.ref == 'refs/heads/beta'
         run: |
           sleep 60  # Wait for TestPyPI to process
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rustic
-          python -c "import rustic; print('Test install successful')"
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rtest
+          python -c "import rtest; print('Test install successful')"

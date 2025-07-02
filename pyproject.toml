@@ -6,7 +6,7 @@ requires = [
 build-backend = "maturin"
 
 [project]
-name = "rustic"
+name = "rtest"
 version = "0.1.0"
 description = "A fast Python test runner built with Rust"
 readme = "README.md"
@@ -33,7 +33,7 @@ classifiers = [
 keywords = ["testing", "pytest", "rust", "performance"]
 
 [project.scripts]
-rustic = "rustic:main"
+rtest = "rtest:main"
 
 [project.optional-dependencies]
 dev = [
@@ -54,7 +54,7 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["rustic"]
+known-first-party = ["rtest"]
 
 [tool.mypy]
 python_version = "3.9"
@@ -81,7 +81,7 @@ strict_equality = true
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "rustic._rustic"
+module-name = "rtest._rtest"
 
 [dependency-groups]
 dev = [
@@ -94,7 +94,7 @@ changelog_file = "CHANGELOG.md"
 upload_to_repository = true
 upload_to_release = true
 hvcs = "github"
-branches = { main = "main", prerelease = "develop" }
+branches = { main = {}, prerelease = { name = "beta", prerelease = true } }
 
 [tool.semantic_release.remote]
 type = "github"

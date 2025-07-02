@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from rustic._rustic import run_tests
+from rtest._rtest import run_tests
 
 
 class TestParallelLogic(unittest.TestCase):

@@ -63,7 +63,7 @@ if [ -n "$RUST_FILES" ]; then
     print_status "Code formatted"
 
     echo "Applying clippy fixes..."
-    if cargo clippy --all-targets --all-features --fix --allow-staged -- -D warnings; then
+    if cargo clippy --bin rtest --fix --allow-staged -- -D warnings; then
         print_status "Clippy fixes applied"
     else
         print_warning "Some clippy issues couldn't be auto-fixed"
@@ -77,19 +77,19 @@ if [ -n "$PYTHON_FILES" ]; then
     print_status "Checking Python code..."
     
     echo "Running ruff format on python/ and tests/ directories..."
-    if ! uv ruff format python/ tests/; then
+    if ! uv run ruff format python/ tests/; then
         print_error "Failed to format Python code."
         exit 1
     fi
     
     echo "Running ruff format on staged files..."
-    if ! uv ruff format $PYTHON_FILES; then
+    if ! uv run ruff format $PYTHON_FILES; then
         print_error "Failed to format Python code."
         exit 1
     fi
     
     echo "Running ruff linter with auto-fix..."
-    if ! uv ruff check --fix $PYTHON_FILES; then
+    if ! uv run ruff check --fix $PYTHON_FILES; then
         print_error "Ruff found unfixable issues. Fix them manually before committing."
         exit 1
     fi

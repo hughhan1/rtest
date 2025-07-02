@@ -14,12 +14,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.repository == 'hughhan1/rustic'
+    if: github.repository == 'hughhan1/rtest'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -90,6 +91,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          submodules: recursive
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -129,6 +131,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          submodules: recursive
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -163,6 +166,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          submodules: recursive
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -190,6 +194,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          submodules: recursive
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1

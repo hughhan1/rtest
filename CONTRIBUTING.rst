@@ -1,7 +1,7 @@
-Contributing to Rustic
+Contributing to RTest
 ====================
 
-Thank you for your interest in contributing to Rustic! This document provides guidelines for contributors.
+Thank you for your interest in contributing to RTest! This document provides guidelines for contributors.
 
 Getting Started
 ---------------
@@ -9,8 +9,8 @@ Getting Started
 1. Fork the repository on GitHub
 2. Clone your fork locally::
 
-    git clone https://github.com/yourusername/rustic.git
-    cd rustic
+    git clone https://github.com/yourusername/rtest.git
+    cd rtest
 
 3. Install development dependencies::
 
@@ -78,7 +78,7 @@ Run the full test suite::
     
     # Integration tests
     maturin develop
-    uv run python -c "import rustic; print('Import successful')"
+    uv run python -c "import rtest; print('Import successful')"
 
 For maintainers, see the `Release Process`_ section below.
 
@@ -90,7 +90,7 @@ Release Process
 Overview
 ~~~~~~~~
 
-Rustic uses automated semantic versioning with ``python-semantic-release``. Releases are triggered by conventional commits and published automatically to PyPI.
+rtest uses automated semantic versioning with ``python-semantic-release``. Releases are triggered by conventional commits and published automatically to PyPI.
 
 Setup Requirements
 ~~~~~~~~~~~~~~~~~~
@@ -119,15 +119,15 @@ Testing Releases
 
 2. Install from TestPyPI::
 
-    uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rustic
+    uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rtest
 
 **Option 2: Local Testing**
 
 ::
 
     maturin build --release --out dist
-    uv pip install dist/rustic-*.whl
-    uv run python -c "import rustic; print('Local test successful')"
+    uv pip install dist/rtest-*.whl
+    uv run python -c "import rtest; print('Local test successful')"
 
 **Option 3: Dry Run**
 
@@ -175,8 +175,8 @@ Troubleshooting
 
 **Upload failures**: Check for existing versions::
 
-    uv pip index versions rustic
-    uv pip index versions --index-url https://test.pypi.org/simple/ rustic
+    uv pip index versions rtest
+    uv pip index versions --index-url https://test.pypi.org/simple/ rtest
 
 Community
 ---------
@@ -194,4 +194,4 @@ By participating, you agree to uphold this code.
 License
 -------
 
-By contributing to Rustic, you agree that your contributions will be licensed under the MIT License.
+By contributing to rtest, you agree that your contributions will be licensed under the MIT License.

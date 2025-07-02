@@ -14,7 +14,7 @@ fn test_cli_help() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage: rustic"));
+    assert!(stdout.contains("Usage: rtest"));
     assert!(stdout.contains("--package-manager"));
     assert!(stdout.contains("--env"));
     assert!(!stdout.contains("--rust-collect")); // Should be removed
@@ -30,7 +30,7 @@ fn test_cli_version() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("rustic"));
+    assert!(stdout.contains("rtest"));
 }
 
 /// Test CLI argument parsing for different package managers
@@ -73,7 +73,7 @@ fn test_collection_phase() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("rustic");
+        .join("rtest");
 
     let output = Command::new(&rustic_binary)
         .args(["--", "test_sample.py"])
