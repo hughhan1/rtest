@@ -47,15 +47,31 @@ At the current moment, `rtest` delegates to [`pytest`](https://pytest.org) for t
 `rtest` delivers significant performance improvements over [`pytest`](https://pytest.org):
 
 ```bash
-# Test Collection (--collect-only)
-pytest:  123.3ms ± 5.4ms
-rtest:    28.1ms ± 2.6ms
-Result:   4.4x faster
+=== Full Test Execution Benchmark ===
+Benchmark 1: pytest
+  Time (mean ± σ):      3.990 s ±  0.059 s    [User: 3.039 s, System: 0.937 s]
+  Range (min … max):    3.881 s …  4.113 s    20 runs
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      65.9 ms ±  10.6 ms    [User: 22.9 ms, System: 22.8 ms]
+  Range (min … max):    40.6 ms …  78.7 ms    20 runs
+ 
+Summary
+  rtest ran
+   60.52 ± 9.78 times faster than pytest
 
-# Full Test Execution  
-pytest:  215.8ms ± 11.0ms
-rtest:    29.7ms ± 5.3ms
-Result:   7.3x faster
+=== Test Collection Only Benchmark ===
+Benchmark 1: pytest --collect-only
+  Time (mean ± σ):      4.051 s ±  0.114 s    [User: 3.060 s, System: 0.959 s]
+  Range (min … max):    3.961 s …  4.424 s    20 runs
+ 
+Benchmark 2: rtest --collect-only
+  Time (mean ± σ):      40.7 ms ±  11.6 ms    [User: 16.6 ms, System: 12.8 ms]
+  Range (min … max):    27.0 ms …  80.8 ms    20 runs
+ 
+Summary
+  rtest --collect-only ran
+   99.61 ± 28.52 times faster than pytest --collect-only
 ```
 
 *Performance benchmarks are a work-in-progress. These results are from a typical test suite using hyperfine with 20 runs each on MacBook Pro M4 Pro (48GB RAM). More comprehensive benchmarking is on the roadmap once additional features are implemented.*
