@@ -1,110 +1,157 @@
-# RTest
+# rtest
 
-A fast Python test runner built with Rust.
+[![PyPI version](https://badge.fury.io/py/rtest.svg)](https://badge.fury.io/py/rtest)
+[![Python](https://img.shields.io/pypi/pyversions/rtest.svg)](https://pypi.org/project/rtest/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Key Features
+A Python test runner built with Rust.
+
+> **⚠️ Development Notice**: `rtest` is in active development and not yet ready for production use. Expect bugs, incomplete features, and breaking changes as we work toward stability.
+
+## Features
 
 ### Resilient Test Collection
-Unlike pytest which stops execution when collection errors occur, RTest continues running tests even when some files fail to collect. This means you get partial test results while fixing syntax errors or other collection issues.
+Unlike [`pytest`](https://pytest.org) which stops execution when collection errors occur, `rtest` continues running tests even when some files fail to collect:
 
-**pytest behavior:**
-```
+**`pytest` stops everything when collection fails:**
+```bash
 collected 22 items / 3 errors
-!!!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!!!!
 ============================== 1 warning, 3 errors in 0.97s ==============================
-# No tests are executed
+# No tests run - you're stuck
 ```
 
-**rtest behavior:**
-```
+**`rtest` keeps going:**
+```bash
 collected 22 items / 3 errors
 !!!!!!!!!!!!!!!!!! Warning: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!
 ================================== test session starts ===================================
-# Continues to run the 22 successfully collected tests
+# Your 22 working tests run while you fix the 3 broken files
 ```
 
-This partial-success approach provides immediate feedback on working tests while you fix collection errors in problematic files.
+### Built-in Parallelization
+`rtest` includes parallel test execution out of the box, without requiring additional plugins like [`pytest-xdist`](https://github.com/pytest-dev/pytest-xdist). Simply use the `-n` flag to run tests across multiple processes:
 
-## Usage
+```bash
+# Run tests in parallel (recommended for large test suites)
+rtest -n 4                    # Use 4 processes
+rtest -n auto                 # Auto-detect CPU cores
+rtest --maxprocesses 8        # Limit maximum processes
+```
 
-### As a Python module
+### Current Implementation
+At the current moment, `rtest` delegates to [`pytest`](https://pytest.org) for test execution while providing enhanced collection and parallelization features.
 
+## Performance
+
+`rtest` delivers significant performance improvements over [`pytest`](https://pytest.org):
+
+```bash
+# Test Collection (--collect-only)
+pytest:  123.3ms ± 5.4ms
+rtest:    28.1ms ± 2.6ms
+Result:   4.4x faster
+
+# Full Test Execution  
+pytest:  215.8ms ± 11.0ms
+rtest:    29.7ms ± 5.3ms
+Result:   7.3x faster
+```
+
+*Performance benchmarks are a work-in-progress. These results are from a typical test suite using hyperfine with 20 runs each on MacBook Pro M4 Pro (48GB RAM). More comprehensive benchmarking is on the roadmap once additional features are implemented.*
+
+## Quick Start
+
+### Installation
+
+```bash
+pip install rtest
+```
+
+*Requires Python 3.9+*
+
+### Basic Usage
+
+```bash
+# Drop-in replacement for [`pytest`](https://pytest.org)
+rtest
+
+# That's it! All your existing [`pytest`](https://pytest.org) workflows work
+rtest tests/
+rtest tests/test_auth.py -v
+rtest -- -k "test_user" --tb=short
+```
+
+## Advanced Usage
+
+### Environment Configuration
+```bash
+# Set environment variables for your tests
+rtest -e DEBUG=1 -e DATABASE_URL=sqlite://test.db
+
+# Perfect for testing different configurations
+rtest -e ENVIRONMENT=staging -- tests/integration/
+```
+
+### Collection and Discovery
+```bash
+# See what tests would run without executing them
+rtest --collect-only
+
+# Mix `rtest` options with any [`pytest`](https://pytest.org) arguments
+rtest -n 4 -- -v --tb=short -k "not slow"
+```
+
+### Python API
 ```python
 from rtest import run_tests
 
-# Run tests
+# Programmatic test execution
 run_tests()
 
-# Run tests with specific pytest arguments
-run_tests(pytest_args=["tests/", "-v"])
+# With custom [`pytest`](https://pytest.org) arguments
+run_tests(pytest_args=["tests/unit/", "-v", "--tb=short"])
+
+# Perfect for CI/CD pipelines and automation
+result = run_tests(pytest_args=["--junitxml=results.xml"])
 ```
 
-### As a CLI tool
+### Command Reference
 
+| Option | Description |
+|--------|-------------|
+| `-n, --numprocesses N` | Run tests in N parallel processes |
+| `--maxprocesses N` | Maximum number of worker processes |
+| `-e, --env KEY=VALUE` | Set environment variables (can be repeated) |
+| `--dist MODE` | Distribution mode for parallel execution (default: load) |
+| `--collect-only` | Show what tests would run without executing them |
+| `--help` | Show all available options |
+| `--version` | Show `rtest` version |
+
+**Pro tip**: Use `--` to separate `rtest` options from [`pytest`](https://pytest.org) arguments:
 ```bash
-# Run all tests
-rtest
-
-# Run specific tests
-rtest tests/test_example.py
-
-# Run with pytest arguments
-rtest -- -v -k test_specific
+rtest -n 4 -e DEBUG=1 -- -v -k "integration" --tb=short
 ```
 
-## Development
+## Contributing
 
-### Building and Testing
+We welcome contributions! Check out our [Contributing Guide](CONTRIBUTING.rst) for details on:
 
-This project is a hybrid Rust/Python package using PyO3 and maturin.
-
-#### Rust Development
-```bash
-# Run Rust unit tests
-cargo test --bin rtest
-
-# Format Rust code
-cargo fmt --all
-
-# Run clippy lints
-cargo clippy --bin rtest -- -D warnings
-```
-
-#### Python Extension Development
-```bash
-# Build and install the Python extension in development mode
-uv run maturin develop
-
-# Test the Python extension
-uv run python -c "import rtest; print('Python extension imported successfully')"
-
-# Run Python tests (if any)
-uv run pytest
-```
-
-#### Full Development Workflow
-```bash
-# 1. Set up the environment
-uv sync
-
-# 2. Build the Python extension
-uv run maturin develop
-
-# 3. Run Rust tests
-cargo test --bin rtest
-
-# 4. Test Python integration
-uv run python -c "import rtest; print('Success')"
-```
-
-#### Why Separate Commands?
-
-The Rust codebase has two parts:
-- **Binary target** (`src/main.rs`): Standalone Rust application, tested with `cargo test --bin rtest`
-- **Library target** (`src/lib.rs`): Python extension built with maturin, requires Python linking
-
-Use `cargo` commands for Rust development and `maturin` for Python extension building.
+- Reporting bugs
+- Suggesting features  
+- Development setup
+- Documentation improvements
 
 ## License
 
-MIT
+MIT - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+This project takes inspiration from [Astral](https://astral.sh) and leverages their excellent Rust crates:
+- [`ruff_python_ast`](https://github.com/astral-sh/ruff/tree/main/crates/ruff_python_ast) - Python AST utilities
+- [`ruff_python_parser`](https://github.com/astral-sh/ruff/tree/main/crates/ruff_python_parser) - Python parser implementation
+
+**Built with Rust for the Python community**
