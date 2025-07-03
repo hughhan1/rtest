@@ -7,7 +7,7 @@ build-backend = "maturin"
 
 [project]
 name = "rtest"
-version = "0.1.0"
+version = "1.0.0"
 description = "A fast Python test runner built with Rust"
 readme = "README.md"
 requires-python = ">=3.9"
