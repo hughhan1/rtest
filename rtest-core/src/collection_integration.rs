@@ -2,6 +2,7 @@
 
 use crate::collection::{collect_one_node, CollectionError, Collector, Session};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// Holds errors encountered during collection
 #[derive(Debug)]
@@ -14,7 +15,7 @@ pub fn collect_tests_rust(
     rootpath: PathBuf,
     args: &[String],
 ) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
-    let mut session = Session::new(rootpath);
+    let session = Rc::new(Session::new(rootpath));
     let mut collection_errors = CollectionErrors { errors: Vec::new() };
 
     match session.perform_collect(args) {

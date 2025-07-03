@@ -10,6 +10,7 @@ use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscove
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Result type for collection operations
 pub type CollectionResult<T> = Result<T, CollectionError>;
@@ -141,7 +142,7 @@ impl Session {
     }
 
     pub fn perform_collect(
-        &mut self,
+        self: Rc<Self>,
         args: &[String],
     ) -> CollectionResult<Vec<Box<dyn Collector>>> {
         let paths = if args.is_empty() {
@@ -173,16 +174,16 @@ impl Session {
             .collect())
     }
 
-    fn collect_path(&self, path: &Path) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    fn collect_path(self: &Rc<Self>, path: &Path) -> CollectionResult<Vec<Box<dyn Collector>>> {
         if self.should_ignore_path(path)? {
             return Ok(vec![]);
         }
 
         if path.is_dir() {
-            let dir = Directory::new(path.to_path_buf(), self);
+            let dir = Directory::new(path.to_path_buf(), Rc::clone(self));
             Ok(vec![Box::new(dir)])
         } else if path.is_file() && self.is_python_file(path) {
-            let module = Module::new(path.to_path_buf(), self);
+            let module = Module::new(path.to_path_buf(), Rc::clone(self));
             Ok(vec![Box::new(module)])
         } else {
             Ok(vec![])
@@ -254,11 +255,11 @@ impl Collector for Session {
 pub struct Directory {
     pub path: PathBuf,
     pub nodeid: String,
-    parent_session: *const Session,
+    parent_session: Rc<Session>,
 }
 
 impl Directory {
-    fn new(path: PathBuf, session: &Session) -> Self {
+    fn new(path: PathBuf, session: Rc<Session>) -> Self {
         let nodeid = path
             .strip_prefix(&session.rootpath)
             .unwrap_or(&path)
@@ -268,12 +269,12 @@ impl Directory {
         Self {
             path,
             nodeid,
-            parent_session: session as *const Session,
+            parent_session: session,
         }
     }
 
     fn session(&self) -> &Session {
-        unsafe { &*self.parent_session }
+        &self.parent_session
     }
 }
 
@@ -313,10 +314,10 @@ impl Collector for Directory {
             }
 
             if path.is_dir() {
-                let dir = Directory::new(path, self.session());
+                let dir = Directory::new(path, Rc::clone(&self.parent_session));
                 items.push(Box::new(dir) as Box<dyn Collector>);
             } else if path.is_file() && self.session().is_python_file(&path) {
-                let module = Module::new(path, self.session());
+                let module = Module::new(path, Rc::clone(&self.parent_session));
                 items.push(Box::new(module) as Box<dyn Collector>);
             }
         }
@@ -334,11 +335,11 @@ impl Collector for Directory {
 pub struct Module {
     pub path: PathBuf,
     pub nodeid: String,
-    parent_session: *const Session,
+    parent_session: Rc<Session>,
 }
 
 impl Module {
-    fn new(path: PathBuf, session: &Session) -> Self {
+    fn new(path: PathBuf, session: Rc<Session>) -> Self {
         let nodeid = path
             .strip_prefix(&session.rootpath)
             .unwrap_or(&path)
@@ -348,12 +349,12 @@ impl Module {
         Self {
             path,
             nodeid,
-            parent_session: session as *const Session,
+            parent_session: session,
         }
     }
 
     fn session(&self) -> &Session {
-        unsafe { &*self.parent_session }
+        &self.parent_session
     }
 }
 
