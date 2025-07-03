@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 
@@ -38,12 +39,22 @@ impl WorkerPool {
         initial_args: Vec<String>,
         tests: Vec<String>,
         pytest_args: Vec<String>,
+        working_dir: Option<PathBuf>,
     ) {
         let handle = thread::spawn(move || {
             let mut cmd = Command::new(&program);
 
             for arg in initial_args {
                 cmd.arg(arg);
+            }
+
+            // Add --rootdir to prevent pytest from traversing up the directory tree during
+            // its collection phase. Without this, pytest searches upward for config files
+            // and can hit protected Windows system directories like "C:\Documents and Settings",
+            // causing PermissionError even when we provide explicit test node IDs.
+            if let Some(ref dir) = working_dir {
+                cmd.arg("--rootdir");
+                cmd.arg(dir);
             }
 
             for test in tests {
@@ -55,6 +66,10 @@ impl WorkerPool {
             }
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+            if let Some(dir) = working_dir {
+                cmd.current_dir(dir);
+            }
 
             match cmd.output() {
                 Ok(output) => WorkerResult {

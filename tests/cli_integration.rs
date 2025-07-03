@@ -15,9 +15,9 @@ fn test_cli_help() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage: rtest"));
-    assert!(stdout.contains("--package-manager"));
     assert!(stdout.contains("--env"));
-    assert!(!stdout.contains("--rust-collect")); // Should be removed
+    assert!(stdout.contains("--numprocesses"));
+    assert!(stdout.contains("--dist"));
 }
 
 /// Test that the CLI shows version when requested
@@ -33,10 +33,10 @@ fn test_cli_version() {
     assert!(stdout.contains("rtest"));
 }
 
-/// Test CLI argument parsing for different package managers
+/// Test CLI argument parsing for distribution modes
 #[test]
-fn test_package_manager_args() {
-    // Test with default (python)
+fn test_distribution_args() {
+    // Test with default (load)
     let output = Command::new("cargo")
         .args(["run", "--", "--help"])
         .output()
@@ -44,7 +44,7 @@ fn test_package_manager_args() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("[default: python]"));
+    assert!(stdout.contains("[default: load]"));
 }
 
 /// Test that invalid arguments are rejected
