@@ -89,7 +89,7 @@ dev = [
 ]
 
 [tool.semantic_release]
-version_toml = ["pyproject.toml:project.version"]
+version_toml = ["pyproject.toml:project.version", "Cargo.toml:package.version"]
 changelog_file = "CHANGELOG.md"
 upload_to_repository = true
 upload_to_release = true
