@@ -150,6 +150,41 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
+  windows:
+    runs-on: ${{ matrix.platform.runner }}
+    needs: release
+    if: needs.release.outputs.new_release == 'true'
+    strategy:
+      matrix:
+        platform:
+          - runner: windows-2022
+            target: x64
+          - runner: windows-2019
+            target: x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
   sdist:
     runs-on: ubuntu-latest
     needs: release
