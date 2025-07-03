@@ -15,11 +15,24 @@ pub fn main() {
         std::process::exit(1);
     }
 
-    let worker_count = determine_worker_count(args.get_num_processes(), args.maxprocesses);
+    let num_processes = match args.get_num_processes() {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+    let worker_count = determine_worker_count(num_processes, args.maxprocesses);
 
     let runner = PytestRunner::new(args.env);
 
-    let rootpath = env::current_dir().expect("Failed to get current directory");
+    let rootpath = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("Failed to get current directory: {e}");
+            std::process::exit(1);
+        }
+    };
     let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
@@ -75,7 +88,13 @@ fn execute_tests_parallel(
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
-    let distribution_mode = dist_mode.parse::<DistributionMode>().unwrap();
+    let distribution_mode = match dist_mode.parse::<DistributionMode>() {
+        Ok(mode) => mode,
+        Err(e) => {
+            eprintln!("Invalid distribution mode '{dist_mode}': {e}");
+            std::process::exit(1);
+        }
+    };
     let scheduler = create_scheduler(distribution_mode);
     let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
 
