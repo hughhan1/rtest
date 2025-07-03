@@ -7,8 +7,8 @@ build-backend = "maturin"
 
 [project]
 name = "rtest"
-version = "1.2.0"
-description = "A fast Python test runner built with Rust"
+version = "0.0.1"
+description = "Python test runner built in Rust"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -95,6 +95,8 @@ upload_to_repository = true
 upload_to_release = true
 hvcs = "github"
 branches = { main = {}, prerelease = { name = "beta", prerelease = true } }
+major_on_zero = false
+version_pattern = "0.0.{patch}"
 
 [tool.semantic_release.remote]
 type = "github"
