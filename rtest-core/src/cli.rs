@@ -36,12 +36,18 @@ pub enum NumProcesses {
 }
 
 impl Args {
-    pub fn get_num_processes(&self) -> Option<NumProcesses> {
-        self.numprocesses.as_ref().map(|s| match s.as_str() {
-            "auto" => NumProcesses::Auto,
-            "logical" => NumProcesses::Logical,
-            _ => NumProcesses::Count(s.parse().unwrap_or(1)),
-        })
+    pub fn get_num_processes(&self) -> Result<Option<NumProcesses>, String> {
+        match &self.numprocesses {
+            None => Ok(None),
+            Some(s) => match s.as_str() {
+                "auto" => Ok(Some(NumProcesses::Auto)),
+                "logical" => Ok(Some(NumProcesses::Logical)),
+                _ => match s.parse::<usize>() {
+                    Ok(n) => Ok(Some(NumProcesses::Count(n))),
+                    Err(_) => Err(format!("Invalid number: {}", s)),
+                },
+            },
+        }
     }
 
     pub fn validate_dist(&self) -> Result<(), String> {
@@ -117,22 +123,25 @@ mod tests {
     #[test]
     fn test_get_num_processes() {
         let args = Args::parse_from(["rtest", "-n", "auto"]);
-        assert!(matches!(args.get_num_processes(), Some(NumProcesses::Auto)));
+        assert!(matches!(args.get_num_processes(), Ok(Some(NumProcesses::Auto))));
 
         let args = Args::parse_from(["rtest", "-n", "logical"]);
         assert!(matches!(
             args.get_num_processes(),
-            Some(NumProcesses::Logical)
+            Ok(Some(NumProcesses::Logical))
         ));
 
         let args = Args::parse_from(["rtest", "-n", "4"]);
         assert!(matches!(
             args.get_num_processes(),
-            Some(NumProcesses::Count(4))
+            Ok(Some(NumProcesses::Count(4)))
         ));
 
         let args = Args::parse_from(["rtest"]);
-        assert!(args.get_num_processes().is_none());
+        assert!(matches!(args.get_num_processes(), Ok(None)));
+
+        let args = Args::parse_from(["rtest", "-n", "invalid"]);
+        assert!(matches!(args.get_num_processes(), Err(_)));
     }
 
     #[test]

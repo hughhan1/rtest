@@ -39,7 +39,13 @@ pub fn execute_tests(
     run_cmd.args(test_nodes);
     run_cmd.args(pytest_args);
 
-    let run_status = run_cmd.status().expect("Failed to execute run command");
+    let run_status = match run_cmd.status() {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!("Failed to execute pytest command: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     std::process::exit(run_status.code().unwrap_or(1));
 }
