@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 
@@ -38,6 +39,7 @@ impl WorkerPool {
         initial_args: Vec<String>,
         tests: Vec<String>,
         pytest_args: Vec<String>,
+        working_dir: Option<PathBuf>,
     ) {
         let handle = thread::spawn(move || {
             let mut cmd = Command::new(&program);
@@ -55,6 +57,10 @@ impl WorkerPool {
             }
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+            if let Some(dir) = working_dir {
+                cmd.current_dir(dir);
+            }
 
             match cmd.output() {
                 Ok(output) => WorkerResult {

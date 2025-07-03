@@ -20,7 +20,7 @@ pub fn main() {
     let runner = PytestRunner::new(args.env);
 
     let rootpath = env::current_dir().expect("Failed to get current directory");
-    let (test_nodes, errors) = match collect_tests_rust(rootpath, &[]) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &[]) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -46,7 +46,13 @@ pub fn main() {
     }
 
     if worker_count == 1 {
-        execute_tests(&runner.program, &runner.initial_args, test_nodes, vec![]);
+        execute_tests(
+            &runner.program,
+            &runner.initial_args,
+            test_nodes,
+            vec![],
+            Some(&rootpath),
+        );
     } else {
         execute_tests_parallel(
             &runner.program,
@@ -54,6 +60,7 @@ pub fn main() {
             test_nodes,
             worker_count,
             &args.dist,
+            &rootpath,
         );
     }
 }
@@ -64,6 +71,7 @@ fn execute_tests_parallel(
     test_nodes: Vec<String>,
     worker_count: usize,
     dist_mode: &str,
+    rootpath: &std::path::Path,
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
@@ -86,6 +94,7 @@ fn execute_tests_parallel(
                 initial_args.to_vec(),
                 tests,
                 vec![],
+                Some(rootpath.to_path_buf()),
             );
         }
     }

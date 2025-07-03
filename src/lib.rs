@@ -38,8 +38,28 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
     // Use the current Python executable
     let runner = PytestRunner::from_current_python(py);
 
-    let rootpath = env::current_dir().expect("Failed to get current directory");
-    let collection_result = collect_tests_rust(rootpath, &pytest_args);
+    // Determine root path: if the first argument is a path and not a pytest flag, use it
+    let (rootpath, filtered_args) = if let Some(first_arg) = pytest_args.first() {
+        if !first_arg.starts_with('-') && std::path::Path::new(first_arg).exists() {
+            // First argument is a path, use it as root and remove it from pytest args
+            let path = std::path::PathBuf::from(first_arg);
+            let remaining_args = pytest_args.into_iter().skip(1).collect();
+            (path, remaining_args)
+        } else {
+            // First argument is not a path, use current directory
+            (
+                env::current_dir().expect("Failed to get current directory"),
+                pytest_args,
+            )
+        }
+    } else {
+        (
+            env::current_dir().expect("Failed to get current directory"),
+            pytest_args,
+        )
+    };
+
+    let collection_result = collect_tests_rust(rootpath.clone(), &filtered_args);
 
     let (test_nodes, errors) = match collection_result {
         Ok((nodes, errs)) => (nodes, errs),
@@ -60,7 +80,8 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
         &runner.program,
         &runner.initial_args,
         test_nodes,
-        pytest_args,
+        filtered_args,
+        Some(&rootpath),
     );
 }
 
@@ -81,7 +102,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
     let runner = PytestRunner::from_current_python(py);
 
     let rootpath = env::current_dir().expect("Failed to get current directory");
-    let (test_nodes, errors) = match collect_tests_rust(rootpath, &[]) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &[]) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -107,7 +128,13 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
     }
 
     if worker_count == 1 {
-        execute_tests(&runner.program, &runner.initial_args, test_nodes, vec![]);
+        execute_tests(
+            &runner.program,
+            &runner.initial_args,
+            test_nodes,
+            vec![],
+            Some(&rootpath),
+        );
     } else {
         execute_tests_parallel(
             &runner.program,
@@ -115,6 +142,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             test_nodes,
             worker_count,
             &args.dist,
+            &rootpath,
         );
     }
 }
@@ -125,6 +153,7 @@ fn execute_tests_parallel(
     test_nodes: Vec<String>,
     worker_count: usize,
     dist_mode: &str,
+    rootpath: &std::path::Path,
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
@@ -147,6 +176,7 @@ fn execute_tests_parallel(
                 initial_args.to_vec(),
                 tests,
                 vec![],
+                Some(rootpath.to_path_buf()),
             );
         }
     }
