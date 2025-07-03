@@ -23,12 +23,21 @@ pub fn execute_tests(
 ) {
     let mut run_cmd = Command::new(program);
     run_cmd.args(initial_args);
-    run_cmd.args(test_nodes);
-    run_cmd.args(pytest_args);
 
+    // Set working directory and constrain pytest's collection scope
     if let Some(dir) = working_dir {
         run_cmd.current_dir(dir);
+        // Add --rootdir to prevent pytest from traversing up the directory tree during
+        // its collection phase. Without this, pytest searches upward for config files
+        // and can hit protected Windows system directories like "C:\Documents and Settings",
+        // causing PermissionError even when we provide explicit test node IDs.
+        run_cmd.arg("--rootdir");
+        run_cmd.arg(dir);
     }
+
+    // Add test nodes after rootdir
+    run_cmd.args(test_nodes);
+    run_cmd.args(pytest_args);
 
     let run_status = run_cmd.status().expect("Failed to execute run command");
 

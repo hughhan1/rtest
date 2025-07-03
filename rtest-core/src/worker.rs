@@ -48,6 +48,15 @@ impl WorkerPool {
                 cmd.arg(arg);
             }
 
+            // Add --rootdir to prevent pytest from traversing up the directory tree during
+            // its collection phase. Without this, pytest searches upward for config files
+            // and can hit protected Windows system directories like "C:\Documents and Settings",
+            // causing PermissionError even when we provide explicit test node IDs.
+            if let Some(ref dir) = working_dir {
+                cmd.arg("--rootdir");
+                cmd.arg(dir);
+            }
+
             for test in tests {
                 cmd.arg(test);
             }
