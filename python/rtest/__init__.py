@@ -1,4 +1,4 @@
-"""RTest - A fast Python test runner built with Rust."""
+"""rtest - Python test runner built in Rust."""
 
 import sys
 
