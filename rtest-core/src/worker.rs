@@ -75,8 +75,8 @@ impl WorkerPool {
                 Ok(output) => WorkerResult {
                     worker_id,
                     exit_code: output.status.code().unwrap_or(-1),
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 },
                 Err(e) => WorkerResult {
                     worker_id,
@@ -104,7 +104,7 @@ impl WorkerPool {
                         worker_id: worker.id,
                         exit_code: -1,
                         stdout: String::new(),
-                        stderr: "Worker thread panicked".to_string(),
+                        stderr: "Worker thread panicked".into(),
                     });
                 }
             }
@@ -135,7 +135,7 @@ mod tests {
         let result = WorkerResult {
             worker_id: 1,
             exit_code: 0,
-            stdout: "test output".to_string(),
+            stdout: "test output".into(),
             stderr: String::new(),
         };
         assert_eq!(result.worker_id, 1);
@@ -150,10 +150,11 @@ mod tests {
         // Use echo command for testing
         pool.spawn_worker(
             0,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["hello".to_string()],
-            vec!["world".to_string()],
+            vec!["hello".into()],
+            vec!["world".into()],
+            None,
         );
 
         assert_eq!(pool.worker_count(), 1);
@@ -173,18 +174,20 @@ mod tests {
         // Spawn multiple echo workers
         pool.spawn_worker(
             0,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["worker0".to_string()],
+            vec!["worker0".into()],
             vec![],
+            None,
         );
 
         pool.spawn_worker(
             1,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["worker1".to_string()],
+            vec!["worker1".into()],
             vec![],
+            None,
         );
 
         assert_eq!(pool.worker_count(), 2);
@@ -206,10 +209,11 @@ mod tests {
         // Use a command that should fail
         pool.spawn_worker(
             0,
-            "false".to_string(), // Command that always exits with code 1
+            "false".into(), // Command that always exits with code 1
             vec![],
             vec![],
             vec![],
+            None,
         );
 
         let results = pool.wait_for_all();
@@ -225,10 +229,11 @@ mod tests {
         // Test with initial args (like "python -m pytest")
         pool.spawn_worker(
             0,
-            "echo".to_string(),
-            vec!["initial".to_string(), "args".to_string()],
-            vec!["test1".to_string()],
-            vec!["final".to_string()],
+            "echo".into(),
+            vec!["initial".into(), "args".into()],
+            vec!["test1".into()],
+            vec!["final".into()],
+            None,
         );
 
         let results = pool.wait_for_all();
@@ -249,10 +254,11 @@ mod tests {
         // Use a command that doesn't exist
         pool.spawn_worker(
             0,
-            "nonexistent_command_12345".to_string(),
+            "nonexistent_command_12345".into(),
             vec![],
             vec![],
             vec![],
+            None,
         );
 
         let results = pool.wait_for_all();
@@ -269,26 +275,29 @@ mod tests {
         // Spawn workers in reverse order
         pool.spawn_worker(
             2,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["worker2".to_string()],
+            vec!["worker2".into()],
             vec![],
+            None,
         );
 
         pool.spawn_worker(
             0,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["worker0".to_string()],
+            vec!["worker0".into()],
             vec![],
+            None,
         );
 
         pool.spawn_worker(
             1,
-            "echo".to_string(),
+            "echo".into(),
             vec![],
-            vec!["worker1".to_string()],
+            vec!["worker1".into()],
             vec![],
+            None,
         );
 
         let results = pool.wait_for_all();

@@ -42,7 +42,7 @@ fn collect_items_recursive(
     collection_errors: &mut CollectionErrors,
 ) {
     if collector.is_item() {
-        test_nodes.push(collector.nodeid().to_string());
+        test_nodes.push(collector.nodeid().into());
     } else {
         let report = collect_one_node(collector);
         match report.outcome {

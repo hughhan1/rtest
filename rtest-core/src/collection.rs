@@ -112,20 +112,20 @@ impl Default for CollectionConfig {
             ignore_patterns: vec![],
             ignore_glob_patterns: vec![],
             norecursedirs: vec![
-                "*.egg".to_string(),
-                ".*".to_string(),
-                "_darcs".to_string(),
-                "build".to_string(),
-                "CVS".to_string(),
-                "dist".to_string(),
-                "node_modules".to_string(),
-                "venv".to_string(),
-                "{arch}".to_string(),
+                "*.egg".into(),
+                ".*".into(),
+                "_darcs".into(),
+                "build".into(),
+                "CVS".into(),
+                "dist".into(),
+                "node_modules".into(),
+                "venv".into(),
+                "{arch}".into(),
             ],
             testpaths: vec![],
-            python_files: vec!["test_*.py".to_string(), "*_test.py".to_string()],
-            python_classes: vec!["Test*".to_string()],
-            python_functions: vec!["test*".to_string()],
+            python_files: vec!["test_*.py".into(), "*_test.py".into()],
+            python_classes: vec!["Test*".into()],
+            python_functions: vec!["test*".into()],
         }
     }
 }
@@ -265,7 +265,7 @@ impl Directory {
             .strip_prefix(&session.rootpath)
             .unwrap_or(&path)
             .to_string_lossy()
-            .to_string();
+            .into_owned();
 
         Self {
             path,
@@ -344,7 +344,7 @@ impl Module {
             .strip_prefix(&session.rootpath)
             .unwrap_or(&path)
             .to_string_lossy()
-            .to_string();
+            .into_owned();
 
         Self {
             path,
@@ -485,14 +485,14 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
     match collector.collect() {
         Ok(result) => CollectReport::new(
-            collector.nodeid().to_string(),
+            collector.nodeid().into(),
             CollectionOutcome::Passed,
             None,
             None,
             result,
         ),
         Err(e) => CollectReport::new(
-            collector.nodeid().to_string(),
+            collector.nodeid().into(),
             CollectionOutcome::Failed,
             Some(e.to_string()),
             Some(e),

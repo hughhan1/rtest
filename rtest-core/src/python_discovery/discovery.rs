@@ -26,8 +26,8 @@ pub struct TestDiscoveryConfig {
 impl Default for TestDiscoveryConfig {
     fn default() -> Self {
         Self {
-            python_classes: vec!["Test*".to_string()],
-            python_functions: vec!["test*".to_string()],
+            python_classes: vec!["Test*".into()],
+            python_functions: vec!["test*".into()],
         }
     }
 }
@@ -107,7 +107,7 @@ class NotATestClass:
 
         assert_eq!(tests[1].name, "test_method");
         assert!(tests[1].is_method);
-        assert_eq!(tests[1].class_name, Some("TestClass".to_string()));
+        assert_eq!(tests[1].class_name, Some("TestClass".into()));
     }
 
     #[test]
@@ -130,7 +130,7 @@ class TestWithoutInit:
 
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_should_be_collected");
-        assert_eq!(tests[0].class_name, Some("TestWithoutInit".to_string()));
+        assert_eq!(tests[0].class_name, Some("TestWithoutInit".into()));
     }
 
     #[test]

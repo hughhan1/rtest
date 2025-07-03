@@ -5,8 +5,8 @@ pub struct PytestRunner {
 
 impl PytestRunner {
     pub fn new(env_vars: Vec<String>) -> Self {
-        let program = "python3".to_string();
-        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
+        let program = "python3".into();
+        let initial_args = vec!["-m".into(), "pytest".into()];
 
         // Apply environment variables (though this is typically done before command execution)
         // For now, we'll just acknowledge them, but a real implementation would set them
@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_env_vars_acknowledged() {
-        let env_vars = vec!["DEBUG=1".to_string(), "TEST_ENV=staging".to_string()];
+        let env_vars = vec!["DEBUG=1".into(), "TEST_ENV=staging".into()];
         let runner = PytestRunner::new(env_vars);
 
         // The runner should be created successfully
