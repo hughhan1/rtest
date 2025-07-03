@@ -165,14 +165,12 @@ impl Session {
                 .collect()
         };
 
-        let mut items = Vec::new();
-        for path in paths {
-            if let Ok(collected) = self.collect_path(&path) {
-                items.extend(collected);
-            }
-        }
-
-        Ok(items)
+        // Use iterator chain to avoid intermediate Vec allocations
+        Ok(paths
+            .into_iter()
+            .filter_map(|path| self.collect_path(&path).ok())
+            .flatten()
+            .collect())
     }
 
     fn collect_path(&self, path: &Path) -> CollectionResult<Vec<Box<dyn Collector>>> {
@@ -289,17 +287,18 @@ impl Collector for Directory {
     }
 
     fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
-        let mut items = Vec::new();
-
         let read_dir_result = std::fs::read_dir(&self.path);
         let dir_entries = match read_dir_result {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Ok(items);
+                return Ok(vec![]);
             }
             Err(err) => return Err(err.into()),
         };
 
+        // Process entries, filtering out unnecessary Vec allocations
+        let mut items = Vec::new();
+        
         for entry_result in dir_entries {
             let entry = match entry_result {
                 Ok(entry) => entry,
@@ -308,7 +307,7 @@ impl Collector for Directory {
             };
 
             let path = entry.path();
-
+            
             if self.session().should_ignore_path(&path)? {
                 continue;
             }
@@ -321,7 +320,7 @@ impl Collector for Directory {
                 items.push(Box::new(module) as Box<dyn Collector>);
             }
         }
-
+        
         Ok(items)
     }
 
@@ -377,20 +376,16 @@ impl Collector for Module {
             python_functions: self.session().config.python_functions.clone(),
         };
 
-        let tests = match discover_tests(&self.path, &source, &discovery_config) {
-            Ok(tests) => tests,
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        let tests = discover_tests(&self.path, &source, &discovery_config)?;
 
-        let mut items: Vec<Box<dyn Collector>> = Vec::new();
-        for test in tests {
-            let function = test_info_to_function(&test, &self.path, &self.nodeid);
-            items.push(Box::new(function));
-        }
-
-        Ok(items)
+        // Use iterator to transform tests without intermediate allocations
+        Ok(tests
+            .into_iter()
+            .map(|test| {
+                let function = test_info_to_function(&test, &self.path, &self.nodeid);
+                Box::new(function) as Box<dyn Collector>
+            })
+            .collect())
     }
 
     fn path(&self) -> &Path {

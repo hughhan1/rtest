@@ -22,6 +22,10 @@ pub struct Args {
     /// Collect tests only, don't run them
     #[arg(long)]
     pub collect_only: bool,
+
+    /// Test files or directories to run
+    #[arg(help = "Test files or directories to run")]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +68,7 @@ mod tests {
         assert!(args.maxprocesses.is_none());
         assert_eq!(args.dist, "load");
         assert!(!args.collect_only);
+        assert!(args.files.is_empty());
     }
 
     #[test]
