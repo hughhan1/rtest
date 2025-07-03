@@ -20,7 +20,7 @@ pub fn main() {
     let runner = PytestRunner::new(args.env);
 
     let rootpath = env::current_dir().expect("Failed to get current directory");
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &[]) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
