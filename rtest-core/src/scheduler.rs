@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn test_load_scheduler_zero_workers() {
         let scheduler = LoadScheduler;
-        let tests = vec!["test1".to_string(), "test2".to_string()];
+        let tests = vec!["test1".into(), "test2".into()];
         let result = scheduler.distribute_tests(tests, 0);
         assert!(result.is_empty());
     }
@@ -95,9 +95,9 @@ mod tests {
     fn test_load_scheduler_single_worker() {
         let scheduler = LoadScheduler;
         let tests = vec![
-            "test1".to_string(),
-            "test2".to_string(),
-            "test3".to_string(),
+            "test1".into(),
+            "test2".into(),
+            "test3".into(),
         ];
         let result = scheduler.distribute_tests(tests.clone(), 1);
         assert_eq!(result.len(), 1);
@@ -108,11 +108,11 @@ mod tests {
     fn test_load_scheduler_round_robin() {
         let scheduler = LoadScheduler;
         let tests = vec![
-            "test1".to_string(),
-            "test2".to_string(),
-            "test3".to_string(),
-            "test4".to_string(),
-            "test5".to_string(),
+            "test1".into(),
+            "test2".into(),
+            "test3".into(),
+            "test4".into(),
+            "test5".into(),
         ];
         let result = scheduler.distribute_tests(tests, 3);
 
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn test_load_scheduler_more_workers_than_tests() {
         let scheduler = LoadScheduler;
-        let tests = vec!["test1".to_string(), "test2".to_string()];
+        let tests = vec!["test1".into(), "test2".into()];
         let result = scheduler.distribute_tests(tests, 5);
 
         assert_eq!(result.len(), 2); // Only non-empty workers
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn test_create_scheduler() {
         let scheduler = create_scheduler(DistributionMode::Load);
-        let tests = vec!["test1".to_string(), "test2".to_string()];
+        let tests = vec!["test1".into(), "test2".into()];
         let result = scheduler.distribute_tests(tests, 2);
         assert_eq!(result.len(), 2);
     }
@@ -145,10 +145,10 @@ mod tests {
     fn test_load_scheduler_consistent_distribution() {
         let scheduler = LoadScheduler;
         let tests = vec![
-            "test1".to_string(),
-            "test2".to_string(),
-            "test3".to_string(),
-            "test4".to_string(),
+            "test1".into(),
+            "test2".into(),
+            "test3".into(),
+            "test4".into(),
         ];
 
         // Test the same distribution multiple times - should be consistent
@@ -164,11 +164,11 @@ mod tests {
     fn test_load_scheduler_all_tests_distributed() {
         let scheduler = LoadScheduler;
         let tests = vec![
-            "test1".to_string(),
-            "test2".to_string(),
-            "test3".to_string(),
-            "test4".to_string(),
-            "test5".to_string(),
+            "test1".into(),
+            "test2".into(),
+            "test3".into(),
+            "test4".into(),
+            "test5".into(),
         ];
 
         let result = scheduler.distribute_tests(tests.clone(), 3);

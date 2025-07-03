@@ -44,7 +44,7 @@ impl TestDiscoveryVisitor {
         let name = func.name.as_str();
         if self.is_test_function(name) {
             self.tests.push(TestInfo {
-                name: name.to_string(),
+                name: name.into(),
                 line: func.range.start().to_u32() as usize,
                 is_method: self.current_class.is_some(),
                 class_name: self.current_class.clone(),
@@ -56,7 +56,7 @@ impl TestDiscoveryVisitor {
         let name = class.name.as_str();
         if self.is_test_class(name) && !self.class_has_init(class) {
             let prev_class = self.current_class.clone();
-            self.current_class = Some(name.to_string());
+            self.current_class = Some(name.into());
 
             // Visit methods in the class
             for stmt in &class.body {

@@ -96,10 +96,10 @@ mod tests {
     #[test]
     fn test_cli_parsing_with_numprocesses() {
         let args = Args::parse_from(["rtest", "-n", "4"]);
-        assert_eq!(args.numprocesses, Some("4".to_string()));
+        assert_eq!(args.numprocesses, Some("4".into()));
 
         let args = Args::parse_from(["rtest", "--numprocesses", "auto"]);
-        assert_eq!(args.numprocesses, Some("auto".to_string()));
+        assert_eq!(args.numprocesses, Some("auto".into()));
     }
 
     #[test]
