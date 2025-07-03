@@ -95,8 +95,14 @@ upload_to_repository = true
 upload_to_release = true
 hvcs = "github"
 branches = { main = {}, prerelease = { name = "beta", prerelease = true } }
+allow_zero_version = true
 major_on_zero = false
-version_pattern = "0.0.{patch}"
+commit_parser = "conventional"
+
+[tool.semantic_release.commit_parser_options]
+major_tags = []
+minor_tags = []
+patch_tags = ["fix", "perf", "feat", "build", "chore", "ci", "docs", "style", "refactor", "test"]
 
 [tool.semantic_release.remote]
 type = "github"
