@@ -291,8 +291,22 @@ impl Collector for Directory {
     fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
         let mut items = Vec::new();
 
-        for entry in std::fs::read_dir(&self.path)? {
-            let entry = entry?;
+        let read_dir_result = std::fs::read_dir(&self.path);
+        let dir_entries = match read_dir_result {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Ok(items);
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        for entry_result in dir_entries {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => continue,
+                Err(err) => return Err(err.into()),
+            };
+
             let path = entry.path();
 
             if self.session().should_ignore_path(&path)? {

@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-24.04, windows-2022, windows-2019]
         # TODO(hughhan1): Add macOS runners back when budget allows
         # macos-13, macos-14 - currently disabled due to cost
         # As of July 2025, macOS runners cost 10x more than Linux runners
