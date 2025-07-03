@@ -51,7 +51,7 @@ fi
 # Run benchmarks based on flags
 if [[ "$COLLECT_ONLY" == true ]]; then
   echo "=== Test Collection Only Benchmark ==="
-  hyperfine --warmup 3 --min-runs 5 \
+  hyperfine --warmup 3 --min-runs 20 \
     --ignore-failure \
     --command-name "pytest --collect-only" \
     --command-name "rtest --collect-only" \
@@ -59,7 +59,7 @@ if [[ "$COLLECT_ONLY" == true ]]; then
     "uv run rtest --collect-only ${TEST_DIR}"
 elif [[ "$ALL" == true ]]; then
   echo "=== Full Test Execution Benchmark ==="
-  hyperfine --warmup 3 --min-runs 5 \
+  hyperfine --warmup 3 --min-runs 20 \
     --ignore-failure \
     --command-name "pytest" \
     --command-name "rtest" \
@@ -68,7 +68,7 @@ elif [[ "$ALL" == true ]]; then
   
   echo
   echo "=== Test Collection Only Benchmark ==="
-  hyperfine --warmup 3 --min-runs 5 \
+  hyperfine --warmup 3 --min-runs 20 \
     --ignore-failure \
     --command-name "pytest --collect-only" \
     --command-name "rtest --collect-only" \
@@ -76,7 +76,7 @@ elif [[ "$ALL" == true ]]; then
     "uv run rtest --collect-only ${TEST_DIR}"
 else
   echo "=== Full Test Execution Benchmark ==="
-  hyperfine --warmup 3 --min-runs 5 \
+  hyperfine --warmup 3 --min-runs 20 \
     --ignore-failure \
     --command-name "pytest" \
     --command-name "rtest" \
