@@ -145,8 +145,6 @@ jobs:
         platform:
           - runner: windows-2022
             target: x64
-          - runner: windows-2019
-            target: x64
     steps:
       - uses: actions/checkout@v4
         with:
