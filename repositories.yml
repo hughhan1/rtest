@@ -1,0 +1,144 @@
+repositories:
+  # Web Frameworks
+  - name: "fastapi"
+    url: "https://github.com/tiangolo/fastapi"
+    category: "web_framework"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-asyncio httpx"
+    test_patterns:
+      - "test_*.py"
+      - "*_test.py"
+    expected_test_count: 200
+    
+  - name: "flask"
+    url: "https://github.com/pallets/flask"
+    category: "web_framework"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 600
+    
+  - name: "django"
+    url: "https://github.com/django/django"
+    category: "web_framework"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-django"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 10000
+    
+  # HTTP Libraries
+  - name: "requests"
+    url: "https://github.com/psf/requests"
+    category: "http_library"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install pytest pytest-cov"
+      - "pip install -e .[socks]"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 100
+    
+  - name: "httpx"
+    url: "https://github.com/encode/httpx"
+    category: "http_library"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-asyncio"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 300
+    
+  # Data Science Libraries
+  - name: "pandas"
+    url: "https://github.com/pandas-dev/pandas"
+    category: "data_science"
+    test_dir: "pandas/tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-xdist"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 150000
+    
+  - name: "scikit-learn"
+    url: "https://github.com/scikit-learn/scikit-learn"
+    category: "data_science"
+    test_dir: "sklearn/tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-xdist"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 20000
+    
+  # Testing Frameworks
+  - name: "pytest"
+    url: "https://github.com/pytest-dev/pytest"
+    category: "testing_framework"
+    test_dir: "testing"
+    setup_commands:
+      - "pip install -e ."
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 3000
+    
+  # CLI Tools
+  - name: "click"
+    url: "https://github.com/pallets/click"
+    category: "cli_tool"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 200
+    
+  # Async Libraries
+  - name: "aiohttp"
+    url: "https://github.com/aio-libs/aiohttp"
+    category: "async_library"
+    test_dir: "tests"
+    setup_commands:
+      - "pip install -e ."
+      - "pip install pytest pytest-asyncio"
+    test_patterns:
+      - "test_*.py"
+    expected_test_count: 2000
+
+# Benchmark configurations
+benchmark_configs:
+  collect_only:
+    description: "Test discovery performance"
+    pytest_args: "--collect-only"
+    rtest_args: "--collect-only"
+    timeout: 300
+    
+  quick_run:
+    description: "Run first 10 tests"
+    pytest_args: "--maxfail=10 -x"
+    rtest_args: "--maxfail=10 -x"
+    timeout: 600
+    
+  parallel_collect:
+    description: "Parallel test collection"
+    pytest_args: "--collect-only -n auto"
+    rtest_args: "--collect-only -n auto"
+    timeout: 300
+    requires_xdist: true
+    
+  memory_profile:
+    description: "Memory usage during collection"
+    pytest_args: "--collect-only"
+    rtest_args: "--collect-only"
+    timeout: 300
+    measure_memory: true

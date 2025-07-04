@@ -89,6 +89,10 @@ dev = [
     "mypy==1.16.1",
     "ruff==0.12.1",
 ]
+benchmark = [
+    "pyyaml>=6.0",
+    "psutil>=5.0",
+]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version", "Cargo.toml:package.version"]
