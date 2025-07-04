@@ -1,7 +1,7 @@
-Contributing to RTest
+Contributing to rtest
 ====================
 
-Thank you for your interest in contributing to RTest! This document provides guidelines for contributors.
+Thank you for your interest in contributing to rtest! This document provides guidelines for contributors.
 
 Getting Started
 ---------------
@@ -12,12 +12,15 @@ Getting Started
     git clone https://github.com/yourusername/rtest.git
     cd rtest
 
-3. Install development dependencies::
+3. Initialize git submodules (required for ruff dependency)::
 
-    uv pip install -e ".[dev]"
-    uv pip install maturin
+    git submodule update --init --recursive
 
-4. Set up Rust toolchain::
+4. Install development dependencies::
+
+    uv sync --dev
+
+5. Set up Rust toolchain::
 
     rustup update stable
 
@@ -30,11 +33,11 @@ Development Workflow
 
 2. Install in development mode::
 
-    maturin develop
+    uv run maturin develop
 
 3. Run tests to ensure everything works::
 
-    uv run python -m unittest discover tests/ -v
+    uv run pytest tests/
     cargo test
 
 4. Make your changes following our coding standards
@@ -71,13 +74,13 @@ Testing
 Run the full test suite::
 
     # Python tests
-    uv run python -m unittest discover tests/ -v
+    uv run pytest tests/ -v
     
     # Rust tests
     cargo test
     
     # Integration tests
-    maturin develop
+    uv run maturin develop
     uv run python -c "import rtest; print('Import successful')"
 
 For maintainers, see the `Release Process`_ section below.
@@ -104,63 +107,23 @@ Branch Workflow
 ~~~~~~~~~~~~~~~
 
 - ``main`` branch: Production releases → PyPI
-- ``develop`` branch: Pre-releases → TestPyPI
 
-Testing Releases
-~~~~~~~~~~~~~~~~
-
-**Option 1: TestPyPI (Recommended)**
-
-1. Push to develop branch::
-
-    git checkout develop
-    git commit -m "feat: new feature for testing"
-    git push origin develop
-
-2. Install from TestPyPI::
-
-    uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rtest
-
-**Option 2: Local Testing**
-
-::
-
-    maturin build --release --out dist
-    uv pip install dist/rtest-*.whl
-    uv run python -c "import rtest; print('Local test successful')"
-
-**Option 3: Dry Run**
-
-::
-
-    uv pip install python-semantic-release
-    semantic-release version --noop  # Shows what version would be released
-
-Production Releases
+Releases
 ~~~~~~~~~~~~~~~~~~~
 
-1. Test thoroughly on develop branch
-2. Merge to main::
+1. Merge to main::
 
     git checkout main
     git merge develop
     git push origin main
 
-3. Release happens automatically:
+2. Release happens automatically:
    - Version bumped in ``pyproject.toml``
    - Changelog updated
    - Git tag created
    - GitHub release published
    - Multi-platform wheels built
    - Package published to PyPI
-
-Manual Release (Emergency)
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-::
-
-    semantic-release version    # Update version and create tag
-    semantic-release publish    # Create GitHub release and publish to PyPI
 
 Troubleshooting
 ~~~~~~~~~~~~~~~
@@ -171,7 +134,7 @@ Troubleshooting
 
     rustup update
     cargo check
-    maturin build --release
+    uv run maturin build --release
 
 **Upload failures**: Check for existing versions::
 
