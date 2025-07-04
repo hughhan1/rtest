@@ -86,6 +86,8 @@ module-name = "rtest._rtest"
 [dependency-groups]
 dev = [
     "maturin>=1.9.0",
+    "mypy==1.16.1",
+    "ruff==0.12.1",
 ]
 
 [tool.semantic_release]

@@ -4,16 +4,16 @@
 [![Python](https://img.shields.io/pypi/pyversions/rtest.svg)](https://pypi.org/project/rtest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python test runner built with Rust.
+A high-performance Python test runner built with Rust, designed as a drop-in replacement for [`pytest`](https://pytest.org) with enhanced collection resilience and built-in parallelization.
 
-> **⚠️ Development Notice**: `rtest` is in active development and not yet ready for production use. Expect bugs, incomplete features, and breaking changes as we work toward stability.
+> **⚠️ Development Status**: This project is in early development (v0.0.x). While functional, expect breaking changes and evolving features as we work toward stability.
 
 ## Features
 
 ### Resilient Test Collection
 Unlike [`pytest`](https://pytest.org) which stops execution when collection errors occur, `rtest` continues running tests even when some files fail to collect:
 
-**`pytest` stops everything when collection fails:**
+**`pytest` stops when collection fails:**
 ```bash
 collected 22 items / 3 errors
 !!!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!!!!!
@@ -40,7 +40,7 @@ rtest --maxprocesses 8        # Limit maximum processes
 ```
 
 ### Current Implementation
-At the current moment, `rtest` delegates to [`pytest`](https://pytest.org) for test execution while providing enhanced collection and parallelization features.
+The current implementation focuses on enhanced test collection and parallelization, with test execution delegated to [`pytest`](https://pytest.org) for maximum compatibility.
 
 ## Performance
 
@@ -74,7 +74,7 @@ Summary
    99.61 ± 28.52 times faster than pytest --collect-only
 ```
 
-*Performance benchmarks are a work-in-progress. These results are from a typical test suite using hyperfine with 20 runs each on MacBook Pro M4 Pro (48GB RAM). More comprehensive benchmarking is on the roadmap once additional features are implemented.*
+*Performance benchmarks shown are preliminary results from a specific test suite using hyperfine with 20 runs each on MacBook Pro M4 Pro (48GB RAM). Results may vary significantly depending on test suite characteristics, system configuration, and workload. More comprehensive benchmarking across diverse scenarios is planned.*
 
 ## Quick Start
 
@@ -89,10 +89,10 @@ pip install rtest
 ### Basic Usage
 
 ```bash
-# Drop-in replacement for [`pytest`](https://pytest.org)
+# Drop-in replacement for pytest
 rtest
 
-# That's it! All your existing [`pytest`](https://pytest.org) workflows work
+# That's it! All your existing pytest workflows work
 rtest tests/
 rtest tests/test_auth.py -v
 rtest -- -k "test_user" --tb=short
@@ -105,7 +105,7 @@ rtest -- -k "test_user" --tb=short
 # Set environment variables for your tests
 rtest -e DEBUG=1 -e DATABASE_URL=sqlite://test.db
 
-# Perfect for testing different configurations
+# Useful for testing different configurations
 rtest -e ENVIRONMENT=staging -- tests/integration/
 ```
 
@@ -114,7 +114,7 @@ rtest -e ENVIRONMENT=staging -- tests/integration/
 # See what tests would run without executing them
 rtest --collect-only
 
-# Mix `rtest` options with any [`pytest`](https://pytest.org) arguments
+# Mix `rtest` options with any pytest arguments
 rtest -n 4 -- -v --tb=short -k "not slow"
 ```
 
@@ -125,10 +125,10 @@ from rtest import run_tests
 # Programmatic test execution
 run_tests()
 
-# With custom [`pytest`](https://pytest.org) arguments
+# With custom pytest arguments
 run_tests(pytest_args=["tests/unit/", "-v", "--tb=short"])
 
-# Perfect for CI/CD pipelines and automation
+# Suitable for CI/CD pipelines and automation
 result = run_tests(pytest_args=["--junitxml=results.xml"])
 ```
 
