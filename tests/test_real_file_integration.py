@@ -13,7 +13,7 @@ from rtest._rtest import run_tests
 class TestRealFileIntegration(unittest.TestCase):
     """Test collection on realistic pytest files."""
 
-    def test_collection_on_comprehensive_pytest_file(self):
+    def test_collection_on_comprehensive_pytest_file(self) -> None:
         """Test collection on a realistic pytest file with comprehensive test patterns."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -111,7 +111,7 @@ class TestRealFileIntegration(unittest.TestCase):
             for item in should_not_collect:
                 self.assertNotIn(item, output, f"Should not collect non-test item: {item}")
 
-    def test_collection_with_various_test_patterns(self):
+    def test_collection_with_various_test_patterns(self) -> None:
         """Test collection recognizes various pytest naming patterns."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -203,7 +203,7 @@ class TestRealFileIntegration(unittest.TestCase):
             for item in should_not_collect:
                 self.assertNotIn(item, output, f"Should not collect: {item}")
 
-    def test_collection_on_multiple_test_files(self):
+    def test_collection_on_multiple_test_files(self) -> None:
         """Test collection across multiple test files."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)

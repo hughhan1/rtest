@@ -82,7 +82,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
     
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
@@ -95,16 +95,182 @@ jobs:
         pip install -e ".[dev]"
     
     - name: Run ruff format check
-      run: ruff format --check python/ tests/
+      run: ruff format --check python/ tests/ scripts/
     
     - name: Run ruff lint
-      run: ruff check python/ tests/
+      run: ruff check python/ tests/ scripts/
     
     - name: Run mypy
-      run: mypy python/
+      run: mypy python/ tests/ scripts/
     
     - name: Check Rust formatting
       run: cargo fmt -- --check
     
     - name: Run clippy
       run: cargo clippy --bin rtest -- -D warnings
+
+  # Setup job that installs dependencies once
+  benchmark-setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+    
+    - name: Cache uv dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/uv
+          .venv
+        key: ${{ runner.os }}-uv-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}
+    
+    - name: Install dependencies
+      run: uv sync --dev
+    
+    - name: Install hyperfine
+      run: |
+        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+        sudo dpkg -i hyperfine_1.18.0_amd64.deb
+    
+    - name: Get repository list
+      id: set-matrix
+      run: |
+        # Extract repository names from YAML
+        repos=$(uv run python -c "
+        import yaml
+        from pathlib import Path
+        config_path = Path('scripts/benchmark/repositories.yml')
+        with open(config_path) as f:
+            data = yaml.safe_load(f)
+        repo_names = [r['name'] for r in data['repositories']]
+        print(' '.join(repo_names))
+        ")
+        # Create matrix JSON
+        matrix_json="{\"repository\": ["
+        first=true
+        for repo in $repos; do
+          if [ "$first" = true ]; then
+            first=false
+          else
+            matrix_json+=", "
+          fi
+          matrix_json+="\"$repo\""
+        done
+        matrix_json+="]}"
+        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+        echo "Repository matrix: $matrix_json"
+    
+    # Upload the environment for parallel jobs
+    - name: Create benchmark environment archive
+      run: |
+        # Archive the virtual environment and dependencies
+        tar -czf benchmark-env.tar.gz .venv uv.lock pyproject.toml
+    
+    - name: Upload benchmark environment
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-environment
+        path: benchmark-env.tar.gz
+        retention-days: 1
+
+  # Parallel benchmark jobs
+  benchmark:
+    needs: benchmark-setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.benchmark-setup.outputs.matrix) }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+    
+    - name: Download benchmark environment
+      uses: actions/download-artifact@v4
+      with:
+        name: benchmark-environment
+    
+    - name: Extract benchmark environment
+      run: |
+        tar -xzf benchmark-env.tar.gz
+        rm benchmark-env.tar.gz
+    
+    - name: Install hyperfine
+      run: |
+        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+        sudo dpkg -i hyperfine_1.18.0_amd64.deb
+    
+    - name: Run benchmark for ${{ matrix.repository }}
+      run: |
+        uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }}
+    
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results-${{ matrix.repository }}
+        path: /tmp/rtest_benchmark_results_*/
+        retention-days: 7
+
+  # Aggregate results
+  benchmark-summary:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: benchmark-results-*
+        path: all-results
+    
+    - name: Aggregate results
+      run: |
+        # Function to output to both stdout and GitHub step summary
+        output_both() {
+          echo "$@"
+          echo "$@" >> $GITHUB_STEP_SUMMARY
+        }
+        
+        output_both "## Benchmark Results Summary"
+        output_both ""
+        
+        # Find all result JSON files and display them
+        for result_dir in all-results/*/; do
+          if [ -d "$result_dir" ]; then
+            repo_name=$(basename "$result_dir" | sed 's/benchmark-results-//')
+            output_both "### $repo_name"
+            output_both ""
+            
+            # Find the JSON file in the nested structure
+            json_file=$(find "$result_dir" -name "*.json" -type f | head -1)
+            if [ -f "$json_file" ]; then
+              # Output JSON with proper markdown formatting
+              output_both '```json'
+              output_both "$(python3 -m json.tool "$json_file")"
+              output_both '```'
+            else
+              output_both "No results found"
+            fi
+            output_both ""
+          fi
+        done

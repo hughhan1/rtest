@@ -13,7 +13,7 @@ from rtest._rtest import run_tests
 class TestCollectionIntegration(unittest.TestCase):
     """Test that Rust-based collection finds all expected tests."""
 
-    def create_test_project(self):
+    def create_test_project(self) -> Path:
         """Create a temporary test project with sample test files."""
         temp_dir = tempfile.mkdtemp()
         project_path = Path(temp_dir)
@@ -68,7 +68,7 @@ class TestCollectionIntegration(unittest.TestCase):
 
         return project_path
 
-    def test_collection_finds_all_tests(self):
+    def test_collection_finds_all_tests(self) -> None:
         """Test that collection finds all expected test patterns."""
         project_path = self.create_test_project()
 
@@ -104,7 +104,7 @@ class TestCollectionIntegration(unittest.TestCase):
         self.assertNotIn("helper_method", output, "Should not find helper methods")
         self.assertNotIn("not_a_test", output, "Should not find non-test functions")
 
-    def test_collection_with_no_tests(self):
+    def test_collection_with_no_tests(self) -> None:
         """Test collection with no test files."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -129,7 +129,7 @@ class TestCollectionIntegration(unittest.TestCase):
             # The "No tests found" message appears in the output, test passes if we get here without error
             self.assertTrue(True)  # Test that collection completes without error
 
-    def test_collection_with_syntax_errors(self):
+    def test_collection_with_syntax_errors(self) -> None:
         """Test collection handles malformed Python files gracefully."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -151,7 +151,7 @@ class TestCollectionIntegration(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Collection should handle syntax errors gracefully, but got: {e}")
 
-    def test_collection_missing_colon_error(self):
+    def test_collection_missing_colon_error(self) -> None:
         """Test collection with missing colon syntax error."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -174,7 +174,7 @@ class TestCollectionIntegration(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Collection should not crash on syntax error, but got: {e}")
 
-    def test_collection_while_stmt_missing_condition(self):
+    def test_collection_while_stmt_missing_condition(self) -> None:
         """Test collection with while statement missing condition."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -193,7 +193,7 @@ class TestCollectionIntegration(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Collection should not crash on while statement syntax error, but got: {e}")
 
-    def test_display_collection_results(self):
+    def test_display_collection_results(self) -> None:
         """Test that collection output display doesn't crash."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -224,7 +224,7 @@ class TestCollectionIntegration(unittest.TestCase):
                 found = any(pattern in line for line in output_lines)
                 self.assertTrue(found, f"Should find pattern: {pattern}")
 
-    def test_collection_with_absolute_path(self):
+    def test_collection_with_absolute_path(self) -> None:
         """Test that collection handles absolute paths correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Use resolve() to ensure we have an absolute path

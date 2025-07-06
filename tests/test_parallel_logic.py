@@ -13,7 +13,7 @@ from rtest._rtest import run_tests
 class TestParallelLogic(unittest.TestCase):
     """Test parallel execution and scheduling logic."""
 
-    def test_end_to_end_test_distribution(self):
+    def test_end_to_end_test_distribution(self) -> None:
         """Test the complete flow from test collection to distribution."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -65,7 +65,7 @@ class TestParallelLogic(unittest.TestCase):
                 found = any(test in line for line in output_lines)
                 self.assertTrue(found, f"Should find test: {test}")
 
-    def test_collection_with_various_file_sizes(self):
+    def test_collection_with_various_file_sizes(self) -> None:
         """Test collection handles various file sizes for load balancing."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -130,7 +130,7 @@ class TestParallelLogic(unittest.TestCase):
                 len(test_lines), expected_count - 2, f"Should find approximately {expected_count} tests"
             )
 
-    def test_collection_consistency(self):
+    def test_collection_consistency(self) -> None:
         """Test that collection results are consistent across multiple runs."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -169,7 +169,7 @@ class TestParallelLogic(unittest.TestCase):
             for i in range(1, len(outputs)):
                 self.assertEqual(outputs[0], outputs[i], "Collection should be deterministic")
 
-    def test_nested_directory_structure(self):
+    def test_nested_directory_structure(self) -> None:
         """Test collection works with nested directory structures."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -216,7 +216,7 @@ class TestParallelLogic(unittest.TestCase):
             for pattern in expected_patterns:
                 self.assertIn(pattern, output, f"Should find test: {pattern}")
 
-    def test_mixed_file_types_collection(self):
+    def test_mixed_file_types_collection(self) -> None:
         """Test collection handles mixed file types correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -287,7 +287,7 @@ class TestParallelLogic(unittest.TestCase):
             self.assertNotIn("utils.py", output, "Should not collect from utils.py")
             self.assertNotIn("README.md", output, "Should not process non-Python files")
 
-    def test_error_handling_in_collection(self):
+    def test_error_handling_in_collection(self) -> None:
         """Test that collection handles errors gracefully."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -323,7 +323,7 @@ class TestParallelLogic(unittest.TestCase):
                 except Exception as e:
                     self.fail(f"Collection should handle errors gracefully, but got: {e}")
 
-    def test_empty_project_handling(self):
+    def test_empty_project_handling(self) -> None:
         """Test handling of completely empty projects."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -336,7 +336,7 @@ class TestParallelLogic(unittest.TestCase):
             output = captured_output.getvalue()
             self.assertIn("No tests found", output, "Should report no tests found for empty project")
 
-    def test_single_test_file_collection(self):
+    def test_single_test_file_collection(self) -> None:
         """Test collection with single test file (no parallelization needed)."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
@@ -357,7 +357,7 @@ class TestParallelLogic(unittest.TestCase):
             found = any("test_single.py::test_single" in line for line in output_lines)
             self.assertTrue(found, "Should find single test")
 
-    def test_large_test_suite_simulation(self):
+    def test_large_test_suite_simulation(self) -> None:
         """Test collection with a larger test suite to simulate real-world usage."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)

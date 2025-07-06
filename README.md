@@ -63,37 +63,35 @@ The current implementation focuses on enhanced test collection and parallelizati
 
 ## Performance
 
-`rtest` delivers significant performance improvements over [`pytest`](https://pytest.org):
+`rtest` delivers significant performance improvements over [`pytest`](https://pytest.org) across popular open-source Python projects:
 
-```bash
-=== Full Test Execution Benchmark ===
-Benchmark 1: pytest
-  Time (mean ± σ):      3.990 s ±  0.059 s    [User: 3.039 s, System: 0.937 s]
-  Range (min … max):    3.881 s …  4.113 s    20 runs
- 
-Benchmark 2: rtest
-  Time (mean ± σ):      65.9 ms ±  10.6 ms    [User: 22.9 ms, System: 22.8 ms]
-  Range (min … max):    40.6 ms …  78.7 ms    20 runs
- 
-Summary
-  rtest ran
-   60.52 ± 9.78 times faster than pytest
-
-=== Test Collection Only Benchmark ===
-Benchmark 1: pytest --collect-only
-  Time (mean ± σ):      4.051 s ±  0.114 s    [User: 3.060 s, System: 0.959 s]
-  Range (min … max):    3.961 s …  4.424 s    20 runs
- 
-Benchmark 2: rtest --collect-only
-  Time (mean ± σ):      40.7 ms ±  11.6 ms    [User: 16.6 ms, System: 12.8 ms]
-  Range (min … max):    27.0 ms …  80.8 ms    20 runs
- 
-Summary
-  rtest --collect-only ran
-   99.61 ± 28.52 times faster than pytest --collect-only
+### Test Collection Performance
+```
+Repository      pytest               rtest                Speedup
+-----------     ------               -----                -------
+FastAPI         5.477s ± 0.044s      0.096s ± 0.001s     56.82x
+Requests        0.446s ± 0.003s      0.041s ± 0.000s     10.89x
+Flask           0.479s ± 0.006s      0.045s ± 0.000s     10.60x
+Click           0.367s ± 0.002s      0.042s ± 0.000s     8.64x
+HTTPX           0.250s ± 0.003s      0.044s ± 0.000s     5.65x
+Scikit-learn    0.225s ± 0.002s      0.226s ± 0.002s     1.00x
+Pandas          0.239s ± 0.005s      0.506s ± 0.001s     0.47x
 ```
 
-*Performance benchmarks shown are preliminary results from a specific test suite using hyperfine with 20 runs each on MacBook Pro M4 Pro (48GB RAM). Results may vary significantly depending on test suite characteristics, system configuration, and workload. More comprehensive benchmarking across diverse scenarios is planned.*
+### Test Execution Performance  
+```
+Repository      pytest               rtest                Speedup
+-----------     ------               -----                -------
+Flask           1.688s ± 0.008s      0.035s ± 0.000s     48.47x
+Click           1.353s ± 0.004s      0.034s ± 0.000s     40.23x
+FastAPI         0.652s ± 0.004s      0.035s ± 0.001s     18.43x
+Django          0.561s ± 0.016s      0.036s ± 0.001s     15.55x
+HTTPX           0.252s ± 0.004s      0.035s ± 0.000s     7.19x
+Pandas          0.235s ± 0.002s      0.061s ± 0.000s     3.81x
+Scikit-learn    0.224s ± 0.002s      0.060s ± 0.001s     3.73x
+```
+
+*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner).*
 
 ## Quick Start
 
@@ -167,6 +165,31 @@ result = run_tests(pytest_args=["--junitxml=results.xml"])
 ```bash
 rtest -n 4 -e DEBUG=1 -- -v -k "integration" --tb=short
 ```
+
+## Known Limitations
+
+### Parametrized Test Discovery
+`rtest` currently discovers only the base function names for parametrized tests (created with `@pytest.mark.parametrize`), rather than expanding them into individual test items during collection. For example:
+
+```python
+@pytest.mark.parametrize("value", [1, 2, 3])
+def test_example(value):
+    assert value > 0
+```
+
+**pytest collection shows:**
+```
+test_example[1]
+test_example[2] 
+test_example[3]
+```
+
+**rtest collection shows:**
+```
+test_example
+```
+
+However, when `rtest` executes tests using pytest as the executor, passing the base function name (`test_example`) to pytest results in identical behavior - pytest automatically runs all parametrized variants. This means test execution is functionally equivalent between the tools, but collection counts may differ.
 
 ## Contributing
 

@@ -1,0 +1,91 @@
+repositories:
+  # Web Frameworks
+  - name: "fastapi"
+    url: "https://github.com/tiangolo/fastapi"
+    category: "web_framework"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+      - "*_test.py"
+    
+  - name: "flask"
+    url: "https://github.com/pallets/flask"
+    category: "web_framework"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+    
+  - name: "django"
+    url: "https://github.com/django/django"
+    category: "web_framework"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+    
+  # HTTP Libraries
+  - name: "requests"
+    url: "https://github.com/psf/requests"
+    category: "http_library"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+    
+  - name: "httpx"
+    url: "https://github.com/encode/httpx"
+    category: "http_library"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+    
+  # Data Science Libraries
+  - name: "pandas"
+    url: "https://github.com/pandas-dev/pandas"
+    category: "data_science"
+    test_dir: "pandas/tests"
+    test_patterns:
+      - "test_*.py"
+    
+  - name: "scikit-learn"
+    url: "https://github.com/scikit-learn/scikit-learn"
+    category: "data_science"
+    test_dir: "sklearn/tests"
+    test_patterns:
+      - "test_*.py"
+    
+  # Testing Frameworks
+  - name: "pytest"
+    url: "https://github.com/pytest-dev/pytest"
+    category: "testing_framework"
+    test_dir: "testing"
+    test_patterns:
+      - "test_*.py"
+    
+  # CLI Tools
+  - name: "click"
+    url: "https://github.com/pallets/click"
+    category: "cli_tool"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+    
+  # Async Libraries
+  - name: "aiohttp"
+    url: "https://github.com/aio-libs/aiohttp"
+    category: "async_library"
+    test_dir: "tests"
+    test_patterns:
+      - "test_*.py"
+
+# Benchmark configurations
+benchmark_configs:
+  collect_only:
+    description: "Test discovery performance"
+    pytest_args: "--collect-only"
+    rtest_args: "--collect-only"
+    timeout: 300
+    
+  execution:
+    description: "Test execution performance"
+    pytest_args: "--maxfail=3 -x"
+    rtest_args: "--maxfail=3 -x"
+    timeout: 120
