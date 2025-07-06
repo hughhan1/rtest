@@ -5,6 +5,9 @@
 //! configurable naming patterns.
 
 mod discovery;
+mod import_tracker;
+#[cfg(test)]
+mod import_tests;
 mod pattern;
 mod visitor;
 

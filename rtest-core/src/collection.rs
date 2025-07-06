@@ -7,10 +7,12 @@
 //! - Collection reporting
 
 use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
+use crate::string_interner::intern;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Result type for collection operations
 pub type CollectionResult<T> = Result<T, CollectionError>;
@@ -82,13 +84,16 @@ pub trait Collector: std::fmt::Debug {
     fn is_item(&self) -> bool {
         false
     }
+
+    /// Enable downcasting to concrete types
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Root of the collection tree
 #[derive(Debug)]
 pub struct Session {
     pub rootpath: PathBuf,
-    pub nodeid: String,
+    pub nodeid: Arc<str>,
     pub config: CollectionConfig,
     #[allow(dead_code)]
     cache: HashMap<PathBuf, Vec<Box<dyn Collector>>>,
@@ -134,7 +139,7 @@ impl Default for CollectionConfig {
 impl Session {
     pub fn new(rootpath: PathBuf) -> Self {
         Self {
-            nodeid: String::new(),
+            nodeid: Arc::from(""),
             rootpath,
             config: CollectionConfig::default(),
             cache: HashMap::new(),
@@ -248,23 +253,31 @@ impl Collector for Session {
     fn path(&self) -> &Path {
         &self.rootpath
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Directory collector
 #[derive(Debug)]
 pub struct Directory {
     pub path: PathBuf,
-    pub nodeid: String,
+    pub nodeid: Arc<str>,
     parent_session: Rc<Session>,
 }
 
 impl Directory {
     fn new(path: PathBuf, session: Rc<Session>) -> Self {
-        let nodeid = path
+        // Use Cow to avoid allocation when path is valid UTF-8
+        let relative_path = path
             .strip_prefix(&session.rootpath)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned();
+            .unwrap_or(&path);
+        
+        let nodeid = match relative_path.to_str() {
+            Some(s) => intern(s),
+            None => intern(&relative_path.to_string_lossy()),
+        };
 
         Self {
             path,
@@ -328,23 +341,31 @@ impl Collector for Directory {
     fn path(&self) -> &Path {
         &self.path
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Python module collector
 #[derive(Debug)]
 pub struct Module {
     pub path: PathBuf,
-    pub nodeid: String,
+    pub nodeid: Arc<str>,
     parent_session: Rc<Session>,
 }
 
 impl Module {
     fn new(path: PathBuf, session: Rc<Session>) -> Self {
-        let nodeid = path
+        // Use same optimization as Directory
+        let relative_path = path
             .strip_prefix(&session.rootpath)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned();
+            .unwrap_or(&path);
+        
+        let nodeid = match relative_path.to_str() {
+            Some(s) => intern(s),
+            None => intern(&relative_path.to_string_lossy()),
+        };
 
         Self {
             path,
@@ -392,15 +413,20 @@ impl Collector for Module {
     fn path(&self) -> &Path {
         &self.path
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Test function item
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     #[allow(dead_code)]
-    pub name: String,
-    pub nodeid: String,
+    pub name: Arc<str>,
+    pub nodeid: Arc<str>,
     pub location: Location,
+    pub xdist_group: Option<Arc<str>>,
 }
 
 impl Collector for Function {
@@ -423,6 +449,10 @@ impl Collector for Function {
 
     fn is_item(&self) -> bool {
         true
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

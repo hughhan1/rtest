@@ -72,11 +72,17 @@ impl WorkerPool {
             }
 
             match cmd.output() {
-                Ok(output) => WorkerResult {
-                    worker_id,
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                Ok(output) => {
+                    // Use from_utf8_lossy which returns Cow<str> to avoid allocation when valid UTF-8
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    
+                    WorkerResult {
+                        worker_id,
+                        exit_code: output.status.code().unwrap_or(-1),
+                        stdout: stdout.into_owned(),
+                        stderr: stderr.into_owned(),
+                    }
                 },
                 Err(e) => WorkerResult {
                     worker_id,

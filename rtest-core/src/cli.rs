@@ -164,7 +164,7 @@ mod tests {
         assert!(args.validate_dist().is_err());
 
         let args = Args::parse_from(["rtest", "--dist", "loadgroup"]);
-        assert!(args.validate_dist().is_err()); // No longer supported
+        assert!(args.validate_dist().is_ok()); // Now supported
     }
 
     #[test]

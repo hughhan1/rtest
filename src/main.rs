@@ -2,8 +2,10 @@
 
 use clap::Parser;
 use rtest_core::{
-    cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, DistributionMode, PytestRunner, WorkerPool,
+    cli::Args, create_scheduler_string, determine_worker_count,
+    display_collection_results, execute_tests, DistributionMode, LoadGroupScheduler, 
+    PytestRunner, TestCollectionService, WorkerPool,
+    scheduler::Scheduler,
 };
 use std::env;
 
@@ -24,7 +26,7 @@ pub fn main() {
     };
     let worker_count = determine_worker_count(num_processes, args.maxprocesses);
 
-    let runner = PytestRunner::new(args.env);
+    let runner = PytestRunner::new(args.env.clone());
 
     let rootpath = match env::current_dir() {
         Ok(dir) => dir,
@@ -33,7 +35,10 @@ pub fn main() {
             std::process::exit(1);
         }
     };
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
+    
+    // Use the new TestCollectionService
+    let collection_service = TestCollectionService::new(rootpath.clone());
+    let (test_nodes, errors) = match collection_service.collect_nodeids(&args.files) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -74,6 +79,7 @@ pub fn main() {
             worker_count,
             &args.dist,
             &rootpath,
+            &args,
         );
     }
 }
@@ -85,6 +91,7 @@ fn execute_tests_parallel(
     worker_count: usize,
     dist_mode: &str,
     rootpath: &std::path::Path,
+    args: &Args,
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
@@ -95,8 +102,51 @@ fn execute_tests_parallel(
             std::process::exit(1);
         }
     };
-    let scheduler = create_scheduler(distribution_mode);
-    let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
+    
+    let test_batches = match distribution_mode {
+        DistributionMode::LoadGroup => {
+            // For LoadGroup, collect Function objects to preserve xdist_group info
+            let collection_service = TestCollectionService::new(rootpath.to_path_buf());
+            let (functions, collection_errors) = match collection_service.collect_functions(&args.files) {
+                Ok((funcs, errors)) => (funcs, errors),
+                Err(e) => {
+                    eprintln!("Collection error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            
+            if !collection_errors.errors.is_empty() {
+                let func_nodeids: Vec<String> = functions.iter().map(|f| f.nodeid.to_string()).collect();
+                display_collection_results(&func_nodeids, &collection_errors);
+            }
+            
+            let load_group_scheduler = LoadGroupScheduler;
+            let function_batches = match load_group_scheduler.distribute(functions, worker_count) {
+                Ok(batches) => batches,
+                Err(e) => {
+                    eprintln!("Distribution error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            
+            // Convert Function batches to String batches for worker execution
+            function_batches
+                .into_iter()
+                .map(|batch| batch.into_iter().map(|f| f.nodeid.to_string()).collect())
+                .collect()
+        }
+        _ => {
+            // Use existing string-based distribution for other modes
+            let scheduler = create_scheduler_string(distribution_mode.clone());
+            match scheduler.distribute(test_nodes, worker_count) {
+                Ok(batches) => batches,
+                Err(e) => {
+                    eprintln!("Distribution error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
 
     if test_batches.is_empty() {
         println!("No test batches to execute.");

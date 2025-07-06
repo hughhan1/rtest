@@ -1,6 +1,7 @@
 //! Integration between Rust collection and pytest execution.
 
-use crate::collection::{collect_one_node, CollectionError, Collector, Session};
+use crate::collection::{collect_one_node, CollectionError, Collector, Function, Session};
+use crate::downcast::CollectorDowncast;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -33,6 +34,70 @@ pub fn collect_tests_rust(
             Ok((test_nodes, collection_errors))
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Run the Rust-based collection and return Function objects (for LoadGroup distribution)
+pub fn collect_functions_rust(
+    rootpath: PathBuf,
+    args: &[String],
+) -> Result<(Vec<Function>, CollectionErrors), CollectionError> {
+    let session = Rc::new(Session::new(rootpath));
+    let mut collection_errors = CollectionErrors { errors: Vec::new() };
+
+    match session.perform_collect(args) {
+        Ok(collectors) => {
+            let mut test_functions = Vec::new();
+
+            for collector in collectors {
+                collect_functions_recursive(
+                    collector.as_ref(),
+                    &mut test_functions,
+                    &mut collection_errors,
+                );
+            }
+
+            Ok((test_functions, collection_errors))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Recursively collect all test Function objects
+fn collect_functions_recursive(
+    collector: &dyn Collector,
+    test_functions: &mut Vec<Function>,
+    collection_errors: &mut CollectionErrors,
+) {
+    if collector.is_item() {
+        // Try to downcast to Function using safe extension
+        match collector.try_as_function() {
+            Some(function) => test_functions.push(function.clone()),
+            None => {
+                // Log warning about unexpected item type
+                eprintln!(
+                    "Warning: Expected Function item but got different type for nodeid: {}",
+                    collector.nodeid()
+                );
+            }
+        }
+    } else {
+        let report = collect_one_node(collector);
+        match report.outcome {
+            crate::collection::CollectionOutcome::Passed => {
+                for child in report.result {
+                    collect_functions_recursive(child.as_ref(), test_functions, collection_errors);
+                }
+            }
+            crate::collection::CollectionOutcome::Failed => {
+                if let Some(error) = report.error_type {
+                    collection_errors
+                        .errors
+                        .push((report.nodeid.clone(), error));
+                }
+            }
+            _ => {}
+        }
     }
 }
 

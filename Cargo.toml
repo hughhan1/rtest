@@ -5,7 +5,7 @@ version = "0.0.9"
 edition = "2021"
 
 [lib]
-name = "rtest"
+name = "rtest_lib"
 crate-type = ["cdylib"]
 
 [[bin]]

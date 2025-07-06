@@ -2,6 +2,7 @@
 
 use crate::collection::{CollectionError, CollectionResult, Function, Location};
 use crate::python_discovery::visitor::TestDiscoveryVisitor;
+use crate::string_interner::intern;
 use ruff_python_ast::Mod;
 use ruff_python_parser::{parse, Mode, ParseOptions};
 use std::path::Path;
@@ -14,6 +15,7 @@ pub struct TestInfo {
     #[allow(dead_code)]
     pub is_method: bool,
     pub class_name: Option<String>,
+    pub xdist_group: Option<String>,
 }
 
 /// Configuration for test discovery
@@ -54,19 +56,20 @@ pub fn discover_tests(
 /// Convert TestInfo to Function collector
 pub fn test_info_to_function(test: &TestInfo, module_path: &Path, module_nodeid: &str) -> Function {
     let nodeid = if let Some(class_name) = &test.class_name {
-        format!("{}::{}::{}", module_nodeid, class_name, test.name)
+        intern(&format!("{}::{}::{}", module_nodeid, class_name, test.name))
     } else {
-        format!("{}::{}", module_nodeid, test.name)
+        intern(&format!("{}::{}", module_nodeid, test.name))
     };
 
     Function {
-        name: test.name.clone(),
+        name: intern(&test.name),
         nodeid,
         location: Location {
             path: module_path.to_path_buf(),
             line: Some(test.line),
             name: test.name.clone(),
         },
+        xdist_group: test.xdist_group.as_ref().map(|s| intern(s)),
     }
 }
 
@@ -104,10 +107,12 @@ class NotATestClass:
         assert_eq!(tests[0].name, "test_simple");
         assert!(!tests[0].is_method);
         assert_eq!(tests[0].class_name, None);
+        assert_eq!(tests[0].xdist_group, None);
 
         assert_eq!(tests[1].name, "test_method");
         assert!(tests[1].is_method);
         assert_eq!(tests[1].class_name, Some("TestClass".into()));
+        assert_eq!(tests[1].xdist_group, None);
     }
 
     #[test]
@@ -131,6 +136,7 @@ class TestWithoutInit:
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_should_be_collected");
         assert_eq!(tests[0].class_name, Some("TestWithoutInit".into()));
+        assert_eq!(tests[0].xdist_group, None);
     }
 
     #[test]
@@ -167,5 +173,46 @@ def not_a_test():
         assert!(test_names.contains(&"testThisIsAlsoATest"));
         assert!(test_names.contains(&"test_method_snake_case"));
         assert!(test_names.contains(&"testMethodCamelCase"));
+    }
+
+    #[test]
+    fn test_xdist_group_parsing() {
+        let source = r#"
+import pytest
+
+@pytest.mark.xdist_group(name="database")
+def test_with_group():
+    pass
+
+@pytest.mark.xdist_group("ui")
+def test_with_positional_group():
+    pass
+
+def test_without_group():
+    pass
+
+class TestClass:
+    @pytest.mark.xdist_group(name="slow")
+    def test_method_with_group(self):
+        pass
+"#;
+
+        let config = TestDiscoveryConfig::default();
+        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+
+        assert_eq!(tests.len(), 4);
+
+        // Find tests by name and check their groups
+        let test_with_group = tests.iter().find(|t| t.name == "test_with_group").unwrap();
+        assert_eq!(test_with_group.xdist_group, Some("database".to_string()));
+
+        let test_with_positional = tests.iter().find(|t| t.name == "test_with_positional_group").unwrap();
+        assert_eq!(test_with_positional.xdist_group, Some("ui".to_string()));
+
+        let test_without_group = tests.iter().find(|t| t.name == "test_without_group").unwrap();
+        assert_eq!(test_without_group.xdist_group, None);
+
+        let test_method_with_group = tests.iter().find(|t| t.name == "test_method_with_group").unwrap();
+        assert_eq!(test_method_with_group.xdist_group, Some("slow".to_string()));
     }
 }
