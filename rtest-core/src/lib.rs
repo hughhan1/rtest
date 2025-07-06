@@ -12,7 +12,7 @@ pub mod subproject;
 pub mod utils;
 pub mod worker;
 
-pub use collection::{CollectionError, CollectionResult};
+pub use collection::error::{CollectionError, CollectionResult};
 pub use collection_integration::{collect_tests_rust, display_collection_results};
 pub use pytest_executor::execute_tests;
 pub use runner::PytestRunner;
