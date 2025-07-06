@@ -3,8 +3,8 @@
 use clap::Parser;
 use rtest_core::{
     cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, subproject, DistributionMode, PytestRunner,
-    WorkerPool,
+    display_collection_results, execute_tests, execute_work_stealing, subproject, 
+    DistributionMode, PytestRunner, WorkerPool,
 };
 use std::env;
 
@@ -112,8 +112,6 @@ fn execute_tests_parallel(
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
-    let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
-
     let distribution_mode = match dist_mode.parse::<DistributionMode>() {
         Ok(mode) => mode,
         Err(e) => {
@@ -122,6 +120,33 @@ fn execute_tests_parallel(
         }
     };
 
+    match distribution_mode {
+        DistributionMode::WorkSteal => {
+            execute_with_work_stealing(program, initial_args, test_nodes, worker_count, rootpath);
+        }
+        _ => {
+            execute_with_traditional_distribution(
+                program,
+                initial_args,
+                test_nodes,
+                worker_count,
+                distribution_mode,
+                rootpath,
+            );
+        }
+    }
+}
+
+fn execute_with_traditional_distribution(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    worker_count: usize,
+    distribution_mode: DistributionMode,
+    rootpath: &std::path::Path,
+) {
+    let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
+    
     let mut worker_pool = WorkerPool::new();
     let mut worker_id = 0;
 
@@ -173,4 +198,66 @@ fn execute_tests_parallel(
     }
 
     std::process::exit(overall_exit_code);
+}
+
+fn execute_with_work_stealing(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    worker_count: usize,
+    rootpath: &std::path::Path,
+) {
+    println!("Using dynamic work-stealing execution");
+
+    // For work-stealing, we also need to handle subprojects
+    let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
+    
+    // If we have multiple subprojects, we need to handle them separately
+    if test_groups.len() > 1 {
+        println!("Note: Work-stealing with multiple subprojects will execute each subproject sequentially");
+        
+        let mut overall_exit_code = 0;
+        
+        for (subproject_root, tests) in test_groups {
+            if tests.is_empty() {
+                continue;
+            }
+            
+            let adjusted_tests = if subproject_root != rootpath {
+                subproject::make_test_paths_relative(&tests, rootpath, &subproject_root)
+            } else {
+                tests
+            };
+            
+            println!("\nExecuting tests in subproject: {}", subproject_root.display());
+            
+            let result = execute_work_stealing(
+                program,
+                initial_args,
+                adjusted_tests,
+                worker_count,
+                &subproject_root,
+            );
+            
+            result.print_summary();
+            
+            if result.exit_code() != 0 {
+                overall_exit_code = result.exit_code();
+            }
+        }
+        
+        std::process::exit(overall_exit_code);
+    } else {
+        // Single project or subproject - use regular work-stealing
+        let result = execute_work_stealing(
+            program,
+            initial_args,
+            test_nodes,
+            worker_count,
+            rootpath,
+        );
+
+        result.print_summary();
+        std::process::exit(result.exit_code());
+    }
 }

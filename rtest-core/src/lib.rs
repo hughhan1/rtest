@@ -18,4 +18,4 @@ pub use pytest_executor::execute_tests;
 pub use runner::PytestRunner;
 pub use scheduler::{create_scheduler, DistributionMode};
 pub use utils::determine_worker_count;
-pub use worker::WorkerPool;
+pub use worker::{WorkerPool, execute_work_stealing};
