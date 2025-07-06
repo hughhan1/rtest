@@ -51,11 +51,10 @@ impl Args {
     }
 
     pub fn validate_dist(&self) -> Result<(), String> {
-        match self.dist.as_str() {
-            "load" => Ok(()),
-            other => Err(format!(
-                "Distribution mode '{other}' is not yet implemented. Only 'load' is supported."
-            )),
+        // Use the FromStr implementation which has proper error handling
+        match self.dist.parse::<crate::scheduler::DistributionMode>() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.to_string()),
         }
     }
 }
@@ -149,8 +148,23 @@ mod tests {
         let args = Args::parse_from(["rtest", "--dist", "load"]);
         assert!(args.validate_dist().is_ok());
 
+        let args = Args::parse_from(["rtest", "--dist", "loadscope"]);
+        assert!(args.validate_dist().is_ok());
+
         let args = Args::parse_from(["rtest", "--dist", "loadfile"]);
+        assert!(args.validate_dist().is_ok());
+
+        let args = Args::parse_from(["rtest", "--dist", "worksteal"]);
+        assert!(args.validate_dist().is_ok());
+
+        let args = Args::parse_from(["rtest", "--dist", "no"]);
+        assert!(args.validate_dist().is_ok());
+
+        let args = Args::parse_from(["rtest", "--dist", "invalid"]);
         assert!(args.validate_dist().is_err());
+
+        let args = Args::parse_from(["rtest", "--dist", "loadgroup"]);
+        assert!(args.validate_dist().is_err()); // No longer supported
     }
 
     #[test]

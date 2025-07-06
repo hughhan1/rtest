@@ -58,7 +58,7 @@ pub fn main() {
         std::process::exit(0);
     }
 
-    if worker_count == 1 {
+    if worker_count == 1 || args.dist == "no" {
         execute_tests(
             &runner.program,
             &runner.initial_args,

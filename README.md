@@ -39,6 +39,25 @@ rtest -n auto                 # Auto-detect CPU cores
 rtest --maxprocesses 8        # Limit maximum processes
 ```
 
+#### Distribution Modes
+
+Control how tests are distributed across workers with the `--dist` flag:
+
+- **`--dist load`** (default): Round-robin distribution of individual tests
+- **`--dist loadscope`**: Group tests by module/class scope for fixture reuse
+- **`--dist loadfile`**: Group tests by file to keep related tests together  
+- **`--dist worksteal`**: Optimized distribution for variable test execution times
+- **`--dist no`**: Sequential execution (no parallelization)
+
+```bash
+# Examples
+rtest -n auto --dist loadfile      # Group by file across all CPU cores
+rtest -n 4 --dist worksteal        # Work-steal optimized distribution
+rtest --dist no                    # Sequential execution for debugging
+```
+
+**Note**: The `loadgroup` distribution mode from pytest-xdist is not yet supported. xdist_group mark parsing is planned for future releases.
+
 ### Current Implementation
 The current implementation focuses on enhanced test collection and parallelization, with test execution delegated to [`pytest`](https://pytest.org) for maximum compatibility.
 
