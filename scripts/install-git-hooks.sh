@@ -76,8 +76,8 @@ fi
 if [ -n "$PYTHON_FILES" ]; then
     print_status "Checking Python code..."
     
-    echo "Running ruff format on python/ and tests/ directories..."
-    if ! uv run ruff format python/ tests/; then
+    echo "Running ruff format on python/, tests/, and scripts/ directories..."
+    if ! uv run ruff format python/ tests/ scripts/; then
         print_error "Failed to format Python code."
         exit 1
     fi
