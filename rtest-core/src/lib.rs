@@ -3,10 +3,12 @@
 pub mod cli;
 pub mod collection;
 pub mod collection_integration;
+pub mod config;
 pub mod pytest_executor;
 pub mod python_discovery;
 pub mod runner;
 pub mod scheduler;
+pub mod subproject;
 pub mod utils;
 pub mod worker;
 

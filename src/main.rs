@@ -3,7 +3,8 @@
 use clap::Parser;
 use rtest_core::{
     cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, DistributionMode, PytestRunner, WorkerPool,
+    display_collection_results, execute_tests, subproject, DistributionMode, PytestRunner,
+    WorkerPool,
 };
 use std::env;
 
@@ -59,13 +60,36 @@ pub fn main() {
     }
 
     if worker_count == 1 || args.dist == "no" {
-        execute_tests(
-            &runner.program,
-            &runner.initial_args,
-            test_nodes,
-            vec![],
-            Some(&rootpath),
-        );
+        // Group tests by subproject
+        let test_groups = subproject::group_tests_by_subproject(&rootpath, &test_nodes);
+
+        let mut overall_exit_code = 0;
+
+        for (subproject_root, tests) in test_groups {
+            if tests.is_empty() {
+                continue;
+            }
+
+            let adjusted_tests = if subproject_root != rootpath {
+                subproject::make_test_paths_relative(&tests, &rootpath, &subproject_root)
+            } else {
+                tests
+            };
+
+            let exit_code = execute_tests(
+                &runner.program,
+                &runner.initial_args,
+                adjusted_tests,
+                vec![],
+                Some(&subproject_root),
+            );
+
+            if exit_code != 0 {
+                overall_exit_code = exit_code;
+            }
+        }
+
+        std::process::exit(overall_exit_code);
     } else {
         execute_tests_parallel(
             &runner.program,
@@ -88,6 +112,8 @@ fn execute_tests_parallel(
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
+    let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
+
     let distribution_mode = match dist_mode.parse::<DistributionMode>() {
         Ok(mode) => mode,
         Err(e) => {
@@ -95,27 +121,38 @@ fn execute_tests_parallel(
             std::process::exit(1);
         }
     };
-    let scheduler = create_scheduler(distribution_mode);
-    let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
-
-    if test_batches.is_empty() {
-        println!("No test batches to execute.");
-        std::process::exit(0);
-    }
 
     let mut worker_pool = WorkerPool::new();
+    let mut worker_id = 0;
 
-    for (worker_id, tests) in test_batches.into_iter().enumerate() {
-        if !tests.is_empty() {
-            worker_pool.spawn_worker(
-                worker_id,
-                program.to_string(),
-                initial_args.to_vec(),
-                tests,
-                vec![],
-                Some(rootpath.to_path_buf()),
-            );
+    for (subproject_root, tests) in test_groups {
+        let adjusted_tests = if subproject_root != rootpath {
+            subproject::make_test_paths_relative(&tests, rootpath, &subproject_root)
+        } else {
+            tests
+        };
+
+        let scheduler = create_scheduler(distribution_mode.clone());
+        let test_batches = scheduler.distribute_tests(adjusted_tests, worker_count);
+
+        for batch in test_batches {
+            if !batch.is_empty() {
+                worker_pool.spawn_worker(
+                    worker_id,
+                    program.to_string(),
+                    initial_args.to_vec(),
+                    batch,
+                    vec![],
+                    Some(subproject_root.clone()),
+                );
+                worker_id += 1;
+            }
         }
+    }
+
+    if worker_id == 0 {
+        println!("No test batches to execute.");
+        std::process::exit(0);
     }
 
     let results = worker_pool.wait_for_all();
