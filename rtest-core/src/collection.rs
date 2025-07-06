@@ -6,6 +6,7 @@
 //! - Test discovery
 //! - Collection reporting
 
+use crate::config::read_pytest_config;
 use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
 use std::collections::HashMap;
 use std::fmt;
@@ -146,14 +147,18 @@ impl Session {
         args: &[String],
     ) -> CollectionResult<Vec<Box<dyn Collector>>> {
         let paths = if args.is_empty() {
-            // Use testpaths from config or current directory
-            if self.config.testpaths.is_empty() {
+            let pytest_config = read_pytest_config(&self.rootpath);
+            
+            if !pytest_config.testpaths.is_empty() {
+                pytest_config.testpaths.iter()
+                    .map(|p| self.rootpath.join(p))
+                    .collect()
+            } else if self.config.testpaths.is_empty() {
                 vec![self.rootpath.clone()]
             } else {
                 self.config.testpaths.clone()
             }
         } else {
-            // Parse arguments into paths
             args.iter()
                 .map(|arg| {
                     let path = PathBuf::from(arg);
@@ -166,7 +171,6 @@ impl Session {
                 .collect()
         };
 
-        // Use iterator chain to avoid intermediate Vec allocations
         Ok(paths
             .into_iter()
             .filter_map(|path| self.collect_path(&path).ok())
