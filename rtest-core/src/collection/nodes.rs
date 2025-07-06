@@ -1,89 +1,13 @@
-//! Pytest collection implementation in Rust.
-//!
-//! This module implements pytest's collection logic, including:
-//! - File system traversal
-//! - Python file parsing
-//! - Test discovery
-//! - Collection reporting
+//! Collection node implementations.
 
-use crate::config::read_pytest_config;
+use super::config::CollectionConfig;
+use super::error::{CollectionError, CollectionOutcome, CollectionResult};
+use super::types::{Collector, Location};
+use super::utils::glob_match;
 use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
 use std::collections::HashMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-
-/// Result type for collection operations
-pub type CollectionResult<T> = Result<T, CollectionError>;
-
-/// Collection-specific errors
-#[derive(Debug)]
-#[allow(dead_code, clippy::enum_variant_names)]
-pub enum CollectionError {
-    IoError(std::io::Error),
-    ParseError(String),
-    ImportError(String),
-    SkipError(String),
-}
-
-impl fmt::Display for CollectionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IoError(e) => write!(f, "IO error: {e}"),
-            Self::ParseError(e) => write!(f, "Parse error: {e}"),
-            Self::ImportError(e) => write!(f, "Import error: {e}"),
-            Self::SkipError(e) => write!(f, "Skip: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for CollectionError {}
-
-impl From<std::io::Error> for CollectionError {
-    fn from(err: std::io::Error) -> Self {
-        CollectionError::IoError(err)
-    }
-}
-
-/// Outcome of a collection operation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum CollectionOutcome {
-    Passed,
-    Failed,
-    Skipped,
-}
-
-/// Location information for a test item
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct Location {
-    pub path: PathBuf,
-    pub line: Option<usize>,
-    pub name: String,
-}
-
-/// Base trait for all collectible nodes
-pub trait Collector: std::fmt::Debug {
-    /// Unique identifier for this node
-    fn nodeid(&self) -> &str;
-
-    /// Parent collector, if any
-    #[allow(dead_code)]
-    fn parent(&self) -> Option<&dyn Collector>;
-
-    /// Collect child nodes
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>>;
-
-    /// Get the path associated with this collector
-    #[allow(dead_code)]
-    fn path(&self) -> &Path;
-
-    /// Check if this is a test item (leaf node)
-    fn is_item(&self) -> bool {
-        false
-    }
-}
 
 /// Root of the collection tree
 #[derive(Debug)]
@@ -93,43 +17,6 @@ pub struct Session {
     pub config: CollectionConfig,
     #[allow(dead_code)]
     cache: HashMap<PathBuf, Vec<Box<dyn Collector>>>,
-}
-
-/// Configuration for collection
-#[derive(Debug, Clone)]
-pub struct CollectionConfig {
-    pub ignore_patterns: Vec<String>,
-    #[allow(dead_code)]
-    pub ignore_glob_patterns: Vec<String>,
-    pub norecursedirs: Vec<String>,
-    pub testpaths: Vec<PathBuf>,
-    pub python_files: Vec<String>,
-    pub python_classes: Vec<String>,
-    pub python_functions: Vec<String>,
-}
-
-impl Default for CollectionConfig {
-    fn default() -> Self {
-        Self {
-            ignore_patterns: vec![],
-            ignore_glob_patterns: vec![],
-            norecursedirs: vec![
-                "*.egg".into(),
-                ".*".into(),
-                "_darcs".into(),
-                "build".into(),
-                "CVS".into(),
-                "dist".into(),
-                "node_modules".into(),
-                "venv".into(),
-                "{arch}".into(),
-            ],
-            testpaths: vec![],
-            python_files: vec!["test_*.py".into(), "*_test.py".into()],
-            python_classes: vec!["Test*".into()],
-            python_functions: vec!["test*".into()],
-        }
-    }
 }
 
 impl Session {
@@ -147,7 +34,7 @@ impl Session {
         args: &[String],
     ) -> CollectionResult<Vec<Box<dyn Collector>>> {
         let paths = if args.is_empty() {
-            let pytest_config = read_pytest_config(&self.rootpath);
+            let pytest_config = crate::config::read_pytest_config(&self.rootpath);
             
             if !pytest_config.testpaths.is_empty() {
                 pytest_config.testpaths.iter()
@@ -455,28 +342,6 @@ impl CollectReport {
             longrepr,
             error_type,
             result,
-        }
-    }
-}
-
-/// Simple glob pattern matching
-fn glob_match(pattern: &str, text: &str) -> bool {
-    use glob::Pattern;
-
-    // Try to use the glob crate for more accurate matching
-    if let Ok(glob_pattern) = Pattern::new(pattern) {
-        glob_pattern.matches(text)
-    } else {
-        // Fallback to simple matching
-        if pattern.starts_with('*') && pattern.ends_with('*') {
-            let middle = &pattern[1..pattern.len() - 1];
-            text.contains(middle)
-        } else if let Some(suffix) = pattern.strip_prefix('*') {
-            text.ends_with(suffix)
-        } else if let Some(prefix) = pattern.strip_suffix('*') {
-            text.starts_with(prefix)
-        } else {
-            pattern == text
         }
     }
 }

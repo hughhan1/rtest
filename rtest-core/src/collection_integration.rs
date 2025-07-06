@@ -1,6 +1,8 @@
 //! Integration between Rust collection and pytest execution.
 
-use crate::collection::{collect_one_node, CollectionError, Collector, Session};
+use crate::collection::error::{CollectionError, CollectionOutcome};
+use crate::collection::nodes::{collect_one_node, Session};
+use crate::collection::types::Collector;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -47,12 +49,12 @@ fn collect_items_recursive(
     } else {
         let report = collect_one_node(collector);
         match report.outcome {
-            crate::collection::CollectionOutcome::Passed => {
+            CollectionOutcome::Passed => {
                 for child in report.result {
                     collect_items_recursive(child.as_ref(), test_nodes, collection_errors);
                 }
             }
-            crate::collection::CollectionOutcome::Failed => {
+            CollectionOutcome::Failed => {
                 if let Some(error) = report.error_type {
                     collection_errors
                         .errors
