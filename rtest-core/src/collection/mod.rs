@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod error;
-pub mod nodes;
+pub mod report;
+pub mod session;
 pub mod types;
 mod utils;

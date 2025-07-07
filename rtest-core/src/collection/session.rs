@@ -1,78 +1,17 @@
-//! Collection node implementations with parallel support.
+//! Session-based collection implementation with parallel support.
 //!
 //! This module implements pytest's collection logic, including:
 //! - Parallel file system traversal
 //! - Python file parsing
 //! - Test discovery
-//! - Collection reporting
 
 use super::config::CollectionConfig;
-use super::error::{CollectionError, CollectionOutcome, CollectionResult};
-use super::types::Location;
+use super::error::{CollectionError, CollectionResult};
+use super::types::{Collector, Directory, Function, Module};
 use super::utils::glob_match;
 use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
-
-/// Directory collector
-#[derive(Debug, Clone)]
-pub struct Directory {
-    pub path: PathBuf,
-    pub nodeid: String,
-}
-
-/// Module collector
-#[derive(Debug, Clone)]
-pub struct Module {
-    pub path: PathBuf,
-    pub nodeid: String,
-}
-
-/// Function collector
-#[derive(Debug, Clone)]
-pub struct Function {
-    pub name: String,
-    pub nodeid: String,
-    pub location: Location,
-}
-
-/// Concrete collector types as an enum
-#[derive(Debug, Clone)]
-pub enum CollectorNode {
-    Directory(Directory),
-    Module(Module),
-    Function(Function),
-}
-
-impl CollectorNode {
-    pub fn nodeid(&self) -> &str {
-        match self {
-            CollectorNode::Directory(d) => &d.nodeid,
-            CollectorNode::Module(m) => &m.nodeid,
-            CollectorNode::Function(f) => &f.nodeid,
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        match self {
-            CollectorNode::Directory(d) => &d.path,
-            CollectorNode::Module(m) => &m.path,
-            CollectorNode::Function(f) => &f.location.path,
-        }
-    }
-
-    pub fn is_item(&self) -> bool {
-        matches!(self, CollectorNode::Function(_))
-    }
-
-    pub fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
-        match self {
-            CollectorNode::Directory(d) => d.collect(session),
-            CollectorNode::Module(m) => m.collect(session),
-            CollectorNode::Function(_) => Ok(vec![]), // Functions are leaf nodes
-        }
-    }
-}
 
 /// Root of the collection tree
 #[derive(Debug)]
@@ -89,11 +28,11 @@ impl Session {
         }
     }
 
-    pub fn perform_collect(&self, args: &[String]) -> (Vec<CollectorNode>, Vec<(PathBuf, CollectionError)>) {
+    pub fn perform_collect(&self, args: &[String]) -> (Vec<Collector>, Vec<(PathBuf, CollectionError)>) {
         let paths = self.resolve_paths(args);
         
         // Collect all results, preserving both successes and errors
-        let results: Vec<(PathBuf, CollectionResult<Vec<CollectorNode>>)> = paths
+        let results: Vec<(PathBuf, CollectionResult<Vec<Collector>>)> = paths
             .par_iter()
             .map(|path| (path.clone(), self.collect_path(path)))
             .collect();
@@ -138,20 +77,21 @@ impl Session {
         }
     }
 
-    fn collect_path(&self, path: &Path) -> CollectionResult<Vec<CollectorNode>> {
+    fn collect_path(&self, path: &Path) -> CollectionResult<Vec<Collector>> {
         if self.should_ignore_path(path)? {
             return Ok(vec![]);
         }
 
         if path.is_dir() {
             let dir = Directory::new(path, &self.rootpath);
-            let mut collectors = vec![CollectorNode::Directory(dir.clone())];
+            let dir_node = Collector::Directory(dir);
+            let mut collectors = vec![dir_node.clone()];
             // Recursively collect directory contents
-            collectors.extend(dir.collect(self)?);
+            collectors.extend(self.collect_node(&dir_node)?);
             Ok(collectors)
         } else if path.is_file() && self.is_python_file(path) {
             let module = Module::new(path, &self.rootpath);
-            Ok(vec![CollectorNode::Module(module)])
+            Ok(vec![Collector::Module(module)])
         } else {
             Ok(vec![])
         }
@@ -197,24 +137,16 @@ impl Session {
         false
     }
 
-}
-
-impl Directory {
-    fn new(path: &Path, rootpath: &Path) -> Self {
-        let nodeid = path
-            .strip_prefix(rootpath)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned();
-
-        Self {
-            path: path.to_path_buf(),
-            nodeid,
+    pub fn collect_node(&self, node: &Collector) -> CollectionResult<Vec<Collector>> {
+        match node {
+            Collector::Directory(d) => self.collect_directory(d),
+            Collector::Module(m) => self.collect_module(m),
+            Collector::Function(_) => Ok(vec![]), // Functions are leaf nodes
         }
     }
 
-    fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
-        let dir_entries = match std::fs::read_dir(&self.path) {
+    fn collect_directory(&self, dir: &Directory) -> CollectionResult<Vec<Collector>> {
+        let dir_entries = match std::fs::read_dir(&dir.path) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
                 return Ok(vec![]);
@@ -233,16 +165,16 @@ impl Directory {
 
                 let entry_path = entry.path();
                 
-                if session.should_ignore_path(&entry_path).unwrap_or(true) {
+                if self.should_ignore_path(&entry_path).unwrap_or(true) {
                     return None;
                 }
 
                 if entry_path.is_dir() {
-                    let dir = Directory::new(&entry_path, &session.rootpath);
-                    Some(CollectorNode::Directory(dir))
-                } else if entry_path.is_file() && session.is_python_file(&entry_path) {
-                    let module = Module::new(&entry_path, &session.rootpath);
-                    Some(CollectorNode::Module(module))
+                    let dir = Directory::new(&entry_path, &self.rootpath);
+                    Some(Collector::Directory(dir))
+                } else if entry_path.is_file() && self.is_python_file(&entry_path) {
+                    let module = Module::new(&entry_path, &self.rootpath);
+                    Some(Collector::Module(module))
                 } else {
                     None
                 }
@@ -251,40 +183,25 @@ impl Directory {
         
         Ok(results)
     }
-}
 
-impl Module {
-    fn new(path: &Path, rootpath: &Path) -> Self {
-        let nodeid = path
-            .strip_prefix(rootpath)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned();
-
-        Self {
-            path: path.to_path_buf(),
-            nodeid,
-        }
-    }
-
-    fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
+    fn collect_module(&self, module: &Module) -> CollectionResult<Vec<Collector>> {
         // Read the Python file
-        let source = std::fs::read_to_string(&self.path)?;
+        let source = std::fs::read_to_string(&module.path)?;
 
         // Configure test discovery
         let discovery_config = TestDiscoveryConfig {
-            python_classes: session.config.python_classes.clone(),
-            python_functions: session.config.python_functions.clone(),
+            python_classes: self.config.python_classes.clone(),
+            python_functions: self.config.python_functions.clone(),
         };
 
-        let tests = discover_tests(&self.path, &source, &discovery_config)?;
+        let tests = discover_tests(&module.path, &source, &discovery_config)?;
 
         // Convert test info to function nodes
         Ok(tests
             .into_iter()
             .map(|test| {
-                let function = test_info_to_function(&test, &self.path, &self.nodeid);
-                CollectorNode::Function(Function {
+                let function = test_info_to_function(&test, &module.path, &module.nodeid);
+                Collector::Function(Function {
                     name: function.name.clone(),
                     nodeid: function.nodeid,
                     location: function.location,
@@ -292,52 +209,5 @@ impl Module {
             })
             .collect())
     }
-}
 
-/// Collection report
-#[derive(Debug)]
-pub struct CollectReport {
-    pub nodeid: String,
-    pub outcome: CollectionOutcome,
-    pub longrepr: Option<String>,
-    pub error_type: Option<CollectionError>,
-    pub result: Vec<CollectorNode>,
-}
-
-impl CollectReport {
-    pub fn new(
-        nodeid: String,
-        outcome: CollectionOutcome,
-        longrepr: Option<String>,
-        error_type: Option<CollectionError>,
-        result: Vec<CollectorNode>,
-    ) -> Self {
-        Self {
-            nodeid,
-            outcome,
-            longrepr,
-            error_type,
-            result,
-        }
-    }
-}
-
-/// Collect a single node and return a report
-pub fn collect_one_node(node: &CollectorNode, session: &Session) -> CollectReport {
-    match node.collect(session) {
-        Ok(result) => CollectReport::new(
-            node.nodeid().into(),
-            CollectionOutcome::Passed,
-            None,
-            None,
-            result,
-        ),
-        Err(e) => CollectReport::new(
-            node.nodeid().into(),
-            CollectionOutcome::Failed,
-            Some(e.to_string()),
-            Some(e),
-            vec![],
-        ),
-    }
 }

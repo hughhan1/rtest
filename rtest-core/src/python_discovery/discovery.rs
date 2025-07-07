@@ -1,7 +1,7 @@
 //! Test discovery types and main entry point.
 
 use crate::collection::error::{CollectionError, CollectionResult};
-use crate::collection::nodes::Function;
+use crate::collection::types::Function;
 use crate::collection::types::Location;
 use crate::python_discovery::visitor::TestDiscoveryVisitor;
 use ruff_python_ast::Mod;
