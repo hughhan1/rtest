@@ -2,7 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [ main, beta ]
+    branches: [ main ]
+  push:
+    branches: [ main ]
 
 jobs:
   test:
@@ -237,6 +239,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
     - name: Download all results
       uses: actions/download-artifact@v4
       with:
@@ -244,6 +251,7 @@ jobs:
         path: all-results
     
     - name: Aggregate results
+      id: aggregate
       run: |
         # Function to output to both stdout and GitHub step summary
         output_both() {
@@ -254,7 +262,11 @@ jobs:
         output_both "## Benchmark Results Summary"
         output_both ""
         
-        # Find all result JSON files and display them
+        # Create aggregated JSON file
+        echo "[" > aggregated-results.json
+        first=true
+        
+        # Find all result JSON files and aggregate them
         for result_dir in all-results/*/; do
           if [ -d "$result_dir" ]; then
             repo_name=$(basename "$result_dir" | sed 's/benchmark-results-//')
@@ -264,6 +276,14 @@ jobs:
             # Find the JSON file in the nested structure
             json_file=$(find "$result_dir" -name "*.json" -type f | head -1)
             if [ -f "$json_file" ]; then
+              # Add to aggregated results
+              if [ "$first" = true ]; then
+                first=false
+              else
+                echo "," >> aggregated-results.json
+              fi
+              cat "$json_file" | python3 -c "import sys, json; results = json.load(sys.stdin); [print(json.dumps(r)) for r in results]" >> aggregated-results.json
+              
               # Output JSON with proper markdown formatting
               output_both '```json'
               output_both "$(python3 -m json.tool "$json_file")"
@@ -274,3 +294,43 @@ jobs:
             output_both ""
           fi
         done
+        
+        echo "]" >> aggregated-results.json
+        
+        # Set output for artifact name
+        if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          echo "artifact_name=benchmark-baseline-main" >> $GITHUB_OUTPUT
+        else
+          echo "artifact_name=benchmark-results-pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+        fi
+    
+    # Upload baseline when on main branch
+    - name: Upload baseline artifact
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-baseline-main
+        path: aggregated-results.json
+        retention-days: 90
+    
+    # Download and compare with baseline when on PR
+    - name: Download baseline for comparison
+      if: github.event_name == 'pull_request'
+      uses: dawidd6/action-download-artifact@v3
+      with:
+        workflow: ci.yml
+        branch: main
+        name: benchmark-baseline-main
+        path: baseline
+        if_no_artifact_found: warn
+    
+    - name: Compare with baseline
+      if: github.event_name == 'pull_request' && success()
+      run: |
+        if [ -f baseline/aggregated-results.json ]; then
+          python3 scripts/benchmark/compare_results.py baseline/aggregated-results.json aggregated-results.json || true
+          echo ""
+          echo "Note: Comparison only includes benchmarks that exist in both baseline and current results."
+        else
+          echo "No baseline found for comparison"
+        fi
