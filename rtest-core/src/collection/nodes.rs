@@ -8,13 +8,71 @@
 
 use super::config::CollectionConfig;
 use super::error::{CollectionError, CollectionOutcome, CollectionResult};
-use super::types::{Collector, Location};
+use super::types::Location;
 use super::utils::glob_match;
 use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+
+/// Directory collector
+#[derive(Debug, Clone)]
+pub struct Directory {
+    pub path: PathBuf,
+    pub nodeid: String,
+}
+
+/// Module collector
+#[derive(Debug, Clone)]
+pub struct Module {
+    pub path: PathBuf,
+    pub nodeid: String,
+}
+
+/// Function collector
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub nodeid: String,
+    pub location: Location,
+}
+
+/// Concrete collector types as an enum
+#[derive(Debug, Clone)]
+pub enum CollectorNode {
+    Directory(Directory),
+    Module(Module),
+    Function(Function),
+}
+
+impl CollectorNode {
+    pub fn nodeid(&self) -> &str {
+        match self {
+            CollectorNode::Directory(d) => &d.nodeid,
+            CollectorNode::Module(m) => &m.nodeid,
+            CollectorNode::Function(f) => &f.nodeid,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            CollectorNode::Directory(d) => &d.path,
+            CollectorNode::Module(m) => &m.path,
+            CollectorNode::Function(f) => &f.location.path,
+        }
+    }
+
+    pub fn is_item(&self) -> bool {
+        matches!(self, CollectorNode::Function(_))
+    }
+
+    pub fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
+        match self {
+            CollectorNode::Directory(d) => d.collect(session),
+            CollectorNode::Module(m) => m.collect(session),
+            CollectorNode::Function(_) => Ok(vec![]), // Functions are leaf nodes
+        }
+    }
+}
 
 /// Root of the collection tree
 #[derive(Debug)]
@@ -31,11 +89,11 @@ impl Session {
         }
     }
 
-    pub fn perform_collect(&self, args: &[String]) -> (Vec<Collector>, Vec<(PathBuf, CollectionError)>) {
+    pub fn perform_collect(&self, args: &[String]) -> (Vec<CollectorNode>, Vec<(PathBuf, CollectionError)>) {
         let paths = self.resolve_paths(args);
         
         // Collect all results, preserving both successes and errors
-        let results: Vec<(PathBuf, CollectionResult<Vec<Collector>>)> = paths
+        let results: Vec<(PathBuf, CollectionResult<Vec<CollectorNode>>)> = paths
             .par_iter()
             .map(|path| (path.clone(), self.collect_path(path)))
             .collect();
@@ -80,17 +138,20 @@ impl Session {
         }
     }
 
-    fn collect_path(&self, path: &Path) -> CollectionResult<Vec<Collector>> {
+    fn collect_path(&self, path: &Path) -> CollectionResult<Vec<CollectorNode>> {
         if self.should_ignore_path(path)? {
             return Ok(vec![]);
         }
 
         if path.is_dir() {
             let dir = Directory::new(path, &self.rootpath);
-            Ok(vec![Collector::Directory(dir)])
+            let mut collectors = vec![CollectorNode::Directory(dir.clone())];
+            // Recursively collect directory contents
+            collectors.extend(dir.collect(self)?);
+            Ok(collectors)
         } else if path.is_file() && self.is_python_file(path) {
             let module = Module::new(path, &self.rootpath);
-            Ok(vec![Collector::Module(module)])
+            Ok(vec![CollectorNode::Module(module)])
         } else {
             Ok(vec![])
         }
@@ -135,6 +196,7 @@ impl Session {
 
         false
     }
+
 }
 
 impl Directory {
@@ -151,7 +213,7 @@ impl Directory {
         }
     }
 
-    fn collect(&self, session: &Session) -> CollectionResult<Vec<Collector>> {
+    fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
         let dir_entries = match std::fs::read_dir(&self.path) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -160,7 +222,7 @@ impl Directory {
             Err(err) => return Err(err.into()),
         };
 
-        // Use par_bridge for parallel processing without collecting into Vec first
+        // Use par_bridge for parallel processing
         let results: Vec<_> = dir_entries
             .par_bridge()
             .filter_map(|entry_result| {
@@ -169,18 +231,18 @@ impl Directory {
                     Err(_) => return None,
                 };
 
-                let path = entry.path();
+                let entry_path = entry.path();
                 
-                if session.should_ignore_path(&path).unwrap_or(true) {
+                if session.should_ignore_path(&entry_path).unwrap_or(true) {
                     return None;
                 }
 
-                if path.is_dir() {
-                    let dir = Directory::new(&path, &session.rootpath);
-                    Some(Collector::Directory(dir))
-                } else if path.is_file() && session.is_python_file(&path) {
-                    let module = Module::new(&path, &session.rootpath);
-                    Some(Collector::Module(module))
+                if entry_path.is_dir() {
+                    let dir = Directory::new(&entry_path, &session.rootpath);
+                    Some(CollectorNode::Directory(dir))
+                } else if entry_path.is_file() && session.is_python_file(&entry_path) {
+                    let module = Module::new(&entry_path, &session.rootpath);
+                    Some(CollectorNode::Module(module))
                 } else {
                     None
                 }
@@ -205,7 +267,7 @@ impl Module {
         }
     }
 
-    fn collect(&self, session: &Session) -> CollectionResult<Vec<Collector>> {
+    fn collect(&self, session: &Session) -> CollectionResult<Vec<CollectorNode>> {
         // Read the Python file
         let source = std::fs::read_to_string(&self.path)?;
 
@@ -222,7 +284,7 @@ impl Module {
             .into_iter()
             .map(|test| {
                 let function = test_info_to_function(&test, &self.path, &self.nodeid);
-                Collector::Function(Function {
+                CollectorNode::Function(Function {
                     name: function.name.clone(),
                     nodeid: function.nodeid,
                     location: function.location,
@@ -232,8 +294,36 @@ impl Module {
     }
 }
 
+/// Collection report
+#[derive(Debug)]
+pub struct CollectReport {
+    pub nodeid: String,
+    pub outcome: CollectionOutcome,
+    pub longrepr: Option<String>,
+    pub error_type: Option<CollectionError>,
+    pub result: Vec<CollectorNode>,
+}
+
+impl CollectReport {
+    pub fn new(
+        nodeid: String,
+        outcome: CollectionOutcome,
+        longrepr: Option<String>,
+        error_type: Option<CollectionError>,
+        result: Vec<CollectorNode>,
+    ) -> Self {
+        Self {
+            nodeid,
+            outcome,
+            longrepr,
+            error_type,
+            result,
+        }
+    }
+}
+
 /// Collect a single node and return a report
-pub fn collect_one_node(node: &Collector, session: &Session) -> CollectReport {
+pub fn collect_one_node(node: &CollectorNode, session: &Session) -> CollectReport {
     match node.collect(session) {
         Ok(result) => CollectReport::new(
             node.nodeid().into(),

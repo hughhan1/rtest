@@ -1,8 +1,7 @@
 //! Integration between Rust collection and pytest execution.
 
 use crate::collection::error::{CollectionError, CollectionOutcome};
-use crate::collection::nodes::{collect_one_node, Session};
-use crate::collection::types::Collector;
+use crate::collection::nodes::{collect_one_node, CollectorNode, Session};
 use std::path::PathBuf;
 
 /// Holds errors encountered during collection
@@ -37,7 +36,7 @@ pub fn collect_tests_rust(
 
 /// Recursively collect all test items
 fn collect_items_recursive(
-    collector: &Collector,
+    collector: &CollectorNode,
     session: &Session,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
