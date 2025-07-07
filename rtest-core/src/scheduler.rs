@@ -23,7 +23,6 @@ pub enum DistributionMode {
     Load,
     LoadScope,
     LoadFile,
-    WorkSteal,
     No,
 }
 
@@ -33,7 +32,6 @@ impl fmt::Display for DistributionMode {
             DistributionMode::Load => write!(f, "load"),
             DistributionMode::LoadScope => write!(f, "loadscope"),
             DistributionMode::LoadFile => write!(f, "loadfile"),
-            DistributionMode::WorkSteal => write!(f, "worksteal"),
             DistributionMode::No => write!(f, "no"),
         }
     }
@@ -49,7 +47,7 @@ impl fmt::Display for ParseDistributionModeError {
         match self {
             ParseDistributionModeError::UnknownMode(mode) => write!(
                 f, 
-                "Unsupported distribution mode: '{}'. Supported modes: load, loadscope, loadfile, worksteal, no", 
+                "Unsupported distribution mode: '{}'. Supported modes: load, loadscope, loadfile, no", 
                 mode
             ),
         }
@@ -66,7 +64,6 @@ impl std::str::FromStr for DistributionMode {
             "load" => Ok(DistributionMode::Load),
             "loadscope" => Ok(DistributionMode::LoadScope),
             "loadfile" => Ok(DistributionMode::LoadFile),
-            "worksteal" => Ok(DistributionMode::WorkSteal),
             "no" => Ok(DistributionMode::No),
             other => Err(ParseDistributionModeError::UnknownMode(other.to_string())),
         }
@@ -158,34 +155,6 @@ impl Scheduler for LoadFileScheduler {
     }
 }
 
-
-/// WorkStealScheduler implements a round-robin distribution that's optimized for 
-/// work stealing scenarios. While true work stealing requires runtime coordination
-/// between workers, this scheduler provides better load balancing by:
-/// 1. Using round-robin assignment (avoiding clustering of slow tests)
-/// 2. Interleaving tests across workers to maximize stealing opportunities
-/// 3. Ensuring each worker gets a good mix of tests from different parts of the suite
-pub struct WorkStealScheduler;
-
-impl Scheduler for WorkStealScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
-        if let Some(result) = validate_and_handle_edge_cases(&tests, num_workers) {
-            return result;
-        }
-
-        let mut workers: Vec<Vec<String>> = (0..num_workers).map(|_| Vec::new()).collect();
-        
-        // Round-robin distribution - this gives better work-stealing characteristics
-        // because it interleaves tests across workers, making it more likely that
-        // when one worker finishes early, there are still tests available for stealing
-        for (i, test) in tests.into_iter().enumerate() {
-            workers[i % num_workers].push(test);
-        }
-
-        workers.into_iter().filter(|w| !w.is_empty()).collect()
-    }
-}
-
 pub struct NoScheduler;
 
 impl Scheduler for NoScheduler {
@@ -221,7 +190,6 @@ pub fn create_scheduler(mode: DistributionMode) -> Box<dyn Scheduler> {
         DistributionMode::Load => Box::new(LoadScheduler),
         DistributionMode::LoadScope => Box::new(LoadScopeScheduler),
         DistributionMode::LoadFile => Box::new(LoadFileScheduler),
-        DistributionMode::WorkSteal => Box::new(WorkStealScheduler),
         DistributionMode::No => Box::new(NoScheduler),
     }
 }
@@ -243,10 +211,6 @@ mod tests {
         assert!(matches!(
             "loadfile".parse::<DistributionMode>(),
             Ok(DistributionMode::LoadFile)
-        ));
-        assert!(matches!(
-            "worksteal".parse::<DistributionMode>(),
-            Ok(DistributionMode::WorkSteal)
         ));
         assert!(matches!(
             "no".parse::<DistributionMode>(),
@@ -370,7 +334,6 @@ mod tests {
         assert_eq!(format!("{}", DistributionMode::Load), "load");
         assert_eq!(format!("{}", DistributionMode::LoadScope), "loadscope");
         assert_eq!(format!("{}", DistributionMode::LoadFile), "loadfile");
-        assert_eq!(format!("{}", DistributionMode::WorkSteal), "worksteal");
         assert_eq!(format!("{}", DistributionMode::No), "no");
     }
 
@@ -379,7 +342,7 @@ mod tests {
         let error = "invalid".parse::<DistributionMode>().unwrap_err();
         let error_string = error.to_string();
         assert!(error_string.contains("Unsupported distribution mode: 'invalid'"));
-        assert!(error_string.contains("Supported modes: load, loadscope, loadfile, worksteal, no"));
+        assert!(error_string.contains("Supported modes: load, loadscope, loadfile, no"));
     }
 
     // LoadScope scheduler tests
@@ -470,66 +433,6 @@ mod tests {
     }
 
 
-    // WorkSteal scheduler tests
-    #[test]
-    fn test_worksteal_scheduler_round_robin() {
-        let scheduler = WorkStealScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-            "test4".into(),
-            "test5".into(),
-            "test6".into(),
-        ];
-        let result = scheduler.distribute_tests(tests, 3);
-
-        assert_eq!(result.len(), 3);
-        // Round-robin: test1->worker0, test2->worker1, test3->worker2, test4->worker0, etc.
-        assert_eq!(result[0], vec!["test1", "test4"]);
-        assert_eq!(result[1], vec!["test2", "test5"]);
-        assert_eq!(result[2], vec!["test3", "test6"]);
-    }
-
-    #[test]
-    fn test_worksteal_scheduler_uneven_distribution() {
-        let scheduler = WorkStealScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-            "test4".into(),
-            "test5".into(),
-        ];
-        let result = scheduler.distribute_tests(tests, 3);
-
-        assert_eq!(result.len(), 3);
-        // Round-robin distribution: some workers get one more test
-        assert_eq!(result[0], vec!["test1", "test4"]);
-        assert_eq!(result[1], vec!["test2", "test5"]);
-        assert_eq!(result[2], vec!["test3"]);
-        
-        // Verify all tests are distributed
-        let total_tests: usize = result.iter().map(|w| w.len()).sum();
-        assert_eq!(total_tests, 5);
-    }
-
-    #[test]
-    fn test_worksteal_scheduler_interleaving() {
-        let scheduler = WorkStealScheduler;
-        let tests = vec![
-            "fast_test1".into(),
-            "slow_test1".into(), 
-            "fast_test2".into(),
-            "slow_test2".into(),
-        ];
-        let result = scheduler.distribute_tests(tests, 2);
-
-        assert_eq!(result.len(), 2);
-        // Tests should be interleaved across workers for better work stealing
-        assert_eq!(result[0], vec!["fast_test1", "fast_test2"]);
-        assert_eq!(result[1], vec!["slow_test1", "slow_test2"]);
-    }
 
     // No scheduler tests
     #[test]
@@ -592,7 +495,6 @@ mod tests {
         let load_scheduler = create_scheduler(DistributionMode::Load);
         let loadscope_scheduler = create_scheduler(DistributionMode::LoadScope);
         let loadfile_scheduler = create_scheduler(DistributionMode::LoadFile);
-        let worksteal_scheduler = create_scheduler(DistributionMode::WorkSteal);
         let no_scheduler = create_scheduler(DistributionMode::No);
 
         let tests = vec!["test1".into(), "test2".into()];
@@ -600,7 +502,6 @@ mod tests {
         assert_eq!(load_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
         assert_eq!(loadscope_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
         assert_eq!(loadfile_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
-        assert_eq!(worksteal_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
         assert_eq!(no_scheduler.distribute_tests(tests.clone(), 2).len(), 1);
     }
 

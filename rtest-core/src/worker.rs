@@ -1,12 +1,23 @@
-use std::path::PathBuf;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 
+/// Result from a worker process that executed a batch of tests.
+/// 
+/// Used in traditional distribution modes (load, loadscope, loadfile) where
+/// tests are pre-assigned to workers in batches. Each worker process executes
+/// multiple tests in a single pytest invocation, and this struct captures the
+/// combined output and exit status of that batch execution.
 #[derive(Debug)]
 pub struct WorkerResult {
+    /// Identifier of the worker that produced this result
     pub worker_id: usize,
+    /// Exit code from the pytest process (0 = success, non-zero = failure)
     pub exit_code: i32,
+    /// Combined stdout from all tests executed by this worker
     pub stdout: String,
+    /// Combined stderr from all tests executed by this worker
     pub stderr: String,
 }
 
@@ -314,5 +325,141 @@ mod tests {
         let pool = WorkerPool::new();
         let results = pool.wait_for_all();
         assert!(results.is_empty());
+    }
+}
+
+/// Aggregated statistics from work-stealing test execution.
+/// 
+/// This struct summarizes the results of executing tests in work-stealing mode,
+/// where each test runs in isolation. It provides counts of test outcomes and
+/// an overall exit code, derived from the individual TestExecutionResults.
+#[derive(Debug)]
+pub struct WorkStealingResult {
+    /// Total number of tests that were executed
+    pub total_tests: usize,
+    /// Number of tests that passed (exit code 0)
+    pub passed: usize,
+    /// Number of tests that failed (non-zero exit code, excluding skipped)
+    pub failed: usize,
+    /// Number of tests that were skipped (pytest exit code 5)
+    pub skipped: usize,
+    /// Overall exit code (0 if all passed/skipped, otherwise first failure code)
+    pub exit_code: i32,
+}
+
+/// Result from executing a single test in isolation.
+/// 
+/// Used in work-stealing mode where each test is executed independently in its
+/// own pytest process. This fine-grained execution model enables dynamic load
+/// balancing through rayon's work-stealing scheduler and provides real-time
+/// progress reporting as individual tests complete.
+#[derive(Debug)]
+struct TestExecutionResult {
+    /// The specific test node that was executed (e.g., "test_file.py::test_func")
+    pub test_id: String,
+    /// Exit code from the pytest process for this single test
+    pub exit_code: i32,
+    /// Stdout from this test's execution
+    pub stdout: String,
+    /// Stderr from this test's execution
+    pub stderr: String,
+}
+
+/// Execute tests using work-stealing parallelism with rayon
+pub fn execute_work_stealing(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    _worker_count: usize,
+    rootpath: &Path,
+) -> WorkStealingResult {
+    let config = TestExecutionConfig {
+        program: program.to_string(),
+        initial_args: initial_args.to_vec(),
+        rootpath: rootpath.to_path_buf(),
+    };
+
+    // Execute tests in parallel using work-stealing
+    let results: Vec<TestExecutionResult> = test_nodes
+        .par_iter()
+        .map(|test| execute_single_test(test, &config))
+        .collect();
+
+    // Aggregate results
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut skipped = 0;
+    let mut overall_exit_code = 0;
+
+    for result in &results {
+        match result.exit_code {
+            0 => passed += 1,
+            5 => skipped += 1,  // pytest exit code 5 means no tests collected
+            _ => {
+                failed += 1;
+                if overall_exit_code == 0 {
+                    overall_exit_code = result.exit_code;
+                }
+            }
+        }
+
+        // Print output as we process results
+        if !result.stdout.is_empty() {
+            print!("{}", result.stdout);
+        }
+        if !result.stderr.is_empty() {
+            eprintln!("[{}] {}", result.test_id, result.stderr.trim());
+        }
+    }
+
+    WorkStealingResult {
+        total_tests: test_nodes.len(),
+        passed,
+        failed,
+        skipped,
+        exit_code: overall_exit_code,
+    }
+}
+
+/// Configuration for test execution
+struct TestExecutionConfig {
+    program: String,
+    initial_args: Vec<String>,
+    rootpath: PathBuf,
+}
+
+/// Execute a single test node
+fn execute_single_test(test_node: &str, config: &TestExecutionConfig) -> TestExecutionResult {
+    let mut cmd = Command::new(&config.program);
+    
+    // Add initial args (e.g., ["-m", "pytest"])
+    for arg in &config.initial_args {
+        cmd.arg(arg);
+    }
+    
+    // Add rootdir to prevent pytest from searching upward
+    cmd.arg("--rootdir");
+    cmd.arg(&config.rootpath);
+    
+    // Add the test node
+    cmd.arg(test_node);
+    
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(&config.rootpath);
+    
+    match cmd.output() {
+        Ok(output) => TestExecutionResult {
+            test_id: test_node.to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        },
+        Err(e) => TestExecutionResult {
+            test_id: test_node.to_string(),
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: format!("Failed to execute test: {}", e),
+        },
     }
 }

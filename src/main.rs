@@ -3,8 +3,8 @@
 use clap::Parser;
 use rtest_core::{
     cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, subproject, DistributionMode, PytestRunner,
-    WorkerPool,
+    display_collection_results, execute_tests, execute_work_stealing, subproject, 
+    DistributionMode, PytestRunner, WorkerPool,
 };
 use std::env;
 
@@ -112,6 +112,26 @@ fn execute_tests_parallel(
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
+    // Use work-stealing for worksteal mode
+    if dist_mode == "worksteal" {
+        let result = execute_work_stealing(
+            program,
+            initial_args,
+            test_nodes,
+            worker_count,
+            rootpath,
+        );
+        
+        println!("\n==== Test Summary ====");
+        println!("Total tests: {}", result.total_tests);
+        println!("Passed: {}", result.passed);
+        println!("Failed: {}", result.failed);
+        println!("Skipped: {}", result.skipped);
+        
+        std::process::exit(result.exit_code);
+    }
+
+    // Use traditional distribution for other modes
     let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
 
     let distribution_mode = match dist_mode.parse::<DistributionMode>() {
