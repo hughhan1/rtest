@@ -1,6 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
+use std::time::Instant;
+use rayon::prelude::*;
 
 #[derive(Debug)]
 pub struct WorkerResult {
@@ -117,6 +119,131 @@ impl WorkerPool {
     #[allow(dead_code)]
     pub fn worker_count(&self) -> usize {
         self.workers.len()
+    }
+}
+
+/// Result of executing a single test
+#[derive(Debug)]
+pub struct TestExecutionResult {
+    pub test: String,
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u64,
+}
+
+/// Execute tests using work-stealing parallelism
+pub fn execute_work_stealing(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    _worker_count: usize,
+    rootpath: &Path,
+) -> WorkStealingResult {
+    // Note: rayon's global thread pool may already be initialized during collection.
+    // If we need a specific number of threads, we should set RAYON_NUM_THREADS
+    // environment variable before any rayon usage.
+
+    // Execute tests in parallel
+    let results: Vec<TestExecutionResult> = test_nodes
+        .par_iter()
+        .map(|test| {
+            let start = Instant::now();
+            
+            let mut cmd = Command::new(program);
+            cmd.args(initial_args)
+                .arg("--rootdir")
+                .arg(rootpath)
+                .arg(test)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .current_dir(rootpath);
+
+            let (exit_code, stdout, stderr) = match cmd.output() {
+                Ok(output) => (
+                    output.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&output.stdout).into_owned(),
+                    String::from_utf8_lossy(&output.stderr).into_owned(),
+                ),
+                Err(e) => (
+                    -1,
+                    String::new(),
+                    format!("Failed to execute command: {}", e),
+                ),
+            };
+
+            TestExecutionResult {
+                test: test.clone(),
+                exit_code,
+                stdout,
+                stderr,
+                duration_ms: start.elapsed().as_millis() as u64,
+            }
+        })
+        .collect();
+
+    WorkStealingResult { results }
+}
+
+/// Result of work-stealing execution
+#[derive(Debug)]
+pub struct WorkStealingResult {
+    pub results: Vec<TestExecutionResult>,
+}
+
+impl WorkStealingResult {
+    /// Get overall exit code (0 if all passed, non-zero if any failed)
+    pub fn exit_code(&self) -> i32 {
+        self.results
+            .iter()
+            .map(|r| r.exit_code)
+            .find(|&code| code != 0)
+            .unwrap_or(0)
+    }
+
+    /// Get list of failed tests
+    pub fn failed_tests(&self) -> Vec<&str> {
+        self.results
+            .iter()
+            .filter(|r| r.exit_code != 0)
+            .map(|r| r.test.as_str())
+            .collect()
+    }
+
+    /// Get count of passed tests
+    pub fn passed_count(&self) -> usize {
+        self.results.iter().filter(|r| r.exit_code == 0).count()
+    }
+
+    /// Print summary of test execution
+    pub fn print_summary(&self) {
+        let failed_tests = self.failed_tests();
+        
+        // Show output for failed tests
+        for result in &self.results {
+            if result.exit_code != 0 {
+                println!("\n=== Failed: {} ({}ms) ===", result.test, result.duration_ms);
+                if !result.stdout.is_empty() {
+                    print!("{}", result.stdout);
+                }
+                if !result.stderr.is_empty() {
+                    eprint!("{}", result.stderr);
+                }
+            }
+        }
+
+        // Print summary
+        println!("\n=== Test Execution Summary ===");
+        println!("Total: {} tests", self.results.len());
+        println!("Passed: {} tests", self.passed_count());
+        println!("Failed: {} tests", failed_tests.len());
+
+        if !failed_tests.is_empty() {
+            println!("\n=== Failed Tests ===");
+            for test in &failed_tests {
+                println!("  {}", test);
+            }
+        }
     }
 }
 
