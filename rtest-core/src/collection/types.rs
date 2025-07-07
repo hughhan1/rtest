@@ -33,3 +33,63 @@ pub trait Collector: std::fmt::Debug {
         false
     }
 }
+
+/// Directory collector
+#[derive(Debug, Clone)]
+pub struct Directory {
+    pub path: PathBuf,
+    pub nodeid: String,
+}
+
+/// Module collector
+#[derive(Debug, Clone)]
+pub struct Module {
+    pub path: PathBuf,
+    pub nodeid: String,
+}
+
+/// Function collector
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub nodeid: String,
+    pub location: Location,
+}
+
+/// Concrete collector types as an enum
+#[derive(Debug, Clone)]
+pub enum CollectorNode {
+    Directory(Directory),
+    Module(Module),
+    Function(Function),
+}
+
+impl CollectorNode {
+    pub fn nodeid(&self) -> &str {
+        match self {
+            CollectorNode::Directory(d) => &d.nodeid,
+            CollectorNode::Module(m) => &m.nodeid,
+            CollectorNode::Function(f) => &f.nodeid,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            CollectorNode::Directory(d) => &d.path,
+            CollectorNode::Module(m) => &m.path,
+            CollectorNode::Function(f) => &f.location.path,
+        }
+    }
+
+    pub fn is_item(&self) -> bool {
+        matches!(self, CollectorNode::Function(_))
+    }
+
+    pub fn collect(&self, session: &crate::collection::nodes::Session) -> CollectionResult<Vec<CollectorNode>> {
+        match self {
+            CollectorNode::Directory(d) => d.collect(session),
+            CollectorNode::Module(m) => m.collect(session),
+            CollectorNode::Function(_) => Ok(vec![]), // Functions are leaf nodes
+        }
+    }
+}

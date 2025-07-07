@@ -1,6 +1,7 @@
 //! Collection error types.
 
 use std::fmt;
+use std::sync::Arc;
 
 /// Result type for collection operations
 pub type CollectionResult<T> = Result<T, CollectionError>;
@@ -9,7 +10,7 @@ pub type CollectionResult<T> = Result<T, CollectionError>;
 #[derive(Debug)]
 #[allow(dead_code, clippy::enum_variant_names)]
 pub enum CollectionError {
-    IoError(std::io::Error),
+    IoError(Arc<std::io::Error>),
     ParseError(String),
     ImportError(String),
     SkipError(String),
@@ -30,7 +31,7 @@ impl std::error::Error for CollectionError {}
 
 impl From<std::io::Error> for CollectionError {
     fn from(err: std::io::Error) -> Self {
-        CollectionError::IoError(err)
+        CollectionError::IoError(Arc::new(err))
     }
 }
 

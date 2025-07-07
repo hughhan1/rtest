@@ -2,9 +2,8 @@
 
 use crate::collection::error::{CollectionError, CollectionOutcome};
 use crate::collection::nodes::{collect_one_node, Session};
-use crate::collection::types::Collector;
+use crate::collection::types::CollectorNode;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 /// Holds errors encountered during collection
 #[derive(Debug)]
@@ -17,41 +16,45 @@ pub fn collect_tests_rust(
     rootpath: PathBuf,
     args: &[String],
 ) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
-    let session = Rc::new(Session::new(rootpath));
+    let session = Session::new(rootpath);
     let mut collection_errors = CollectionErrors { errors: Vec::new() };
 
-    match session.perform_collect(args) {
-        Ok(collectors) => {
-            let mut test_nodes = Vec::new();
+    let (collectors, errors) = session.perform_collect(args);
 
-            for collector in collectors {
-                collect_items_recursive(
-                    collector.as_ref(),
-                    &mut test_nodes,
-                    &mut collection_errors,
-                );
-            }
-
-            Ok((test_nodes, collection_errors))
-        }
-        Err(e) => Err(e),
+    // Add any path-level errors to collection errors
+    for (path, error) in errors {
+        collection_errors.errors.push((path.display().to_string(), error));
     }
+
+    let mut test_nodes = Vec::new();
+
+    for collector in collectors {
+        collect_items_recursive(
+            &collector,
+            &session,
+            &mut test_nodes,
+            &mut collection_errors,
+        );
+    }
+
+    Ok((test_nodes, collection_errors))
 }
 
 /// Recursively collect all test items
 fn collect_items_recursive(
-    collector: &dyn Collector,
+    collector: &CollectorNode,
+    session: &Session,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
 ) {
     if collector.is_item() {
         test_nodes.push(collector.nodeid().into());
     } else {
-        let report = collect_one_node(collector);
+        let report = collect_one_node(collector, session);
         match report.outcome {
             CollectionOutcome::Passed => {
                 for child in report.result {
-                    collect_items_recursive(child.as_ref(), test_nodes, collection_errors);
+                    collect_items_recursive(&child, session, test_nodes, collection_errors);
                 }
             }
             CollectionOutcome::Failed => {

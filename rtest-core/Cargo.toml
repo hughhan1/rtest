@@ -12,6 +12,7 @@ ruff_python_ast = { path = "../ruff/crates/ruff_python_ast" }
 num_cpus = "1.0"
 log = "0.4"
 toml = "0.8"
+rayon = "1.8"
 
 [dev-dependencies]
 tempfile = "3.0"
