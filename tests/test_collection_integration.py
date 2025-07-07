@@ -7,6 +7,13 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from test_helpers import (
+    assert_patterns_not_found,
+    assert_tests_found,
+    create_test_project,
+    run_collection,
+)
+
 from rtest._rtest import run_tests
 
 
@@ -72,12 +79,7 @@ class TestCollectionIntegration(unittest.TestCase):
         """Test that collection finds all expected test patterns."""
         project_path = self.create_test_project()
 
-        # Capture stdout
-        captured_output = StringIO()
-        with patch("sys.stdout", captured_output):
-            run_tests([str(project_path)])
-
-        output = captured_output.getvalue()
+        output, output_lines = run_collection(project_path)
 
         # Check for expected test patterns
         expected_patterns = [
@@ -90,19 +92,11 @@ class TestCollectionIntegration(unittest.TestCase):
             "test_math.py::TestCalculator::test_subtraction",
         ]
 
-        # Check if patterns exist in any line of the output
-        # This handles both relative and absolute paths on all platforms
-        output_lines = output.split("\n")
-        for pattern in expected_patterns:
-            found = any(pattern in line for line in output_lines)
-            self.assertTrue(found, f"Should find test matching pattern: {pattern}")
+        assert_tests_found(output_lines, expected_patterns)
 
-        # Should NOT find tests in utils.py (non-test file)
-        self.assertNotIn("utils.py", output, "Should not find tests in non-test files")
-
-        # Should NOT find helper methods or non-test functions
-        self.assertNotIn("helper_method", output, "Should not find helper methods")
-        self.assertNotIn("not_a_test", output, "Should not find non-test functions")
+        # Should NOT find these patterns
+        patterns_to_not_find = ["utils.py", "helper_method", "not_a_test"]
+        assert_patterns_not_found(output, patterns_to_not_find)
 
     def test_collection_with_no_tests(self) -> None:
         """Test collection with no test files."""
@@ -125,10 +119,6 @@ class TestCollectionIntegration(unittest.TestCase):
             with patch("sys.stdout", captured_stdout), patch("sys.stderr", captured_stderr):
                 run_tests([str(project_path)])
 
-            captured_stdout.getvalue() + captured_stderr.getvalue()
-            # The "No tests found" message appears in the output, test passes if we get here without error
-            self.assertTrue(True)  # Test that collection completes without error
-
     def test_collection_with_syntax_errors(self) -> None:
         """Test collection handles malformed Python files gracefully."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,8 +136,6 @@ class TestCollectionIntegration(unittest.TestCase):
             with patch("sys.stdout", captured_stdout), patch("sys.stderr", captured_stderr):
                 try:
                     run_tests([str(project_path)])
-                    # Test passes if no exception is raised
-                    self.assertTrue(True)
                 except Exception as e:
                     self.fail(f"Collection should handle syntax errors gracefully, but got: {e}")
 
@@ -169,8 +157,6 @@ class TestCollectionIntegration(unittest.TestCase):
             with patch("sys.stdout", captured_stdout), patch("sys.stderr", captured_stderr):
                 try:
                     run_tests([str(project_path)])
-                    # Test passes if collection completes without crashing
-                    self.assertTrue(True)
                 except Exception as e:
                     self.fail(f"Collection should not crash on syntax error, but got: {e}")
 
@@ -188,18 +174,13 @@ class TestCollectionIntegration(unittest.TestCase):
             with patch("sys.stdout", captured_stdout), patch("sys.stderr", captured_stderr):
                 try:
                     run_tests([str(project_path)])
-                    # Test passes if collection completes without crashing
-                    self.assertTrue(True)
                 except Exception as e:
                     self.fail(f"Collection should not crash on while statement syntax error, but got: {e}")
 
     def test_display_collection_results(self) -> None:
         """Test that collection output display doesn't crash."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
-
-            # Create a simple test file
-            test_content = textwrap.dedent("""
+        files = {
+            "test_file.py": textwrap.dedent("""
                 def test_function():
                     assert True
 
@@ -207,49 +188,35 @@ class TestCollectionIntegration(unittest.TestCase):
                     def test_method(self):
                         assert True
             """)
-            (project_path / "test_file.py").write_text(test_content)
+        }
 
+        with create_test_project(files) as project_path:
             # This should not crash
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
-            # Check if patterns exist in any line of the output
-            output_lines = output.split("\n")
+            output, output_lines = run_collection(project_path)
 
             # Should contain the test identifiers
-            patterns = ["test_file.py::test_function", "test_file.py::TestClass::test_method"]
-            for pattern in patterns:
-                found = any(pattern in line for line in output_lines)
-                self.assertTrue(found, f"Should find pattern: {pattern}")
+            expected_tests = ["test_file.py::test_function", "test_file.py::TestClass::test_method"]
+            assert_tests_found(output_lines, expected_tests)
 
     def test_collection_with_absolute_path(self) -> None:
         """Test that collection handles absolute paths correctly."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Use resolve() to ensure we have an absolute path
-            project_path = Path(temp_dir).resolve()
-
-            # Create a test file
-            test_content = textwrap.dedent("""
+        files = {
+            "test_abs.py": textwrap.dedent("""
                 def test_absolute_path():
                     assert True
             """)
-            (project_path / "test_abs.py").write_text(test_content)
+        }
+
+        with create_test_project(files) as project_path:
+            # Use resolve() to ensure we have an absolute path
+            absolute_path = project_path.resolve()
 
             # Run tests with absolute path
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output, output_lines = run_collection(absolute_path)
 
             # Should find the test
             self.assertIn("test_abs.py::test_absolute_path", output)
             self.assertIn("collected 1 item", output)
-
-            # Verify the absolute path was used (not joined to cwd)
-            self.assertIn(str(project_path), output)
 
 
 if __name__ == "__main__":

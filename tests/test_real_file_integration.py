@@ -3,11 +3,15 @@
 import tempfile
 import textwrap
 import unittest
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
-from rtest._rtest import run_tests
+from test_helpers import (
+    assert_patterns_not_found,
+    assert_tests_found,
+    create_test_project,
+    run_collection,
+)
+from test_utils import run_rtest
 
 
 class TestRealFileIntegration(unittest.TestCase):
@@ -15,11 +19,9 @@ class TestRealFileIntegration(unittest.TestCase):
 
     def test_collection_on_comprehensive_pytest_file(self) -> None:
         """Test collection on a realistic pytest file with comprehensive test patterns."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
-
-            # Create a realistic pytest file with comprehensive test patterns
-            real_pytest_content = textwrap.dedent("""
+        # Create a realistic pytest file with comprehensive test patterns
+        files = {
+            "test_comprehensive.py": textwrap.dedent("""
                 def test_simple_assertion():
                     assert 1 + 1 == 2
 
@@ -62,40 +64,23 @@ class TestRealFileIntegration(unittest.TestCase):
                 def process_data(data):
                     return sum(data)
             """)
+        }
 
-            test_file_path = project_path / "test_comprehensive.py"
-            test_file_path.write_text(real_pytest_content)
+        with create_test_project(files) as project_path:
+            output, output_lines = run_collection(project_path)
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
-            output_lines = output.split("\n")
-
-            # Expected test functions
-            expected_functions = [
+            # Expected test functions and class methods
+            expected_tests = [
                 "test_comprehensive.py::test_simple_assertion",
                 "test_comprehensive.py::test_string_operations",
                 "test_comprehensive.py::test_list_operations",
-            ]
-
-            # Expected test class methods
-            expected_class_methods = [
                 "test_comprehensive.py::TestMathOperations::test_addition",
                 "test_comprehensive.py::TestMathOperations::test_subtraction",
                 "test_comprehensive.py::TestStringMethods::test_capitalize",
                 "test_comprehensive.py::TestStringMethods::test_split",
             ]
 
-            # Verify all expected tests are found
-            for expected in expected_functions:
-                found = any(expected in line for line in output_lines)
-                self.assertTrue(found, f"Should find test function: {expected}")
-
-            for expected in expected_class_methods:
-                found = any(expected in line for line in output_lines)
-                self.assertTrue(found, f"Should find test method: {expected}")
+            assert_tests_found(output_lines, expected_tests)
 
             # Verify we don't collect non-test items
             should_not_collect = [
@@ -108,8 +93,7 @@ class TestRealFileIntegration(unittest.TestCase):
                 "process_data",
             ]
 
-            for item in should_not_collect:
-                self.assertNotIn(item, output, f"Should not collect non-test item: {item}")
+            assert_patterns_not_found(output, should_not_collect)
 
     def test_collection_with_various_test_patterns(self) -> None:
         """Test collection recognizes various pytest naming patterns."""
@@ -168,11 +152,7 @@ class TestRealFileIntegration(unittest.TestCase):
 
             (project_path / "test_patterns.py").write_text(patterns_content)
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             # Should collect all properly named test functions
@@ -205,43 +185,31 @@ class TestRealFileIntegration(unittest.TestCase):
 
     def test_collection_on_multiple_test_files(self) -> None:
         """Test collection across multiple test files."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
+        # Create multiple test files
+        files = {
+            "test_file1.py": textwrap.dedent("""
+                def test_file1_function():
+                    pass
 
-            # Create multiple test files
-            files_and_content = {
-                "test_file1.py": textwrap.dedent("""
-                    def test_file1_function():
+                class TestFile1Class:
+                    def test_method(self):
                         pass
+            """),
+            "test_file2.py": textwrap.dedent("""
+                def test_file2_function1():
+                    pass
 
-                    class TestFile1Class:
-                        def test_method(self):
-                            pass
-                """),
-                "test_file2.py": textwrap.dedent("""
-                    def test_file2_function1():
-                        pass
+                def test_file2_function2():
+                    pass
+            """),
+            "subdir/test_nested.py": textwrap.dedent("""
+                def test_nested_function():
+                    pass
+            """),
+        }
 
-                    def test_file2_function2():
-                        pass
-                """),
-                "subdir/test_nested.py": textwrap.dedent("""
-                    def test_nested_function():
-                        pass
-                """),
-            }
-
-            for file_path, content in files_and_content.items():
-                full_path = project_path / file_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content)
-
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
-            output_lines = output.split("\n")
+        with create_test_project(files) as project_path:
+            output, output_lines = run_collection(project_path)
 
             # Should find tests from all files
             expected_tests = [
@@ -249,16 +217,10 @@ class TestRealFileIntegration(unittest.TestCase):
                 "test_file1.py::TestFile1Class::test_method",
                 "test_file2.py::test_file2_function1",
                 "test_file2.py::test_file2_function2",
+                "test_nested.py::test_nested_function",
             ]
 
-            for test in expected_tests:
-                found = any(test in line for line in output_lines)
-                self.assertTrue(found, f"Should find test: {test}")
-
-            # For nested paths, check both forward and backslash versions
-            nested_pattern = "test_nested.py::test_nested_function"
-            found = any(nested_pattern in line for line in output_lines)
-            self.assertTrue(found, f"Should find test: {nested_pattern}")
+            assert_tests_found(output_lines, expected_tests)
 
 
 if __name__ == "__main__":

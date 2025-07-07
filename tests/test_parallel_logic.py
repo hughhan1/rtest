@@ -3,11 +3,16 @@
 import tempfile
 import textwrap
 import unittest
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
-from rtest._rtest import run_tests
+from test_helpers import (
+    assert_tests_found,
+    count_collected_tests,
+    create_test_project,
+    extract_test_lines,
+    run_collection,
+)
+from test_utils import run_rtest
 
 
 class TestParallelLogic(unittest.TestCase):
@@ -15,42 +20,32 @@ class TestParallelLogic(unittest.TestCase):
 
     def test_end_to_end_test_distribution(self) -> None:
         """Test the complete flow from test collection to distribution."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
+        # Create multiple test files to simulate test distribution
+        test_files = {
+            "test_file1.py": textwrap.dedent("""
+                def test_function1():
+                    assert True
 
-            # Create multiple test files to simulate test distribution
-            test_files = {
-                "test_file1.py": textwrap.dedent("""
-                    def test_function1():
+                def test_function2():
+                    assert True
+            """),
+            "test_file2.py": textwrap.dedent("""
+                class TestClass:
+                    def test_method1(self):
                         assert True
 
-                    def test_function2():
+                    def test_method2(self):
                         assert True
-                """),
-                "test_file2.py": textwrap.dedent("""
-                    class TestClass:
-                        def test_method1(self):
-                            assert True
+            """),
+            "test_file3.py": textwrap.dedent("""
+                def test_function3():
+                    assert True
+            """),
+        }
 
-                        def test_method2(self):
-                            assert True
-                """),
-                "test_file3.py": textwrap.dedent("""
-                    def test_function3():
-                        assert True
-                """),
-            }
-
-            for filename, content in test_files.items():
-                (project_path / filename).write_text(content)
-
+        with create_test_project(test_files) as project_path:
             # Test with simulated parallel execution (single-threaded for testing)
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
-            output_lines = output.split("\n")
+            output, output_lines = run_collection(project_path)
 
             # Should find all tests from all files
             expected_tests = [
@@ -61,82 +56,66 @@ class TestParallelLogic(unittest.TestCase):
                 "test_file3.py::test_function3",
             ]
 
-            for test in expected_tests:
-                found = any(test in line for line in output_lines)
-                self.assertTrue(found, f"Should find test: {test}")
+            assert_tests_found(output_lines, expected_tests)
 
     def test_collection_with_various_file_sizes(self) -> None:
         """Test collection handles various file sizes for load balancing."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
+        # Create files with different numbers of tests to simulate load balancing
+        test_files = {
+            "test_small.py": textwrap.dedent("""
+                def test_single():
+                    assert True
+            """),
+            "test_medium.py": textwrap.dedent("""
+                def test_one():
+                    assert True
 
-            # Create files with different numbers of tests to simulate load balancing
-            test_files = {
-                "test_small.py": textwrap.dedent("""
-                    def test_single():
-                        assert True
-                """),
-                "test_medium.py": textwrap.dedent("""
-                    def test_one():
-                        assert True
+                def test_two():
+                    assert True
 
-                    def test_two():
-                        assert True
-
-                    def test_three():
-                        assert True
-                """),
-                "test_large.py": textwrap.dedent("""
-                    class TestLargeClass:
-                        def test_method1(self):
-                            assert True
-
-                        def test_method2(self):
-                            assert True
-
-                        def test_method3(self):
-                            assert True
-
-                        def test_method4(self):
-                            assert True
-
-                        def test_method5(self):
-                            assert True
-
-                    def test_additional1():
+                def test_three():
+                    assert True
+            """),
+            "test_large.py": textwrap.dedent("""
+                class TestLargeClass:
+                    def test_method1(self):
                         assert True
 
-                    def test_additional2():
+                    def test_method2(self):
                         assert True
-                """),
-            }
 
-            for filename, content in test_files.items():
-                (project_path / filename).write_text(content)
+                    def test_method3(self):
+                        assert True
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
+                    def test_method4(self):
+                        assert True
 
-            output = captured_output.getvalue()
+                    def test_method5(self):
+                        assert True
+
+                def test_additional1():
+                    assert True
+
+                def test_additional2():
+                    assert True
+            """),
+        }
+
+        with create_test_project(test_files) as project_path:
+            output, output_lines = run_collection(project_path)
 
             # Should find all tests regardless of file size differences
             # This tests the scheduler's ability to handle varied test distributions
             expected_count = 1 + 3 + 7  # small(1) + medium(3) + large(7) = 11 tests
-            test_lines = [line for line in output.split("\n") if "::" in line and "test_" in line]
+            test_count = count_collected_tests(output_lines)
 
             # Allow some flexibility in exact count due to collection differences
-            self.assertGreaterEqual(
-                len(test_lines), expected_count - 2, f"Should find approximately {expected_count} tests"
-            )
+            self.assertGreaterEqual(test_count, expected_count - 2, f"Should find approximately {expected_count} tests")
 
     def test_collection_consistency(self) -> None:
         """Test that collection results are consistent across multiple runs."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
-
-            # Create a consistent set of test files
-            test_content = textwrap.dedent("""
+        files = {
+            "test_consistency.py": textwrap.dedent("""
                 def test_function1():
                     assert True
 
@@ -150,19 +129,16 @@ class TestParallelLogic(unittest.TestCase):
                     def test_method2(self):
                         assert True
             """)
-            (project_path / "test_consistency.py").write_text(test_content)
+        }
 
+        with create_test_project(files) as project_path:
             # Run collection multiple times
             outputs = []
             for _ in range(3):
-                captured_output = StringIO()
-                with patch("sys.stdout", captured_output):
-                    run_tests([str(project_path)])
+                output, output_lines = run_collection(project_path)
 
                 # Extract just the test collection lines
-                test_lines = [
-                    line.strip() for line in captured_output.getvalue().split("\n") if "::" in line and "test_" in line
-                ]
+                test_lines = extract_test_lines(output_lines)
                 outputs.append(sorted(test_lines))
 
             # All runs should produce the same results
@@ -199,11 +175,7 @@ class TestParallelLogic(unittest.TestCase):
                 full_path.parent.mkdir(parents=True, exist_ok=True)
                 full_path.write_text(content)
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output = run_rtest(["--collect-only"], cwd=str(project_path))
 
             # Should find tests from all nested directories
             expected_patterns = [
@@ -264,11 +236,7 @@ class TestParallelLogic(unittest.TestCase):
                 else:
                     full_path.write_bytes(content.encode() if isinstance(content, str) else b"binary")
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             # Should only find tests from actual test files
@@ -314,26 +282,16 @@ class TestParallelLogic(unittest.TestCase):
                 (project_path / filename).write_text(content)
 
             # Should not crash despite problematic files
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                try:
-                    run_tests([str(project_path)])
-                    # Should handle gracefully
-                    self.assertTrue(True)
-                except Exception as e:
-                    self.fail(f"Collection should handle errors gracefully, but got: {e}")
+            try:
+                run_rtest(["--collect-only"], cwd=str(project_path))
+            except Exception as e:
+                self.fail(f"Collection should handle errors gracefully, but got: {e}")
 
     def test_empty_project_handling(self) -> None:
         """Test handling of completely empty projects."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
-
+        with create_test_project({}) as project_path:
             # Create empty project
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output, output_lines = run_collection(project_path)
             self.assertIn("No tests found", output, "Should report no tests found for empty project")
 
     def test_single_test_file_collection(self) -> None:
@@ -347,11 +305,7 @@ class TestParallelLogic(unittest.TestCase):
             """)
             (project_path / "test_single.py").write_text(single_test_content)
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             found = any("test_single.py::test_single" in line for line in output_lines)
@@ -385,11 +339,7 @@ class TestParallelLogic(unittest.TestCase):
 
                 (project_path / f"test_module_{module_num}.py").write_text(test_content)
 
-            captured_output = StringIO()
-            with patch("sys.stdout", captured_output):
-                run_tests([str(project_path)])
-
-            output = captured_output.getvalue()
+            output = run_rtest(["--collect-only"], cwd=str(project_path))
 
             # Should find all tests (5 modules * (3 functions + 2 class methods) = 25 tests)
             test_lines = [line for line in output.split("\n") if "::test_" in line]
