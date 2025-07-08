@@ -143,11 +143,6 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
     
-    - name: Install hyperfine
-      run: |
-        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
-        sudo dpkg -i hyperfine_1.18.0_amd64.deb
-    
     - name: Get repository list
       id: set-matrix
       run: |
