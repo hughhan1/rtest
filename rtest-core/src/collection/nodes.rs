@@ -35,9 +35,11 @@ impl Session {
     ) -> CollectionResult<Vec<Box<dyn Collector>>> {
         let paths = if args.is_empty() {
             let pytest_config = crate::config::read_pytest_config(&self.rootpath);
-            
+
             if !pytest_config.testpaths.is_empty() {
-                pytest_config.testpaths.iter()
+                pytest_config
+                    .testpaths
+                    .iter()
                     .map(|p| self.rootpath.join(p))
                     .collect()
             } else if self.config.testpaths.is_empty() {
@@ -190,7 +192,7 @@ impl Collector for Directory {
 
         // Process entries, filtering out unnecessary Vec allocations
         let mut items = Vec::new();
-        
+
         for entry_result in dir_entries {
             let entry = match entry_result {
                 Ok(entry) => entry,
@@ -199,7 +201,7 @@ impl Collector for Directory {
             };
 
             let path = entry.path();
-            
+
             if self.session().should_ignore_path(&path)? {
                 continue;
             }
@@ -212,7 +214,7 @@ impl Collector for Directory {
                 items.push(Box::new(module) as Box<dyn Collector>);
             }
         }
-        
+
         Ok(items)
     }
 

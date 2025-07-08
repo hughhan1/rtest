@@ -3,8 +3,8 @@
 use clap::Parser;
 use pyo3::prelude::*;
 use rtest_core::{
-    cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, DistributionMode, WorkerPool,
+    cli::Args, collect_tests_rust, determine_worker_count, display_collection_results,
+    execute_tests, execute_tests_parallel,
 };
 use std::env;
 
@@ -127,7 +127,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             std::process::exit(1);
         }
     };
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &[]) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -161,75 +161,17 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             Some(&rootpath),
         );
     } else {
-        execute_tests_parallel(
+        let exit_code = execute_tests_parallel(
             &runner.program,
             &runner.initial_args,
             test_nodes,
             worker_count,
             &args.dist,
             &rootpath,
+            false, // Python bindings don't use subprojects
         );
+        std::process::exit(exit_code);
     }
-}
-
-fn execute_tests_parallel(
-    program: &str,
-    initial_args: &[String],
-    test_nodes: Vec<String>,
-    worker_count: usize,
-    dist_mode: &str,
-    rootpath: &std::path::Path,
-) {
-    println!("Running tests with {worker_count} workers using {dist_mode} distribution");
-
-    let distribution_mode = match dist_mode.parse::<DistributionMode>() {
-        Ok(mode) => mode,
-        Err(e) => {
-            eprintln!("Invalid distribution mode '{dist_mode}': {e}");
-            std::process::exit(1);
-        }
-    };
-    let scheduler = create_scheduler(distribution_mode);
-    let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
-
-    if test_batches.is_empty() {
-        println!("No test batches to execute.");
-        std::process::exit(0);
-    }
-
-    let mut worker_pool = WorkerPool::new();
-
-    for (worker_id, tests) in test_batches.into_iter().enumerate() {
-        if !tests.is_empty() {
-            worker_pool.spawn_worker(
-                worker_id,
-                program.to_string(),
-                initial_args.to_vec(),
-                tests,
-                vec![],
-                Some(rootpath.to_path_buf()),
-            );
-        }
-    }
-
-    let results = worker_pool.wait_for_all();
-
-    let mut overall_exit_code = 0;
-    for result in results {
-        println!("=== Worker {} ===", result.worker_id);
-        if !result.stdout.is_empty() {
-            print!("{}", result.stdout);
-        }
-        if !result.stderr.is_empty() {
-            eprint!("{}", result.stderr);
-        }
-
-        if result.exit_code != 0 {
-            overall_exit_code = result.exit_code;
-        }
-    }
-
-    std::process::exit(overall_exit_code);
 }
 
 #[pymodule]
