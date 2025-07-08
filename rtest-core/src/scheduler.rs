@@ -10,8 +10,12 @@ pub enum SchedulerError {
 impl fmt::Display for SchedulerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SchedulerError::InvalidTestPath(path) => write!(f, "Invalid test path format: {}", path),
-            SchedulerError::InvalidWorkerCount(count) => write!(f, "Invalid worker count: {}", count),
+            SchedulerError::InvalidTestPath(path) => {
+                write!(f, "Invalid test path format: {}", path)
+            }
+            SchedulerError::InvalidWorkerCount(count) => {
+                write!(f, "Invalid worker count: {}", count)
+            }
         }
     }
 }
@@ -48,7 +52,7 @@ impl fmt::Display for ParseDistributionModeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseDistributionModeError::UnknownMode(mode) => write!(
-                f, 
+                f,
                 "Unsupported distribution mode: '{}'. Supported modes: load, loadscope, loadfile, worksteal, no", 
                 mode
             ),
@@ -78,39 +82,42 @@ pub trait Scheduler {
 }
 
 // Common utility functions to eliminate code duplication
-fn validate_and_handle_edge_cases(tests: &[String], num_workers: usize) -> Option<Vec<Vec<String>>> {
+fn validate_and_handle_edge_cases(
+    tests: &[String],
+    num_workers: usize,
+) -> Option<Vec<Vec<String>>> {
     if num_workers == 0 || tests.is_empty() {
         return Some(vec![]);
     }
-    
+
     if num_workers == 1 {
         return Some(vec![tests.to_vec()]);
     }
-    
+
     None // Continue with normal processing
 }
 
 fn distribute_groups_to_workers<T>(groups: Vec<Vec<T>>, num_workers: usize) -> Vec<Vec<T>> {
     let mut workers: Vec<Vec<T>> = (0..num_workers).map(|_| Vec::new()).collect();
-    
+
     for (i, group) in groups.into_iter().enumerate() {
         workers[i % num_workers].extend(group);
     }
-    
+
     workers.into_iter().filter(|w| !w.is_empty()).collect()
 }
 
 fn group_tests_by_key<F>(tests: Vec<String>, key_extractor: F) -> Vec<Vec<String>>
-where 
+where
     F: Fn(&str) -> String,
 {
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    
+
     for test in tests {
         let key = key_extractor(&test);
         groups.entry(key).or_default().push(test);
     }
-    
+
     groups.into_values().collect()
 }
 
@@ -158,8 +165,7 @@ impl Scheduler for LoadFileScheduler {
     }
 }
 
-
-/// WorkStealScheduler implements a round-robin distribution that's optimized for 
+/// WorkStealScheduler implements a round-robin distribution that's optimized for
 /// work stealing scenarios. While true work stealing requires runtime coordination
 /// between workers, this scheduler provides better load balancing by:
 /// 1. Using round-robin assignment (avoiding clustering of slow tests)
@@ -174,7 +180,7 @@ impl Scheduler for WorkStealScheduler {
         }
 
         let mut workers: Vec<Vec<String>> = (0..num_workers).map(|_| Vec::new()).collect();
-        
+
         // Round-robin distribution - this gives better work-stealing characteristics
         // because it interleaves tests across workers, making it more likely that
         // when one worker finishes early, there are still tests available for stealing
@@ -213,7 +219,11 @@ fn extract_scope(test_path: &str) -> String {
 fn extract_file(test_path: &str) -> String {
     // Extract file path from test path
     // Format: path/to/file.py::TestClass::test_method or path/to/file.py::test_function
-    test_path.split("::").next().unwrap_or(test_path).to_string()
+    test_path
+        .split("::")
+        .next()
+        .unwrap_or(test_path)
+        .to_string()
 }
 
 pub fn create_scheduler(mode: DistributionMode) -> Box<dyn Scheduler> {
@@ -274,11 +284,7 @@ mod tests {
     #[test]
     fn test_load_scheduler_single_worker() {
         let scheduler = LoadScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-        ];
+        let tests = vec!["test1".into(), "test2".into(), "test3".into()];
         let result = scheduler.distribute_tests(tests.clone(), 1);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], tests);
@@ -397,26 +403,30 @@ mod tests {
 
         // Should have 4 groups: file1::TestClass1, file1, file2::TestClass2, file2
         assert_eq!(result.len(), 4);
-        
+
         // Verify that tests with same scope are grouped together
-        let mut scope_to_worker: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        
+        let mut scope_to_worker: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
         for (worker_idx, worker_tests) in result.iter().enumerate() {
             for test in worker_tests {
                 let scope = extract_scope(test);
                 if let Some(&existing_worker) = scope_to_worker.get(&scope) {
-                    assert_eq!(existing_worker, worker_idx, 
-                        "Test {} should be in same worker as other tests from scope {}", test, scope);
+                    assert_eq!(
+                        existing_worker, worker_idx,
+                        "Test {} should be in same worker as other tests from scope {}",
+                        test, scope
+                    );
                 } else {
                     scope_to_worker.insert(scope, worker_idx);
                 }
             }
         }
-        
+
         // Verify all tests are distributed
         let total_tests: usize = result.iter().map(|w| w.len()).sum();
         assert_eq!(total_tests, 5);
-        
+
         // Verify the class methods are grouped together
         assert_eq!(scope_to_worker.len(), 4); // Should have 4 different scopes
     }
@@ -448,27 +458,30 @@ mod tests {
         let result = scheduler.distribute_tests(tests, 2);
 
         assert_eq!(result.len(), 2);
-        
+
         // Verify that each file's tests are kept together
-        let mut file_to_worker: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        
+        let mut file_to_worker: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
         for (worker_idx, worker_tests) in result.iter().enumerate() {
             for test in worker_tests {
                 let file = extract_file(test);
                 if let Some(&existing_worker) = file_to_worker.get(&file) {
-                    assert_eq!(existing_worker, worker_idx, 
-                        "Test {} should be in same worker as other tests from {}", test, file);
+                    assert_eq!(
+                        existing_worker, worker_idx,
+                        "Test {} should be in same worker as other tests from {}",
+                        test, file
+                    );
                 } else {
                     file_to_worker.insert(file, worker_idx);
                 }
             }
         }
-        
+
         // Verify all tests are distributed
         let total_tests: usize = result.iter().map(|w| w.len()).sum();
         assert_eq!(total_tests, 6);
     }
-
 
     // WorkSteal scheduler tests
     #[test]
@@ -508,7 +521,7 @@ mod tests {
         assert_eq!(result[0], vec!["test1", "test4"]);
         assert_eq!(result[1], vec!["test2", "test5"]);
         assert_eq!(result[2], vec!["test3"]);
-        
+
         // Verify all tests are distributed
         let total_tests: usize = result.iter().map(|w| w.len()).sum();
         assert_eq!(total_tests, 5);
@@ -519,7 +532,7 @@ mod tests {
         let scheduler = WorkStealScheduler;
         let tests = vec![
             "fast_test1".into(),
-            "slow_test1".into(), 
+            "slow_test1".into(),
             "fast_test2".into(),
             "slow_test2".into(),
         ];
@@ -535,11 +548,7 @@ mod tests {
     #[test]
     fn test_no_scheduler_single_group() {
         let scheduler = NoScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-        ];
+        let tests = vec!["test1".into(), "test2".into(), "test3".into()];
         let result = scheduler.distribute_tests(tests.clone(), 5);
 
         assert_eq!(result.len(), 1);
@@ -564,10 +573,7 @@ mod tests {
             extract_scope("tests/test_file.py::test_function"),
             "tests/test_file.py"
         );
-        assert_eq!(
-            extract_scope("tests/test_file.py"),
-            "tests/test_file.py"
-        );
+        assert_eq!(extract_scope("tests/test_file.py"), "tests/test_file.py");
     }
 
     #[test]
@@ -580,10 +586,7 @@ mod tests {
             extract_file("tests/test_file.py::test_function"),
             "tests/test_file.py"
         );
-        assert_eq!(
-            extract_file("tests/test_file.py"),
-            "tests/test_file.py"
-        );
+        assert_eq!(extract_file("tests/test_file.py"), "tests/test_file.py");
     }
 
     // Create scheduler tests for all modes
@@ -596,11 +599,20 @@ mod tests {
         let no_scheduler = create_scheduler(DistributionMode::No);
 
         let tests = vec!["test1".into(), "test2".into()];
-        
+
         assert_eq!(load_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
-        assert_eq!(loadscope_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
-        assert_eq!(loadfile_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
-        assert_eq!(worksteal_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
+        assert_eq!(
+            loadscope_scheduler.distribute_tests(tests.clone(), 2).len(),
+            2
+        );
+        assert_eq!(
+            loadfile_scheduler.distribute_tests(tests.clone(), 2).len(),
+            2
+        );
+        assert_eq!(
+            worksteal_scheduler.distribute_tests(tests.clone(), 2).len(),
+            2
+        );
         assert_eq!(no_scheduler.distribute_tests(tests.clone(), 2).len(), 1);
     }
 
@@ -615,31 +627,36 @@ mod tests {
             "z_file.py::test4".into(),
             "a_file.py::test5".into(),
         ];
-        
+
         // Run multiple times to ensure deterministic behavior
         let result1 = scheduler.distribute_tests(tests.clone(), 2);
         let result2 = scheduler.distribute_tests(tests.clone(), 2);
         let result3 = scheduler.distribute_tests(tests.clone(), 2);
-        
+
         assert_eq!(result1, result2);
         assert_eq!(result2, result3);
-        
+
         // Verify that the same files end up together across runs
         // This tests the key benefit: deterministic grouping
         for (worker_idx, worker_tests) in result1.iter().enumerate() {
-            let mut files_in_worker: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut files_in_worker: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             for test in worker_tests {
                 files_in_worker.insert(extract_file(test));
             }
-            
+
             // Verify the same files are in the same worker in all runs
-            let mut files_in_worker2: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut files_in_worker2: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             for test in &result2[worker_idx] {
                 files_in_worker2.insert(extract_file(test));
             }
-            
-            assert_eq!(files_in_worker, files_in_worker2, 
-                "Worker {} should have the same files across runs", worker_idx);
+
+            assert_eq!(
+                files_in_worker, files_in_worker2,
+                "Worker {} should have the same files across runs",
+                worker_idx
+            );
         }
     }
 }

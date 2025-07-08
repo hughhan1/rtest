@@ -122,7 +122,10 @@ mod tests {
     #[test]
     fn test_get_num_processes() {
         let args = Args::parse_from(["rtest", "-n", "auto"]);
-        assert!(matches!(args.get_num_processes(), Ok(Some(NumProcesses::Auto))));
+        assert!(matches!(
+            args.get_num_processes(),
+            Ok(Some(NumProcesses::Auto))
+        ));
 
         let args = Args::parse_from(["rtest", "-n", "logical"]);
         assert!(matches!(

@@ -15,7 +15,7 @@ pub mod worker;
 pub use collection::error::{CollectionError, CollectionResult};
 pub use collection_integration::{collect_tests_rust, display_collection_results};
 pub use pytest_executor::execute_tests;
-pub use runner::PytestRunner;
+pub use runner::{execute_tests_parallel, PytestRunner};
 pub use scheduler::{create_scheduler, DistributionMode};
 pub use utils::determine_worker_count;
 pub use worker::WorkerPool;

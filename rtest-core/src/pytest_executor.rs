@@ -43,4 +43,3 @@ pub fn execute_tests(
 
     run_status.code().unwrap_or(1)
 }
-

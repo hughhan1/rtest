@@ -103,7 +103,10 @@ mod tests {
         assert_eq!(count, 3, "maxprocesses should limit worker count to 3");
 
         let count = determine_worker_count(Some(NumProcesses::Count(2)), Some(10));
-        assert_eq!(count, 2, "worker count should not exceed requested when under limit");
+        assert_eq!(
+            count, 2,
+            "worker count should not exceed requested when under limit"
+        );
 
         // Test with auto/logical modes
         let count = determine_worker_count(Some(NumProcesses::Auto), Some(1));
