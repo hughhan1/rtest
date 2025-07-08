@@ -265,40 +265,10 @@ jobs:
         output_both "## Benchmark Results Summary"
         output_both ""
         
-        # Create aggregated JSON file
-        echo "[" > aggregated-results.json
-        first=true
-        
-        # Find all result JSON files and aggregate them
-        for result_dir in all-results/*/; do
-          if [ -d "$result_dir" ]; then
-            repo_name=$(basename "$result_dir" | sed 's/benchmark-results-//')
-            output_both "### $repo_name"
-            output_both ""
-            
-            # Find the JSON file in the nested structure
-            json_file=$(find "$result_dir" -name "*.json" -type f | head -1)
-            if [ -f "$json_file" ]; then
-              # Add to aggregated results
-              if [ "$first" = true ]; then
-                first=false
-              else
-                echo "," >> aggregated-results.json
-              fi
-              cat "$json_file" | python3 -c "import sys, json; results = json.load(sys.stdin); [print(json.dumps(r)) for r in results]" >> aggregated-results.json
-              
-              # Output JSON with proper markdown formatting
-              output_both '```json'
-              output_both "$(python3 -m json.tool "$json_file")"
-              output_both '```'
-            else
-              output_both "No results found"
-            fi
-            output_both ""
-          fi
+        # Aggregate all JSON files into a single array
+        python3 scripts/benchmark/aggregate_results.py all-results/ aggregated-results.json | while IFS= read -r line; do
+          output_both "$line"
         done
-        
-        echo "]" >> aggregated-results.json
         
         # Set output for artifact name
         if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
@@ -340,9 +310,10 @@ jobs:
           # Run comparison and capture output
           comparison_output=$(python3 scripts/benchmark/compare_results.py baseline/aggregated-results.json aggregated-results.json 2>&1) || true
           
-          # Output to both console and step summary
-          echo "$comparison_output"
-          echo "$comparison_output" >> $GITHUB_STEP_SUMMARY
+          # Output comparison results line by line to handle multi-line output
+          while IFS= read -r line; do
+            output_both "$line"
+          done <<< "$comparison_output"
           
           output_both ""
           output_both "Note: Comparison only includes benchmarks that exist in both baseline and current results."
