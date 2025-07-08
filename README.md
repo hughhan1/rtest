@@ -63,13 +63,11 @@ The current implementation focuses on enhanced test collection and parallelizati
 
 ## Performance
 
-Below are some benchmarks of `rtest` against [`pytest`](https://pytest.org) against the [`flask`](https://github.com/pallets/flask) repository.
+*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement, on an M4 Macbook Pro with 14 cores and 48GB RAM.* **More sophisticated benchmarks will be implemented in the future.**
 
-*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement, on an M4 Macbook Pro with 14 cores and 48GB RAM.*
+### Against the [`flask`](https://github.com/pallets/flask) Repository
 
-**More sophisticated benchmarks will be complemented in the future.**
-
-### Test Collection Performance
+#### Test Collection Performance
 ```
 hyperfine --command-name pytest --command-name rtest "uv run pytest --collect-only" "uv run rtest --collect-only" --warmup 3 --runs 20
 Benchmark 1: pytest
@@ -85,7 +83,7 @@ Summary
     6.41 ± 0.23 times faster than pytest
 ```
 
-### Test Execution Performance  
+#### Test Execution Performance  
 ```
 hyperfine --command-name pytest --command-name rtest "uv run pytest -n auto" "uv run rtest -n auto" --warmup 3 --runs 20
 Benchmark 1: pytest
@@ -100,6 +98,46 @@ Summary
   rtest ran
     1.91 ± 0.12 times faster than pytest
 ```
+
+### Against the [`pydantic`](https://github.com/pydantic/pydantic) Repository
+
+#### Test Collection Performance
+```
+hyperfine --command-name pytest --command-name rtest "uv run pytest --collect-only" "uv run rtest --collect-only" --warmup 3 --runs 20
+Benchmark 1: pytest
+  Time (mean ± σ):      2.777 s ±  0.031 s    [User: 2.598 s, System: 0.147 s]
+  Range (min … max):    2.731 s …  2.864 s    20 runs
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      61.2 ms ±   1.1 ms    [User: 40.1 ms, System: 14.4 ms]
+  Range (min … max):    60.1 ms …  64.2 ms    20 runs
+ 
+Summary
+  rtest ran
+   45.39 ± 0.95 times faster than pytest
+```
+
+#### Test Execution Performance  
+
+```
+hyperfine --command-name pytest --command-name rtest "uv run pytest -n auto" "uv run rtest -n auto" --warmup 3 --runs 20 --ignore-failure
+Benchmark 1: pytest
+  Time (mean ± σ):      5.239 s ±  0.223 s    [User: 48.686 s, System: 4.160 s]
+  Range (min … max):    4.964 s …  5.712 s    20 runs
+ 
+  Warning: Ignoring non-zero exit code.
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      3.209 s ±  0.238 s    [User: 21.003 s, System: 5.131 s]
+  Range (min … max):    2.935 s …  3.680 s    20 runs
+ 
+  Warning: Ignoring non-zero exit code.
+ 
+Summary
+  rtest ran
+    1.63 ± 0.14 times faster than pytest
+```
+*Note: `--ignore-failure` is passed at the moment because there are failures when running both `pytest` and `rtest` against the [`pydantic`](https://github.com/pydantic/pydantic) repository for reason not yet investigated.*
 
 ## Quick Start
 
