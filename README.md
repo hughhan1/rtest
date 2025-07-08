@@ -69,29 +69,44 @@ The current implementation focuses on enhanced test collection and parallelizati
 ```
 Repository      pytest               rtest                Speedup
 -----------     ------               -----                -------
-FastAPI         5.477s ± 0.044s      0.096s ± 0.001s     56.82x
-Requests        0.446s ± 0.003s      0.041s ± 0.000s     10.89x
-Flask           0.479s ± 0.006s      0.045s ± 0.000s     10.60x
-Click           0.367s ± 0.002s      0.042s ± 0.000s     8.64x
-HTTPX           0.250s ± 0.003s      0.044s ± 0.000s     5.65x
-Scikit-learn    0.225s ± 0.002s      0.226s ± 0.002s     1.00x
-Pandas          0.239s ± 0.005s      0.506s ± 0.001s     0.47x
+FastAPI         5.583s ± 0.083s      0.096s ± 0.000s     58.00x
+Flask           0.502s ± 0.004s      0.044s ± 0.001s     11.35x
+Requests        0.442s ± 0.002s      0.040s ± 0.000s     11.09x
+Click           0.395s ± 0.001s      0.043s ± 0.000s     9.22x
+HTTPX           0.259s ± 0.003s      0.044s ± 0.000s     5.89x
+Scikit-learn    0.241s ± 0.003s      0.225s ± 0.001s     1.07x
+Pandas          0.242s ± 0.002s      0.514s ± 0.004s     0.47x
 ```
 
-### Test Execution Performance  
+### Test Execution Performance (Sequential)
 ```
 Repository      pytest               rtest                Speedup
 -----------     ------               -----                -------
-Flask           1.688s ± 0.008s      0.035s ± 0.000s     48.47x
-Click           1.353s ± 0.004s      0.034s ± 0.000s     40.23x
-FastAPI         0.652s ± 0.004s      0.035s ± 0.001s     18.43x
-Django          0.561s ± 0.016s      0.036s ± 0.001s     15.55x
-HTTPX           0.252s ± 0.004s      0.035s ± 0.000s     7.19x
-Pandas          0.235s ± 0.002s      0.061s ± 0.000s     3.81x
-Scikit-learn    0.224s ± 0.002s      0.060s ± 0.001s     3.73x
+Requests        7.488s ± 0.003s      0.034s ± 0.002s     219.09x
+Flask           1.724s ± 0.009s      0.035s ± 0.000s     49.00x
+Click           1.403s ± 0.006s      0.035s ± 0.000s     40.65x
+FastAPI         0.665s ± 0.007s      0.035s ± 0.000s     18.92x
+Django          0.577s ± 0.023s      0.037s ± 0.001s     15.77x
+HTTPX           0.259s ± 0.003s      0.034s ± 0.000s     7.51x
+Scikit-learn    0.239s ± 0.002s      0.060s ± 0.001s     3.97x
+Pandas          0.243s ± 0.003s      0.061s ± 0.001s     3.99x
 ```
 
-*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner). Performance benchmarks include both sequential and parallel execution modes (using `-n auto --dist load`).*
+### Test Execution Performance (Parallel with -n auto)
+```
+Repository      pytest               rtest                Speedup
+-----------     ------               -----                -------
+Requests        8.241s ± 0.009s      0.034s ± 0.000s     243.79x
+Flask           1.995s ± 0.013s      0.035s ± 0.000s     56.32x
+Click           1.726s ± 0.028s      0.035s ± 0.000s     49.64x
+FastAPI         1.597s ± 0.013s      0.035s ± 0.000s     45.13x
+Django          1.311s ± 0.011s      0.036s ± 0.000s     36.81x
+HTTPX           0.258s ± 0.002s      0.034s ± 0.000s     7.54x
+Pandas          0.243s ± 0.002s      0.061s ± 0.001s     3.99x
+Scikit-learn    0.237s ± 0.001s      0.060s ± 0.001s     3.94x
+```
+
+*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner).*
 
 ## Quick Start
 
