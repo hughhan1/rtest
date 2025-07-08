@@ -155,11 +155,6 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
     
-    - name: Install hyperfine
-      run: |
-        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
-        sudo dpkg -i hyperfine_1.18.0_amd64.deb
-    
     - name: Get repository list
       id: set-matrix
       run: |
@@ -238,7 +233,7 @@ jobs:
     
     - name: Run benchmark for ${{ matrix.repository }}
       run: |
-        uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }}
+        uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }} --collect-only
     
     - name: Upload results
       uses: actions/upload-artifact@v4
