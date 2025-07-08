@@ -32,6 +32,11 @@ classifiers = [
 ]
 keywords = ["testing", "pytest", "rust", "performance"]
 
+[project.urls]
+Homepage = "https://github.com/hughhan1/rtest"
+Repository = "https://github.com/hughhan1/rtest.git"
+Issues = "https://github.com/hughhan1/rtest/issues"
+
 [project.scripts]
 rtest = "rtest:main"
 
