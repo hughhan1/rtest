@@ -99,6 +99,44 @@ Summary
     1.91 ± 0.12 times faster than pytest
 ```
 
+### Against the [`httpx`](https://github.com/encode/httpx) Repository
+
+#### Test Collection Performance
+```
+hyperfine --command-name pytest --command-name rtest "pytest --collect-only" "rtest --collect-only" --warmup 3 --runs 20
+Benchmark 1: pytest
+  Time (mean ± σ):     310.1 ms ±  18.6 ms    [User: 259.3 ms, System: 42.6 ms]
+  Range (min … max):   291.0 ms … 344.4 ms    20 runs
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      20.6 ms ±   1.0 ms    [User: 12.5 ms, System: 5.5 ms]
+  Range (min … max):    18.6 ms …  21.9 ms    20 runs
+ 
+Summary
+  rtest ran
+   15.06 ± 1.15 times faster than pytest
+```
+
+#### Test Execution Performance
+```
+hyperfine --command-name pytest --command-name rtest "pytest" "rtest" --warmup 3 --runs 20 --ignore-failure
+Benchmark 1: pytest
+  Time (mean ± σ):      3.155 s ±  0.073 s    [User: 1.708 s, System: 0.256 s]
+  Range (min … max):    3.087 s …  3.296 s    20 runs
+ 
+  Warning: Ignoring non-zero exit code.
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      2.411 s ±  0.111 s    [User: 1.771 s, System: 0.275 s]
+  Range (min … max):    2.335 s …  2.827 s    20 runs
+ 
+Summary
+  rtest ran
+    1.31 ± 0.07 times faster than pytest
+```
+*Note: `--ignore-failure` is passed at the moment because there are failures when running both `pytest` and `rtest` against the [`httpx`](https://github.com/encode/httpx) repository for reason not yet investigated.*
+*Note: `-n auto` is not used because attempting this command for both `pytest` and `rtest` against the [`httpx`](https://github.com/encode/httpx) repository seems to hang for a reason not yet investigated.*
+
 ### Against the [`pydantic`](https://github.com/pydantic/pydantic) Repository
 
 #### Test Collection Performance
