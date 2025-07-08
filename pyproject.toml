@@ -41,6 +41,7 @@ dev = [
     "mypy==1.16.1",
     "pyyaml>=6.0",
     "types-PyYAML>=6.0",
+    "vulture==2.14",
 ]
 
 [tool.ruff]
@@ -92,6 +93,7 @@ dev = [
     "ruff==0.12.1",
     "pyyaml>=6.0",
     "types-PyYAML>=6.0",
+    "vulture==2.14",
 ]
 
 [tool.semantic_release]

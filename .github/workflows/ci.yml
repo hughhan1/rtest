@@ -105,6 +105,9 @@ jobs:
     - name: Run mypy
       run: mypy python/ tests/ scripts/
     
+    - name: Run vulture (dead code detection)
+      run: vulture python/ tests/ scripts/ --min-confidence 80
+    
     - name: Check Rust formatting
       run: cargo fmt -- --check
     

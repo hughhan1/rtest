@@ -94,6 +94,12 @@ if [ -n "$PYTHON_FILES" ]; then
         exit 1
     fi
     
+    echo "Running vulture to check for dead code..."
+    if ! uv run vulture python/ tests/ scripts/ --min-confidence 80; then
+        print_warning "Vulture found potential dead code. Review the findings above."
+        # Don't fail the commit for dead code warnings, just warn
+    fi
+    
     # Re-add any files that were modified by ruff
     git add $PYTHON_FILES
 fi
