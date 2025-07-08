@@ -4,7 +4,7 @@ use clap::Parser;
 use pyo3::prelude::*;
 use rtest_core::{
     cli::Args, collect_tests_rust, create_scheduler, determine_worker_count,
-    display_collection_results, execute_tests, DistributionMode, WorkerPool,
+    display_collection_results, execute_tests, execute_work_stealing, DistributionMode, WorkerPool,
 };
 use std::env;
 
@@ -127,7 +127,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             std::process::exit(1);
         }
     };
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &[]) {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -182,6 +182,26 @@ fn execute_tests_parallel(
 ) {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
+    // Use work-stealing for worksteal mode
+    if dist_mode == "worksteal" {
+        let result = execute_work_stealing(
+            program,
+            initial_args,
+            test_nodes,
+            worker_count,
+            rootpath,
+        );
+        
+        println!("\n==== Test Summary ====");
+        println!("Total tests: {}", result.total_tests);
+        println!("Passed: {}", result.passed);
+        println!("Failed: {}", result.failed);
+        println!("Skipped: {}", result.skipped);
+        
+        std::process::exit(result.exit_code);
+    }
+
+    // Use traditional distribution for other modes
     let distribution_mode = match dist_mode.parse::<DistributionMode>() {
         Ok(mode) => mode,
         Err(e) => {

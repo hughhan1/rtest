@@ -15,7 +15,7 @@ pub struct Args {
     #[arg(long)]
     pub maxprocesses: Option<usize>,
 
-    /// Distribution mode for parallel execution
+    /// Distribution mode for parallel execution (load, loadscope, loadfile, worksteal, no)
     #[arg(long, default_value = "load")]
     pub dist: String,
 
@@ -51,6 +51,11 @@ impl Args {
     }
 
     pub fn validate_dist(&self) -> Result<(), String> {
+        // Special handling for worksteal which bypasses the scheduler system
+        if self.dist == "worksteal" {
+            return Ok(());
+        }
+        
         // Use the FromStr implementation which has proper error handling
         match self.dist.parse::<crate::scheduler::DistributionMode>() {
             Ok(_) => Ok(()),
