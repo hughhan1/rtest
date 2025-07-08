@@ -97,7 +97,6 @@ pub fn main() {
             worker_count,
             &args.dist,
             &rootpath,
-            true, // CLI uses subprojects
         );
         std::process::exit(exit_code);
     }

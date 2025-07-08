@@ -168,7 +168,6 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             worker_count,
             &args.dist,
             &rootpath,
-            false, // Python bindings don't use subprojects
         );
         std::process::exit(exit_code);
     }
