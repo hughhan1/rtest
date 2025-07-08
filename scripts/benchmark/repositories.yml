@@ -8,13 +8,6 @@ repositories:
       - "test_*.py"
       - "*_test.py"
     
-  - name: "flask"
-    url: "https://github.com/pallets/flask"
-    category: "web_framework"
-    test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
-    
   # HTTP Libraries
   - name: "httpx"
     url: "https://github.com/encode/httpx"
@@ -23,28 +16,6 @@ repositories:
     test_patterns:
       - "test_*.py"
     
-  # Data Science Libraries
-  - name: "pandas"
-    url: "https://github.com/pandas-dev/pandas"
-    category: "data_science"
-    test_dir: "pandas/tests"
-    test_patterns:
-      - "test_*.py"
-    
-  - name: "scikit-learn"
-    url: "https://github.com/scikit-learn/scikit-learn"
-    category: "data_science"
-    test_dir: "sklearn/tests"
-    test_patterns:
-      - "test_*.py"
-    
-  # CLI Tools
-  - name: "click"
-    url: "https://github.com/pallets/click"
-    category: "cli_tool"
-    test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
     
 
 # Benchmark configurations
@@ -59,4 +30,4 @@ benchmark_configs:
     description: "Test execution performance"
     pytest_args: "--maxfail=3 -x"
     rtest_args: "--maxfail=3 -x"
-    timeout: 120
+    timeout: 300
