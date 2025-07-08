@@ -32,7 +32,7 @@ impl PytestRunner {
 
 #[pyfunction]
 #[pyo3(signature = (pytest_args=None))]
-fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
+fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
     let pytest_args = pytest_args.unwrap_or_default();
 
     // Use the current Python executable
@@ -52,7 +52,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
                     Ok(dir) => dir,
                     Err(e) => {
                         eprintln!("Failed to get current directory: {e}");
-                        return;
+                        return 1;
                     }
                 },
                 pytest_args,
@@ -64,7 +64,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
                 Ok(dir) => dir,
                 Err(e) => {
                     eprintln!("Failed to get current directory: {e}");
-                    return;
+                    return 1;
                 }
             },
             pytest_args,
@@ -77,7 +77,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
         Ok((nodes, errs)) => (nodes, errs),
         Err(e) => {
             eprintln!("Collection failed: {e}");
-            return;
+            return 1;
         }
     };
 
@@ -85,7 +85,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
 
     if test_nodes.is_empty() {
         println!("No tests found.");
-        return;
+        return 0;
     }
 
     execute_tests(
@@ -94,7 +94,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) {
         test_nodes,
         filtered_args,
         Some(&rootpath),
-    );
+    )
 }
 
 #[pyfunction]
@@ -152,16 +152,16 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
         std::process::exit(0);
     }
 
-    if worker_count == 1 {
+    let exit_code = if worker_count == 1 {
         execute_tests(
             &runner.program,
             &runner.initial_args,
             test_nodes,
             vec![],
             Some(&rootpath),
-        );
+        )
     } else {
-        let exit_code = execute_tests_parallel(
+        execute_tests_parallel(
             &runner.program,
             &runner.initial_args,
             test_nodes,
@@ -169,9 +169,9 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             &args.dist,
             &rootpath,
             false, // Python bindings don't use subprojects
-        );
-        std::process::exit(exit_code);
-    }
+        )
+    };
+    std::process::exit(exit_code);
 }
 
 #[pymodule]
