@@ -11,6 +11,7 @@ performance between rtest and pytest using hyperfine.
 import argparse
 import json
 import logging
+import shlex
 import shutil
 import subprocess
 import sys
@@ -231,7 +232,7 @@ class RepositoryManager:
 name = "benchmark-{repo_config.name}"
 version = "0.1.0"
 dependencies = [{dependencies}]
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -245,20 +246,28 @@ build-backend = "setuptools.build_meta"
             logger.error(f"Failed to sync dependencies: {result.stderr}")
             return False
 
-        # Install repository package
-        result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
-        if result.returncode != 0:
-            # Check if it's a Python version issue
-            if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} requires a different Python version")
-                logger.info(f"Skipping {repo_config.name} due to Python version requirements")
-            # Check if it's a build/compilation issue
-            elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} failed to build")
-                logger.info(f"Skipping {repo_config.name} due to build requirements")
-            else:
-                logger.error(f"Failed to install repository package: {result.stderr}")
-            return False
+        # Check if repository is installable by examining its structure
+        has_setup = (repo_path / "setup.py").exists() or (repo_path / "pyproject.toml").exists()
+
+        if has_setup:
+            # Install repository package
+            result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
+            if result.returncode != 0:
+                # Check if it's a Python version issue
+                if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
+                    logger.warning(f"Repository {repo_config.name} requires a different Python version")
+                    logger.info(f"Skipping {repo_config.name} due to Python version requirements")
+                # Check if it's a build/compilation issue
+                elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
+                    logger.warning(f"Repository {repo_config.name} failed to build")
+                    logger.info(f"Skipping {repo_config.name} due to build requirements")
+                else:
+                    logger.error(f"Failed to install repository package: {result.stderr}")
+                return False
+        else:
+            logger.info(f"Repository {repo_config.name} has no setup.py/pyproject.toml, adding to PYTHONPATH instead")
+            # For repositories without setup files, we'll add them to PYTHONPATH during test runs
+            # This is handled by running tests from the repository root
 
         return True
 
@@ -304,9 +313,26 @@ class HyperfineRunner:
         return self._parse_results(repo_path, json_output, repo_config.name, benchmark_config.description)
 
     def _build_command(self, base_cmd: List[str], tool: str, args: str, test_dir: str) -> str:
-        """Build command string for hyperfine."""
-        cmd_parts = base_cmd + [tool] + args.split() + [test_dir]
-        return " ".join(cmd_parts)
+        """Build command string for hyperfine with proper quoting."""
+        # Quote paths that might contain spaces
+        quoted_parts = []
+        for part in base_cmd:
+            # Quote if it contains spaces or special characters
+            if " " in part or any(c in part for c in ["$", "`", "\\", '"']):
+                quoted_parts.append(shlex.quote(part))
+            else:
+                quoted_parts.append(part)
+
+        quoted_parts.append(tool)
+        quoted_parts.extend(args.split())
+
+        # Quote test_dir if it contains spaces
+        if " " in test_dir:
+            quoted_parts.append(shlex.quote(test_dir))
+        else:
+            quoted_parts.append(test_dir)
+
+        return " ".join(quoted_parts)
 
     def _build_hyperfine_command(self, pytest_cmd: str, rtest_cmd: str, json_output: str) -> List[str]:
         """Build hyperfine command."""
@@ -320,11 +346,13 @@ class HyperfineRunner:
             str(HYPERFINE_MAX_RUNS),
             "--export-json",
             json_output,
+            "--show-output",
             "--command-name",
             "pytest",
             "--command-name",
             "rtest",
-            "--ignore-failure",
+            "--shell",
+            "default",
             pytest_cmd,
             rtest_cmd,
         ]
@@ -342,6 +370,24 @@ class HyperfineRunner:
             results = data["results"]
             pytest_data = results[0]
             rtest_data = results[1]
+
+            # Check for exit codes indicating failures
+            pytest_exit_codes = pytest_data.get("exit_codes", [])
+            rtest_exit_codes = rtest_data.get("exit_codes", [])
+
+            if pytest_exit_codes and any(code != 0 for code in pytest_exit_codes):
+                return ErrorResult(
+                    repository=repo_name,
+                    benchmark=benchmark_desc,
+                    error=f"pytest had test failures (exit codes: {pytest_exit_codes})",
+                )
+
+            if rtest_exit_codes and any(code != 0 for code in rtest_exit_codes):
+                return ErrorResult(
+                    repository=repo_name,
+                    benchmark=benchmark_desc,
+                    error=f"rtest had test failures (exit codes: {rtest_exit_codes})",
+                )
 
             # Extract values with proper type handling
             pytest_mean = pytest_data.get("mean", 0.0)
