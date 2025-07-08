@@ -59,7 +59,7 @@ benchmark_configs:
     description: "Test execution performance"
     pytest_args: "--maxfail=3 -x"
     rtest_args: "--maxfail=3 -x"
-    timeout: 120
+    timeout: 300
     
   execution_parallel:
     description: "Test execution performance (parallel with -n auto)"
