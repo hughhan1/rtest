@@ -91,7 +91,7 @@ Pandas          0.235s ± 0.002s      0.061s ± 0.000s     3.81x
 Scikit-learn    0.224s ± 0.002s      0.060s ± 0.001s     3.73x
 ```
 
-*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner).*
+*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner). Performance benchmarks include both sequential and parallel execution modes (using `-n auto --dist load`).*
 
 ## Quick Start
 

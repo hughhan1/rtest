@@ -27,7 +27,20 @@ uv run python scripts/benchmark/benchmark_repositories.py --repositories click f
 
 The `repositories.yml` file contains:
 - Repository definitions (name, URL, test directory)
-- Benchmark configurations (collect_only, execution)
+- Benchmark configurations:
+  - `collect_only`: Test discovery performance
+  - `execution`: Sequential test execution performance
+  - `execution_parallel`: Parallel test execution performance using `-n auto --dist load`
+
+## Benchmark Types
+
+The benchmarking suite runs three types of performance tests:
+
+1. **Test Collection** (`collect_only`): Measures how fast each tool can discover tests without executing them
+2. **Sequential Execution** (`execution`): Measures test execution performance in a single process
+3. **Parallel Execution** (`execution_parallel`): Measures test execution performance using all available CPU cores with `-n auto --dist load`
+   - Uses `pytest-xdist` for pytest's parallel execution
+   - Uses rtest's built-in parallel execution
 
 ## Requirements
 
