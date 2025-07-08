@@ -11,6 +11,7 @@ performance between rtest and pytest using hyperfine.
 import argparse
 import json
 import logging
+import platform
 import shutil
 import subprocess
 import sys
@@ -215,49 +216,54 @@ class RepositoryManager:
         return repo_path
 
     def setup_repository(self, repo_config: RepositoryConfig, repo_path: Path) -> bool:
-        """Set up repository dependencies using uv."""
+        """Set up repository dependencies using venv and pip."""
         logger.info(f"Setting up {repo_config.name}...")
 
-        benchmark_dir = repo_path / ".benchmark"
-        benchmark_dir.mkdir(exist_ok=True)
+        # Check if requirements.txt exists, if not compile from pyproject.toml
+        requirements_path = repo_path / "requirements.txt"
+        if not requirements_path.exists():
+            pyproject_path = repo_path / "pyproject.toml"
+            if pyproject_path.exists():
+                logger.info("No requirements.txt found, compiling from pyproject.toml...")
+                result = run_command(
+                    ["uv", "pip", "compile", "pyproject.toml", "-o", "requirements.txt"], str(repo_path)
+                )
+                if result.returncode != 0:
+                    logger.error(f"Failed to compile requirements.txt: {result.stderr}")
+                    return False
+            else:
+                logger.warning(f"No requirements.txt or pyproject.toml found for {repo_config.name}")
+                # Create a minimal requirements.txt
+                requirements_path.write_text("")
 
-        dependencies = f'"pytest", "rtest @ file://{self.project_root}"'
-
-        # Create pyproject.toml for isolated environment
-        pyproject_path = benchmark_dir / "pyproject.toml"
-        pyproject_path.write_text(
-            f"""
-[project]
-name = "benchmark-{repo_config.name}"
-version = "0.1.0"
-dependencies = [{dependencies}]
-requires-python = ">=3.12"
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-""".strip()
-        )
-
-        # Sync dependencies
-        result = run_command(["uv", "sync"], str(benchmark_dir))
+        # Create virtual environment
+        venv_path = repo_path / ".venv"
+        logger.info("Creating virtual environment...")
+        result = run_command(["python3", "-m", "venv", str(venv_path)], str(repo_path))
         if result.returncode != 0:
-            logger.error(f"Failed to sync dependencies: {result.stderr}")
+            logger.error(f"Failed to create virtual environment: {result.stderr}")
             return False
 
-        # Install repository package
-        result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
+        # Determine pip executable path based on OS
+        if platform.system() == "Windows":
+            pip_executable = venv_path / "Scripts" / "pip3"
+        else:
+            pip_executable = venv_path / "bin" / "pip3"
+
+        # Install requirements
+        logger.info("Installing requirements...")
+        result = run_command([str(pip_executable), "install", "-r", "requirements.txt"], str(repo_path))
         if result.returncode != 0:
-            # Check if it's a Python version issue
-            if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} requires a different Python version")
-                logger.info(f"Skipping {repo_config.name} due to Python version requirements")
-            # Check if it's a build/compilation issue
-            elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} failed to build")
-                logger.info(f"Skipping {repo_config.name} due to build requirements")
-            else:
-                logger.error(f"Failed to install repository package: {result.stderr}")
+            raise Exception(f"Failed to install requirements: {result.stderr}")
+
+        logger.info("Installing pytest, pytest-xdist, and rtest...")
+        # Install rtest from the project root
+        result = run_command(
+            [str(pip_executable), "install", "pytest", "pytest-xdist", f"rtest @ file://{self.project_root}"],
+            str(repo_path),
+        )
+        if result.returncode != 0:
+            logger.error(f"Failed to install pytest, pytest-xdist, and rtest: {result.stderr}")
             return False
 
         return True
@@ -280,12 +286,18 @@ class HyperfineRunner:
 
         logger.info(f"Running {benchmark_config.description} on {repo_config.name}")
 
-        benchmark_dir = repo_path / ".benchmark"
-        base_cmd = ["uv", "run", "--project", str(benchmark_dir)]
+        # Use the venv executables directly
+        venv_path = repo_path / ".venv"
+        if platform.system() == "Windows":
+            pytest_executable = venv_path / "Scripts" / "pytest"
+            rtest_executable = venv_path / "Scripts" / "rtest"
+        else:
+            pytest_executable = venv_path / "bin" / "pytest"
+            rtest_executable = venv_path / "bin" / "rtest"
 
         # Build commands
-        pytest_cmd = self._build_command(base_cmd, "pytest", benchmark_config.pytest_args, repo_config.test_dir)
-        rtest_cmd = self._build_command(base_cmd, "rtest", benchmark_config.rtest_args, repo_config.test_dir)
+        pytest_cmd = self._build_command(str(pytest_executable), benchmark_config.pytest_args, repo_config.test_dir)
+        rtest_cmd = self._build_command(str(rtest_executable), benchmark_config.rtest_args, repo_config.test_dir)
 
         # Run hyperfine
         json_output = f"{repo_config.name}_benchmark.json"
@@ -303,14 +315,14 @@ class HyperfineRunner:
         # Parse results
         return self._parse_results(repo_path, json_output, repo_config.name, benchmark_config.description)
 
-    def _build_command(self, base_cmd: List[str], tool: str, args: str, test_dir: str) -> str:
+    def _build_command(self, executable: str, args: str, test_dir: str) -> str:
         """Build command string for hyperfine."""
-        cmd_parts = base_cmd + [tool] + args.split() + [test_dir]
+        cmd_parts = [executable] + args.split() + [test_dir]
         return " ".join(cmd_parts)
 
     def _build_hyperfine_command(self, pytest_cmd: str, rtest_cmd: str, json_output: str) -> List[str]:
         """Build hyperfine command."""
-        return [
+        cmd = [
             "hyperfine",
             "--warmup",
             str(HYPERFINE_WARMUP),
@@ -324,10 +336,10 @@ class HyperfineRunner:
             "pytest",
             "--command-name",
             "rtest",
-            "--ignore-failure",
-            pytest_cmd,
-            rtest_cmd,
         ]
+
+        cmd.extend([pytest_cmd, rtest_cmd])
+        return cmd
 
     def _parse_results(
         self, repo_path: Path, json_output: str, repo_name: str, benchmark_desc: str
