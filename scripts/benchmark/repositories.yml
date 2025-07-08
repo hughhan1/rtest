@@ -15,21 +15,7 @@ repositories:
     test_patterns:
       - "test_*.py"
     
-  - name: "django"
-    url: "https://github.com/django/django"
-    category: "web_framework"
-    test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
-    
   # HTTP Libraries
-  - name: "requests"
-    url: "https://github.com/psf/requests"
-    category: "http_library"
-    test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
-    
   - name: "httpx"
     url: "https://github.com/encode/httpx"
     category: "http_library"
@@ -52,14 +38,6 @@ repositories:
     test_patterns:
       - "test_*.py"
     
-  # Testing Frameworks
-  - name: "pytest"
-    url: "https://github.com/pytest-dev/pytest"
-    category: "testing_framework"
-    test_dir: "testing"
-    test_patterns:
-      - "test_*.py"
-    
   # CLI Tools
   - name: "click"
     url: "https://github.com/pallets/click"
@@ -68,13 +46,6 @@ repositories:
     test_patterns:
       - "test_*.py"
     
-  # Async Libraries
-  - name: "aiohttp"
-    url: "https://github.com/aio-libs/aiohttp"
-    category: "async_library"
-    test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
 
 # Benchmark configurations
 benchmark_configs:

@@ -330,10 +330,22 @@ jobs:
     - name: Compare with baseline
       if: github.event_name == 'pull_request' && success()
       run: |
+        # Function to output to both stdout and GitHub step summary
+        output_both() {
+          echo "$@"
+          echo "$@" >> $GITHUB_STEP_SUMMARY
+        }
+        
         if [ -f baseline/aggregated-results.json ]; then
-          python3 scripts/benchmark/compare_results.py baseline/aggregated-results.json aggregated-results.json || true
-          echo ""
-          echo "Note: Comparison only includes benchmarks that exist in both baseline and current results."
+          # Run comparison and capture output
+          comparison_output=$(python3 scripts/benchmark/compare_results.py baseline/aggregated-results.json aggregated-results.json 2>&1) || true
+          
+          # Output to both console and step summary
+          echo "$comparison_output"
+          echo "$comparison_output" >> $GITHUB_STEP_SUMMARY
+          
+          output_both ""
+          output_both "Note: Comparison only includes benchmarks that exist in both baseline and current results."
         else
-          echo "No baseline found for comparison"
+          output_both "No baseline found for comparison"
         fi

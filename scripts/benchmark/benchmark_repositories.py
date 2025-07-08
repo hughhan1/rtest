@@ -221,12 +221,7 @@ class RepositoryManager:
         benchmark_dir = repo_path / ".benchmark"
         benchmark_dir.mkdir(exist_ok=True)
 
-        # Special handling for pytest repository - don't include pytest as dependency
-        # since we're testing pytest itself
-        if repo_config.name == "pytest":
-            dependencies = f'"rtest @ file://{self.project_root}"'
-        else:
-            dependencies = f'"pytest", "rtest @ file://{self.project_root}"'
+        dependencies = f'"pytest", "rtest @ file://{self.project_root}"'
 
         # Create pyproject.toml for isolated environment
         pyproject_path = benchmark_dir / "pyproject.toml"
@@ -251,27 +246,19 @@ build-backend = "setuptools.build_meta"
             return False
 
         # Install repository package
-        # For pytest, we don't need to install it as editable since it will be the pytest we're testing
-        if repo_config.name != "pytest":
-            result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
-            if result.returncode != 0:
-                # Check if it's a Python version issue
-                if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
-                    logger.warning(f"Repository {repo_config.name} requires a different Python version")
-                    logger.info(f"Skipping {repo_config.name} due to Python version requirements")
-                # Check if it's a build/compilation issue
-                elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
-                    logger.warning(f"Repository {repo_config.name} failed to build")
-                    logger.info(f"Skipping {repo_config.name} due to build requirements")
-                else:
-                    logger.error(f"Failed to install repository package: {result.stderr}")
-                return False
-        else:
-            # For pytest, install it directly as the pytest to be tested
-            result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
-            if result.returncode != 0:
-                logger.error(f"Failed to install pytest repository: {result.stderr}")
-                return False
+        result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
+        if result.returncode != 0:
+            # Check if it's a Python version issue
+            if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
+                logger.warning(f"Repository {repo_config.name} requires a different Python version")
+                logger.info(f"Skipping {repo_config.name} due to Python version requirements")
+            # Check if it's a build/compilation issue
+            elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
+                logger.warning(f"Repository {repo_config.name} failed to build")
+                logger.info(f"Skipping {repo_config.name} due to build requirements")
+            else:
+                logger.error(f"Failed to install repository package: {result.stderr}")
+            return False
 
         return True
 
