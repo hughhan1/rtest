@@ -63,35 +63,43 @@ The current implementation focuses on enhanced test collection and parallelizati
 
 ## Performance
 
-`rtest` delivers significant performance improvements over [`pytest`](https://pytest.org) across popular open-source Python projects:
+Below are some benchmarks of `rtest` against [`pytest`](https://pytest.org) against the [`flask`](https://github.com/pallets/flask) repository.
+
+*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement, on an M4 Macbook Pro with 14 cores and 48GB RAM.*
+
+**More sophisticated benchmarks will be complemented in the future.**
 
 ### Test Collection Performance
 ```
-Repository      pytest               rtest                Speedup
------------     ------               -----                -------
-FastAPI         5.477s ± 0.044s      0.096s ± 0.001s     56.82x
-Requests        0.446s ± 0.003s      0.041s ± 0.000s     10.89x
-Flask           0.479s ± 0.006s      0.045s ± 0.000s     10.60x
-Click           0.367s ± 0.002s      0.042s ± 0.000s     8.64x
-HTTPX           0.250s ± 0.003s      0.044s ± 0.000s     5.65x
-Scikit-learn    0.225s ± 0.002s      0.226s ± 0.002s     1.00x
-Pandas          0.239s ± 0.005s      0.506s ± 0.001s     0.47x
+hyperfine --command-name pytest --command-name rtest "uv run pytest --collect-only" "uv run rtest --collect-only" --warmup 3 --runs 20
+Benchmark 1: pytest
+  Time (mean ± σ):     229.9 ms ±   2.6 ms    [User: 184.5 ms, System: 37.4 ms]
+  Range (min … max):   226.0 ms … 235.4 ms    20 runs
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):      35.8 ms ±   1.2 ms    [User: 18.1 ms, System: 10.7 ms]
+  Range (min … max):    34.2 ms …  40.3 ms    20 runs
+ 
+Summary
+  rtest ran
+    6.41 ± 0.23 times faster than pytest
 ```
 
 ### Test Execution Performance  
 ```
-Repository      pytest               rtest                Speedup
------------     ------               -----                -------
-Flask           1.688s ± 0.008s      0.035s ± 0.000s     48.47x
-Click           1.353s ± 0.004s      0.034s ± 0.000s     40.23x
-FastAPI         0.652s ± 0.004s      0.035s ± 0.001s     18.43x
-Django          0.561s ± 0.016s      0.036s ± 0.001s     15.55x
-HTTPX           0.252s ± 0.004s      0.035s ± 0.000s     7.19x
-Pandas          0.235s ± 0.002s      0.061s ± 0.000s     3.81x
-Scikit-learn    0.224s ± 0.002s      0.060s ± 0.001s     3.73x
+hyperfine --command-name pytest --command-name rtest "uv run pytest -n auto" "uv run rtest -n auto" --warmup 3 --runs 20
+Benchmark 1: pytest
+  Time (mean ± σ):      1.156 s ±  0.021 s    [User: 5.314 s, System: 1.044 s]
+  Range (min … max):    1.128 s …  1.205 s    20 runs
+ 
+Benchmark 2: rtest
+  Time (mean ± σ):     605.4 ms ±  36.2 ms    [User: 4768.0 ms, System: 954.3 ms]
+  Range (min … max):   566.0 ms … 700.1 ms    20 runs
+ 
+Summary
+  rtest ran
+    1.91 ± 0.12 times faster than pytest
 ```
-
-*Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per measurement. Results show mean ± standard deviation across popular Python projects on Ubuntu Linux (GitHub Actions runner).*
 
 ## Quick Start
 
