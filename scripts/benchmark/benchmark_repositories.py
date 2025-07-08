@@ -221,7 +221,7 @@ class RepositoryManager:
         benchmark_dir = repo_path / ".benchmark"
         benchmark_dir.mkdir(exist_ok=True)
 
-        dependencies = f'"pytest", "rtest @ file://{self.project_root}"'
+        dependencies = f'"pytest", "pytest-xdist", "rtest @ file://{self.project_root}"'
 
         # Create pyproject.toml for isolated environment
         pyproject_path = benchmark_dir / "pyproject.toml"
@@ -563,7 +563,7 @@ def main() -> None:
         orchestrator = BenchmarkOrchestrator(config_path)
 
         # Run benchmarks
-        benchmark_types = ["collect_only"] if args.collect_only else ["collect_only", "execution"]
+        benchmark_types = ["collect_only"] if args.collect_only else ["collect_only", "execution", "execution_parallel"]
         results = orchestrator.run_benchmarks(args.repositories, benchmark_types)
         ResultFormatter.print_summary(results)
         filename = f"benchmark_results_{int(time.time())}.json"
