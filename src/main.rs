@@ -1,7 +1,7 @@
 //! Main entry point for the rtest application.
 
 use clap::Parser;
-use rtest_core::{
+use rtest::{
     cli::Args, collect_tests_rust, determine_worker_count, display_collection_results,
     execute_tests, execute_tests_parallel, subproject, PytestRunner,
 };

@@ -45,7 +45,7 @@ run_check "Rust compilation" "cargo check --all-targets"
 run_check "Rust formatting" "cargo fmt --check"
 run_check "Rust linting" "cargo clippy --all-targets -- -D warnings"
 run_check "Rust tests" "cargo test"
-run_check "Rust core tests" "cd rtest-core && cargo test"
+run_check "Rust core tests" "cd rtest && cargo test"
 
 # Python checks  
 echo -e "${BLUE}=== Python Quality Checks ===${NC}"

@@ -1,8 +1,8 @@
-//! Python bindings for rtest-core library.
+//! Python bindings for rtest library.
 
 use clap::Parser;
 use pyo3::prelude::*;
-use rtest_core::{
+use rtest::{
     cli::Args, collect_tests_rust, determine_worker_count, display_collection_results,
     execute_tests, execute_tests_parallel,
 };
