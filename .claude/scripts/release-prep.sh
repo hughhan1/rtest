@@ -57,9 +57,9 @@ echo -e "${BLUE}📝 Updating version to $VERSION${NC}"
 sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 rm Cargo.toml.bak
 
-# Update rtest-core/Cargo.toml
-sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" rtest-core/Cargo.toml
-rm rtest-core/Cargo.toml.bak
+# Update rtest/Cargo.toml
+sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" rtest/Cargo.toml
+rm rtest/Cargo.toml.bak
 
 # Update pyproject.toml
 sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
@@ -122,7 +122,7 @@ echo -e "${YELLOW}⚠️  Please update CHANGELOG.md with proper release notes${
 
 # Commit version changes
 echo -e "${BLUE}💾 Committing version changes...${NC}"
-git add Cargo.toml rtest-core/Cargo.toml pyproject.toml Cargo.lock
+git add Cargo.toml rtest/Cargo.toml pyproject.toml Cargo.lock
 git commit -m "chore: bump version to $VERSION"
 
 echo -e "${GREEN}🎉 Release preparation complete!${NC}"

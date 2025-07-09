@@ -81,7 +81,7 @@ rtest/
 ├── src/                    # Python bindings and CLI entry point
 │   ├── lib.rs             # PyO3 Python module bindings
 │   └── main.rs            # CLI application entry point
-├── rtest-core/            # Core Rust implementation
+├── rtest/                 # Core Rust implementation
 │   └── src/
 │       ├── collection.rs      # Test collection logic (SAFE: uses Rc<Session>)
 │       ├── python_discovery/  # Python AST parsing for test discovery
@@ -154,7 +154,7 @@ cargo clippy -- -D warnings && cargo fmt --check && uv run ruff format --check .
 ```bash
 # Rust unit tests
 cargo test --lib                              # Core library tests
-cd rtest-core && cargo test                   # Core module tests
+cd rtest && cargo test                        # Core module tests
 
 # Integration tests  
 cargo test --test cli_integration             # CLI integration tests

@@ -1,5 +1,5 @@
 [package]
-name = "rtest-core"
+name = "rtest"
 version = "0.0.1"
 edition = "2021"
 

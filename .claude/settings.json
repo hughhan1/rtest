@@ -14,20 +14,20 @@
     "rootDir": ".",
     "sourcePatterns": [
       "src/**/*.rs",
-      "rtest-core/src/**/*.rs", 
+      "rtest/src/**/*.rs", 
       "python/rtest/**/*.py",
       "tests/**/*.rs",
       "tests/**/*.py"
     ],
     "testPatterns": [
       "tests/**/*.rs",
-      "rtest-core/src/**/*.rs",
+      "rtest/src/**/*.rs",
       "**/test_*.py",
       "**/*_test.py"
     ],
     "configFiles": [
       "Cargo.toml",
-      "rtest-core/Cargo.toml",
+      "rtest/Cargo.toml",
       "pyproject.toml",
       ".github/workflows/*.yml",
       "CONTRIBUTING.rst"
@@ -48,8 +48,8 @@
         "check": "cargo check",
         "lint": "cargo clippy -- -D warnings",
         "format": "cargo fmt",
-        "buildCore": "cd rtest-core && cargo build",
-        "testCore": "cd rtest-core && cargo test"
+        "buildCore": "cd rtest && cargo build",
+        "testCore": "cd rtest && cargo test"
       },
       "python": {
         "setup": "uv sync --dev",
@@ -147,7 +147,7 @@
       "description": "Start working on a new feature",
       "steps": [
         "git checkout -b feature/feature-name",
-        "Create rust module in rtest-core/src/ if needed",
+        "Create rust module in rtest/src/ if needed",
         "Add python bindings in src/lib.rs if needed", 
         "Write tests first (TDD approach)",
         "Implement feature with proper error handling",
