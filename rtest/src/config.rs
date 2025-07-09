@@ -5,16 +5,10 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 /// Pytest configuration from pyproject.toml
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PytestConfig {
     /// Test paths to search for tests
     pub testpaths: Vec<PathBuf>,
-}
-
-impl Default for PytestConfig {
-    fn default() -> Self {
-        Self { testpaths: vec![] }
-    }
 }
 
 /// Read pytest configuration from pyproject.toml
@@ -22,14 +16,14 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
     let pyproject_path = root_path.join("pyproject.toml");
 
     if !pyproject_path.exists() {
-        debug!("No pyproject.toml found at {:?}", pyproject_path);
+        debug!("No pyproject.toml found at {pyproject_path:?}");
         return PytestConfig::default();
     }
 
     let content = match std::fs::read_to_string(&pyproject_path) {
         Ok(content) => content,
         Err(e) => {
-            debug!("Failed to read pyproject.toml: {}", e);
+            debug!("Failed to read pyproject.toml: {e}");
             return PytestConfig::default();
         }
     };
@@ -37,7 +31,7 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
     let toml_value: Value = match toml::from_str(&content) {
         Ok(value) => value,
         Err(e) => {
-            debug!("Failed to parse pyproject.toml: {}", e);
+            debug!("Failed to parse pyproject.toml: {e}");
             return PytestConfig::default();
         }
     };

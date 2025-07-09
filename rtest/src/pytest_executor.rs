@@ -36,7 +36,7 @@ pub fn execute_tests(
     let run_status = match run_cmd.status() {
         Ok(status) => status,
         Err(e) => {
-            eprintln!("Failed to execute pytest command: {}", e);
+            eprintln!("Failed to execute pytest command: {e}");
             return 1;
         }
     };

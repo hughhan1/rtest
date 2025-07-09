@@ -1,16 +1,12 @@
 
 [package]
-name = "rtest"
+name = "rtest-py"
 version = "0.0.19"
 edition = "2021"
 
 [lib]
-name = "rtest"
+name = "_rtest"
 crate-type = ["cdylib"]
-
-[[bin]]
-name = "rtest"
-path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

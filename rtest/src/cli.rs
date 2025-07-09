@@ -44,7 +44,7 @@ impl Args {
                 "logical" => Ok(Some(NumProcesses::Logical)),
                 _ => match s.parse::<usize>() {
                     Ok(n) => Ok(Some(NumProcesses::Count(n))),
-                    Err(_) => Err(format!("Invalid number: {}", s)),
+                    Err(_) => Err(format!("Invalid number: {s}")),
                 },
             },
         }
@@ -143,7 +143,7 @@ mod tests {
         assert!(matches!(args.get_num_processes(), Ok(None)));
 
         let args = Args::parse_from(["rtest", "-n", "invalid"]);
-        assert!(matches!(args.get_num_processes(), Err(_)));
+        assert!(args.get_num_processes().is_err());
     }
 
     #[test]
