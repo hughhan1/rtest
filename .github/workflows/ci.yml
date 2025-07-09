@@ -72,7 +72,7 @@ jobs:
       run: python -m unittest discover tests/ -v
     
     - name: Run Rust tests
-      run: cargo test --bin rtest
+      run: cargo test -p rtest --bin rtest
 
   lint:
     runs-on: ubuntu-latest
@@ -112,7 +112,7 @@ jobs:
       run: cargo fmt -- --check
     
     - name: Run clippy
-      run: cargo clippy --bin rtest -- -D warnings
+      run: cargo clippy -p rtest --bin rtest -- -D warnings
 
   # Setup job that installs dependencies once
   benchmark-setup:
