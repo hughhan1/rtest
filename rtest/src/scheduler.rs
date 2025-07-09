@@ -11,10 +11,10 @@ impl fmt::Display for SchedulerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SchedulerError::InvalidTestPath(path) => {
-                write!(f, "Invalid test path format: {}", path)
+                write!(f, "Invalid test path format: {path}")
             }
             SchedulerError::InvalidWorkerCount(count) => {
-                write!(f, "Invalid worker count: {}", count)
+                write!(f, "Invalid worker count: {count}")
             }
         }
     }
@@ -53,8 +53,7 @@ impl fmt::Display for ParseDistributionModeError {
         match self {
             ParseDistributionModeError::UnknownMode(mode) => write!(
                 f,
-                "Unsupported distribution mode: '{}'. Supported modes: load, loadscope, loadfile, worksteal, no", 
-                mode
+                "Unsupported distribution mode: '{mode}'. Supported modes: load, loadscope, loadfile, worksteal, no"
             ),
         }
     }
@@ -414,8 +413,7 @@ mod tests {
                 if let Some(&existing_worker) = scope_to_worker.get(&scope) {
                     assert_eq!(
                         existing_worker, worker_idx,
-                        "Test {} should be in same worker as other tests from scope {}",
-                        test, scope
+                        "Test {test} should be in same worker as other tests from scope {scope}"
                     );
                 } else {
                     scope_to_worker.insert(scope, worker_idx);
@@ -469,8 +467,7 @@ mod tests {
                 if let Some(&existing_worker) = file_to_worker.get(&file) {
                     assert_eq!(
                         existing_worker, worker_idx,
-                        "Test {} should be in same worker as other tests from {}",
-                        test, file
+                        "Test {test} should be in same worker as other tests from {file}"
                     );
                 } else {
                     file_to_worker.insert(file, worker_idx);
@@ -654,8 +651,7 @@ mod tests {
 
             assert_eq!(
                 files_in_worker, files_in_worker2,
-                "Worker {} should have the same files across runs",
-                worker_idx
+                "Worker {worker_idx} should have the same files across runs"
             );
         }
     }

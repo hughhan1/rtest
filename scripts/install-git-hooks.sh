@@ -63,7 +63,8 @@ if [ -n "$RUST_FILES" ]; then
     print_status "Code formatted"
 
     echo "Applying clippy fixes..."
-    if cargo clippy --bin rtest --fix --allow-staged -- -D warnings; then
+    # Run clippy on the workspace (both rtest-py and rtest crates)
+    if cargo clippy --workspace --fix --allow-staged -- -D warnings; then
         print_status "Clippy fixes applied"
     else
         print_warning "Some clippy issues couldn't be auto-fixed"
