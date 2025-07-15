@@ -6,7 +6,7 @@ import sys
 from typing import List, Optional
 
 
-def run_rtest(args: List[str], cwd: Optional[str] = None) -> str:
+def run_rtest(args: List[str], cwd: Optional[str] = None) -> tuple[int, str, str]:
     """Helper to run rtest binary and capture output.
 
     Args:
@@ -14,15 +14,22 @@ def run_rtest(args: List[str], cwd: Optional[str] = None) -> str:
         cwd: Working directory for the subprocess
 
     Returns:
-        str: The stdout output from rtest
+        tuple: (returncode, stdout, stderr)
     """
 
     # On Windows, console scripts are installed in the Scripts subdirectory
     if sys.platform == "win32":
-        scripts_dir = os.path.join(os.path.dirname(sys.executable), "Scripts")
+        exe_dir = os.path.dirname(sys.executable)
+        # Check if we're already in Scripts directory
+        if os.path.basename(exe_dir).lower() == "scripts":
+            scripts_dir = exe_dir
+        else:
+            scripts_dir = os.path.join(exe_dir, "Scripts")
         rtest_cmd = os.path.join(scripts_dir, "rtest.exe")
     else:
         rtest_cmd = os.path.join(os.path.dirname(sys.executable), "rtest")
+
+    print(f"Running rtest command: {rtest_cmd} with args: {args} in cwd: {cwd}")
 
     result = subprocess.run(
         [rtest_cmd] + args,
@@ -30,4 +37,4 @@ def run_rtest(args: List[str], cwd: Optional[str] = None) -> str:
         text=True,
         cwd=cwd,
     )
-    return result.stdout
+    return result.returncode, result.stdout, result.stderr

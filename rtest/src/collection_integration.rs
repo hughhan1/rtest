@@ -1,15 +1,16 @@
 //! Integration between Rust collection and pytest execution.
 
-use crate::collection::error::{CollectionError, CollectionOutcome};
+use crate::collection::error::{CollectionError, CollectionOutcome, CollectionWarning};
 use crate::collection::nodes::{collect_one_node, Session};
 use crate::collection::types::Collector;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-/// Holds errors encountered during collection
+/// Holds errors and warnings encountered during collection
 #[derive(Debug)]
 pub struct CollectionErrors {
     pub errors: Vec<(String, CollectionError)>,
+    pub warnings: Vec<CollectionWarning>,
 }
 
 /// Run the Rust-based collection and return test node IDs
@@ -18,7 +19,10 @@ pub fn collect_tests_rust(
     args: &[String],
 ) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
     let session = Rc::new(Session::new(rootpath));
-    let mut collection_errors = CollectionErrors { errors: Vec::new() };
+    let mut collection_errors = CollectionErrors {
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
 
     match session.perform_collect(args) {
         Ok(collectors) => {
@@ -71,6 +75,7 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
     // ANSI color codes
     const RED: &str = "\x1b[31m";
     const BOLD_RED: &str = "\x1b[1;31m";
+    const YELLOW: &str = "\x1b[33m";
     const RESET: &str = "\x1b[0m";
 
     if !errors.errors.is_empty() {
@@ -102,6 +107,7 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
 
     let item_count = test_nodes.len();
     let error_count = errors.errors.len();
+    let warning_count = errors.warnings.len();
 
     if item_count == 0 && error_count == 0 {
         println!("No tests collected.");
@@ -124,6 +130,14 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
             ));
         }
 
+        if warning_count > 0 {
+            summary_parts.push(format!(
+                "{} warning{}",
+                warning_count,
+                if warning_count == 1 { "" } else { "s" }
+            ));
+        }
+
         if !summary_parts.is_empty() {
             println!("{}", summary_parts.join(" / "));
         }
@@ -134,5 +148,17 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
                 println!("  {node}");
             }
         }
+    }
+
+    // Display warnings after the test list
+    if !errors.warnings.is_empty() {
+        println!();
+        println!(
+            "=============================== warnings summary ==============================="
+        );
+        for warning in &errors.warnings {
+            println!("{YELLOW}{warning}{RESET}");
+        }
+        println!("-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html");
     }
 }

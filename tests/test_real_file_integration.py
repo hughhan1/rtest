@@ -67,7 +67,7 @@ class TestRealFileIntegration(unittest.TestCase):
         }
 
         with create_test_project(files) as project_path:
-            output, output_lines = run_collection(project_path)
+            result = run_collection(project_path)
 
             # Expected test functions and class methods
             expected_tests = [
@@ -80,7 +80,7 @@ class TestRealFileIntegration(unittest.TestCase):
                 "test_comprehensive.py::TestStringMethods::test_split",
             ]
 
-            assert_tests_found(output_lines, expected_tests)
+            assert_tests_found(result.output_lines, expected_tests)
 
             # Verify we don't collect non-test items
             should_not_collect = [
@@ -93,7 +93,7 @@ class TestRealFileIntegration(unittest.TestCase):
                 "process_data",
             ]
 
-            assert_patterns_not_found(output, should_not_collect)
+            assert_patterns_not_found(result.output, should_not_collect)
 
     def test_collection_with_various_test_patterns(self) -> None:
         """Test collection recognizes various pytest naming patterns."""
@@ -152,7 +152,7 @@ class TestRealFileIntegration(unittest.TestCase):
 
             (project_path / "test_patterns.py").write_text(patterns_content)
 
-            output = run_rtest(["--collect-only"], cwd=str(project_path))
+            return_code, output, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             # Should collect all properly named test functions
@@ -209,7 +209,7 @@ class TestRealFileIntegration(unittest.TestCase):
         }
 
         with create_test_project(files) as project_path:
-            output, output_lines = run_collection(project_path)
+            result = run_collection(project_path)
 
             # Should find tests from all files
             expected_tests = [
@@ -220,7 +220,7 @@ class TestRealFileIntegration(unittest.TestCase):
                 "test_nested.py::test_nested_function",
             ]
 
-            assert_tests_found(output_lines, expected_tests)
+            assert_tests_found(result.output_lines, expected_tests)
 
 
 if __name__ == "__main__":

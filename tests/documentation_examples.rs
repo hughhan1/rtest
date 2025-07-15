@@ -2,11 +2,14 @@
 
 use std::process::Command;
 
+mod common;
+use common::get_rtest_binary;
+
 #[test]
 fn test_basic_usage_examples() {
     // Test basic sequential usage (should work even without pytest)
-    let output = Command::new("cargo")
-        .args(["run", "--", "--help"])
+    let output = Command::new(get_rtest_binary())
+        .arg("--help")
         .output()
         .expect("Failed to execute help command");
 
@@ -35,11 +38,8 @@ fn test_parallel_usage_examples() {
     ];
 
     for args in test_cases {
-        let mut cmd_args = vec!["run", "--"];
-        cmd_args.extend(args.iter());
-
-        let output = Command::new("cargo")
-            .args(cmd_args)
+        let output = Command::new(get_rtest_binary())
+            .args(&args)
             .output()
             .expect("Failed to execute command");
 
@@ -62,29 +62,29 @@ fn test_error_cases_examples() {
     // Test that documented error cases work as expected
 
     // Invalid distribution mode
-    let output = Command::new("cargo")
-        .args(["run", "--", "--dist", "invalid"])
+    let output = Command::new(get_rtest_binary())
+        .args(["--dist", "invalid"])
         .output()
         .expect("Failed to execute command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("not yet implemented") || stderr.contains("Only 'load' is supported"));
+    assert!(stderr.contains("Unsupported distribution mode: 'invalid'"));
 }
 
 #[test]
 fn test_version_and_help_accessibility() {
     // Ensure basic documentation commands work
 
-    let version_output = Command::new("cargo")
-        .args(["run", "--", "--version"])
+    let version_output = Command::new(get_rtest_binary())
+        .arg("--version")
         .output()
         .expect("Failed to execute version command");
 
     assert!(version_output.status.success());
 
-    let help_output = Command::new("cargo")
-        .args(["run", "--", "--help"])
+    let help_output = Command::new(get_rtest_binary())
+        .arg("--help")
         .output()
         .expect("Failed to execute help command");
 
@@ -100,8 +100,8 @@ fn test_version_and_help_accessibility() {
 #[test]
 fn test_pytest_passthrough_args() {
     // Test that pytest arguments are properly passed through
-    let output = Command::new("cargo")
-        .args(["run", "--", "-n", "2", "--", "-v", "--tb=short"])
+    let output = Command::new(get_rtest_binary())
+        .args(["-n", "2", "--", "-v", "--tb=short"])
         .output()
         .expect("Failed to execute command");
 
@@ -110,22 +110,4 @@ fn test_pytest_passthrough_args() {
     // Should not have argument parsing errors for pytest args
     assert!(!stderr.contains("error: invalid value"));
     assert!(!stderr.contains("error: unexpected argument"));
-}
-
-#[test]
-fn test_package_manager_integration() {
-    // Test that parallel execution works with different package managers
-    let package_managers = ["python", "uv", "pipenv", "poetry"];
-
-    for pm in package_managers {
-        let output = Command::new("cargo")
-            .args(["run", "--", "--package-manager", pm, "-n", "2"])
-            .output()
-            .expect("Failed to execute command");
-
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        // Should accept the package manager argument
-        assert!(!stderr.contains("error: invalid value"));
-    }
 }

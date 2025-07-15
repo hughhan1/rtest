@@ -5,8 +5,15 @@
 //! configurable naming patterns.
 
 mod discovery;
+pub mod module_resolver;
 mod pattern;
+pub mod semantic_analyzer;
 mod visitor;
 
 // Re-export public API
-pub use discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
+pub use discovery::{
+    discover_tests, discover_tests_with_inheritance, test_info_to_function, TestDiscoveryConfig,
+    TestInfo,
+};
+pub use module_resolver::{ModuleResolver, ParsedModule};
+pub use semantic_analyzer::{SemanticTestDiscovery, TestClassInfo};

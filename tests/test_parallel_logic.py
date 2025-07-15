@@ -45,7 +45,7 @@ class TestParallelLogic(unittest.TestCase):
 
         with create_test_project(test_files) as project_path:
             # Test with simulated parallel execution (single-threaded for testing)
-            output, output_lines = run_collection(project_path)
+            result = run_collection(project_path)
 
             # Should find all tests from all files
             expected_tests = [
@@ -56,7 +56,7 @@ class TestParallelLogic(unittest.TestCase):
                 "test_file3.py::test_function3",
             ]
 
-            assert_tests_found(output_lines, expected_tests)
+            assert_tests_found(result.output_lines, expected_tests)
 
     def test_collection_with_various_file_sizes(self) -> None:
         """Test collection handles various file sizes for load balancing."""
@@ -102,12 +102,12 @@ class TestParallelLogic(unittest.TestCase):
         }
 
         with create_test_project(test_files) as project_path:
-            output, output_lines = run_collection(project_path)
+            result = run_collection(project_path)
 
             # Should find all tests regardless of file size differences
             # This tests the scheduler's ability to handle varied test distributions
             expected_count = 1 + 3 + 7  # small(1) + medium(3) + large(7) = 11 tests
-            test_count = count_collected_tests(output_lines)
+            test_count = count_collected_tests(result.output_lines)
 
             # Allow some flexibility in exact count due to collection differences
             self.assertGreaterEqual(test_count, expected_count - 2, f"Should find approximately {expected_count} tests")
@@ -135,10 +135,10 @@ class TestParallelLogic(unittest.TestCase):
             # Run collection multiple times
             outputs = []
             for _ in range(3):
-                output, output_lines = run_collection(project_path)
+                result = run_collection(project_path)
 
                 # Extract just the test collection lines
-                test_lines = extract_test_lines(output_lines)
+                test_lines = extract_test_lines(result.output_lines)
                 outputs.append(sorted(test_lines))
 
             # All runs should produce the same results
@@ -175,7 +175,7 @@ class TestParallelLogic(unittest.TestCase):
                 full_path.parent.mkdir(parents=True, exist_ok=True)
                 full_path.write_text(content)
 
-            output = run_rtest(["--collect-only"], cwd=str(project_path))
+            return_code, output, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
 
             # Should find tests from all nested directories
             expected_patterns = [
@@ -236,7 +236,7 @@ class TestParallelLogic(unittest.TestCase):
                 else:
                     full_path.write_bytes(content.encode() if isinstance(content, str) else b"binary")
 
-            output = run_rtest(["--collect-only"], cwd=str(project_path))
+            return_code, output, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             # Should only find tests from actual test files
@@ -291,8 +291,8 @@ class TestParallelLogic(unittest.TestCase):
         """Test handling of completely empty projects."""
         with create_test_project({}) as project_path:
             # Create empty project
-            output, output_lines = run_collection(project_path)
-            self.assertIn("No tests found", output, "Should report no tests found for empty project")
+            result = run_collection(project_path)
+            self.assertIn("No tests found", result.output, "Should report no tests found for empty project")
 
     def test_single_test_file_collection(self) -> None:
         """Test collection with single test file (no parallelization needed)."""
@@ -305,7 +305,7 @@ class TestParallelLogic(unittest.TestCase):
             """)
             (project_path / "test_single.py").write_text(single_test_content)
 
-            output = run_rtest(["--collect-only"], cwd=str(project_path))
+            return_code, output, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
             output_lines = output.split("\n")
 
             found = any("test_single.py::test_single" in line for line in output_lines)
@@ -339,7 +339,7 @@ class TestParallelLogic(unittest.TestCase):
 
                 (project_path / f"test_module_{module_num}.py").write_text(test_content)
 
-            output = run_rtest(["--collect-only"], cwd=str(project_path))
+            return_code, output, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
 
             # Should find all tests (5 modules * (3 functions + 2 class methods) = 25 tests)
             test_lines = [line for line in output.split("\n") if "::test_" in line]

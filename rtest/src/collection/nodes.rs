@@ -4,7 +4,9 @@ use super::config::CollectionConfig;
 use super::error::{CollectionError, CollectionOutcome, CollectionResult};
 use super::types::{Collector, Location};
 use super::utils::glob_match;
-use crate::python_discovery::{discover_tests, test_info_to_function, TestDiscoveryConfig};
+use crate::python_discovery::{
+    discover_tests_with_inheritance, test_info_to_function, TestDiscoveryConfig,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -270,7 +272,17 @@ impl Collector for Module {
             python_functions: self.session().config.python_functions.clone(),
         };
 
-        let tests = discover_tests(&self.path, &source, &discovery_config)?;
+        // Use the directory containing this file as the root path for module resolution
+        // This ensures that relative imports work correctly regardless of the working directory
+        let file_dir = self.path.parent().unwrap_or(&self.session().rootpath);
+
+        let (tests, warnings) =
+            discover_tests_with_inheritance(&self.path, &source, &discovery_config, file_dir)?;
+
+        // Print warnings directly (following pytest's approach)
+        for warning in &warnings {
+            println!("{}", warning);
+        }
 
         // Use iterator to transform tests without intermediate allocations
         Ok(tests
