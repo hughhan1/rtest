@@ -40,39 +40,51 @@ jobs:
           target
         key: ${{ runner.os }}-${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Install maturin
+    - name: Create virtual environment
+      run: python -m venv .venv
+    
+    - name: Install dependencies in virtual environment
       run: |
         if [ "${{ runner.os }}" = "Windows" ]; then
-          pip install maturin
+          .venv\\Scripts\\pip install maturin pytest
         else
-          pip install maturin[patchelf]
+          .venv/bin/pip install maturin[patchelf] pytest
         fi
       shell: bash
     
-    - name: Install ziglang (Linux only)
-      if: runner.os == 'Linux'
-      run: pip install ziglang
-    
-    - name: Build wheel
+    - name: Install rtest with maturin develop
       run: |
-        if [ "${{ runner.os }}" = "Linux" ]; then
-          maturin build --release --out dist --zig
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          .venv\\Scripts\\maturin develop --release
         else
-          maturin build --release --out dist
+          .venv/bin/maturin develop --release
         fi
       shell: bash
     
-    - name: Install built wheel
-      run: pip install --find-links dist rtest
+    - name: Run Rust unit tests
+      run: |
+        cd rtest && cargo test --lib
+    
+    - name: Run Rust integration tests
+      run: cargo test
     
     - name: Test import
-      run: python -c "import rtest; print('Import successful')"
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          .venv\\Scripts\\python -c "import rtest; print('Import successful')"
+        else
+          .venv/bin/python -c "import rtest; print('Import successful')"
+        fi
+      shell: bash
     
     - name: Run Python integration tests
-      run: python -m unittest discover tests/ -v
-    
-    - name: Run Rust tests
-      run: cargo test -p rtest --bin rtest
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          .venv\\Scripts\\pytest tests/ -vvv --log-level=debug -s --cache-clear
+        else
+          .venv/bin/pytest tests/ -vvv --log-level=debug -s --cache-clear
+        fi
+      shell: bash
 
   lint:
     runs-on: ubuntu-latest
@@ -110,7 +122,7 @@ jobs:
     
     - name: Check Rust formatting
       run: cargo fmt -- --check
-    
+
     - name: Run clippy
       run: cargo clippy -p rtest --bin rtest -- -D warnings
 

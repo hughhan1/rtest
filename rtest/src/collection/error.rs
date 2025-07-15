@@ -42,3 +42,21 @@ pub enum CollectionOutcome {
     Failed,
     Skipped,
 }
+
+/// Collection warnings
+#[derive(Debug, Clone)]
+pub struct CollectionWarning {
+    pub file_path: String,
+    pub line: usize,
+    pub message: String,
+}
+
+impl fmt::Display for CollectionWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}: RtestCollectionWarning: {}",
+            self.file_path, self.line, self.message
+        )
+    }
+}

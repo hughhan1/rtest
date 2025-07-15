@@ -1,11 +1,16 @@
 //! Common test utilities and helpers.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
 use tempfile::TempDir;
 
-/// Creates a temporary directory with Python test files for testing
+/// Creates a temporary directory with Python test files for testing.
+///
+/// Used by multiple integration test modules (cli_integration, cli_parallel_options, etc.)
+#[allow(dead_code)]
 pub fn create_test_project() -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     // Create a subdirectory that doesn't start with a dot to avoid being ignored
@@ -77,4 +82,85 @@ def test_in_regular_file():
         .expect("Failed to write regular file");
 
     (temp_dir, project_path)
+}
+
+/// Helper function to get the path to the rtest binary.
+///
+/// Used by multiple integration test modules.
+#[allow(dead_code)]
+pub fn get_rtest_binary() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("rtest");
+    path.push("target");
+    path.push("debug");
+    path.push("rtest");
+
+    // Add .exe extension on Windows
+    if cfg!(target_os = "windows") {
+        path.set_extension("exe");
+    }
+
+    // Ensure the binary is built
+    if !path.exists() {
+        let output = Command::new("cargo")
+            .args(["build", "--bin", "rtest"])
+            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("rtest"))
+            .output()
+            .expect("Failed to build rtest binary");
+
+        if !output.status.success() {
+            panic!(
+                "Failed to build rtest binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    path
+}
+
+/// Creates a temporary directory with specified Python test files for testing.
+///
+/// This is a more flexible version that accepts a HashMap of file paths and contents,
+/// similar to the Python test helper.
+///
+/// # Arguments
+///
+/// * `files` - A HashMap where keys are file paths (relative to project root) and values are file contents
+///
+/// # Returns
+///
+/// A tuple of (TempDir, PathBuf) where TempDir is the temporary directory handle
+/// and PathBuf is the path to the project directory inside it.
+#[allow(dead_code)]
+pub fn create_test_project_with_files(files: HashMap<&str, &str>) -> (TempDir, PathBuf) {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    std::fs::create_dir_all(&project_path).expect("Failed to create project directory");
+
+    for (file_path, content) in files {
+        let full_path = project_path.join(file_path);
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("Failed to create parent directories");
+        }
+
+        let mut file = fs::File::create(&full_path)
+            .unwrap_or_else(|e| panic!("Failed to create file {file_path}: {e}"));
+        file.write_all(content.as_bytes())
+            .unwrap_or_else(|e| panic!("Failed to write file {file_path}: {e}"));
+    }
+
+    (temp_dir, project_path)
+}
+
+/// Creates a test project with a single Python file
+///
+/// Convenience function for simple test cases that only need one file.
+#[allow(dead_code)]
+pub fn create_test_file(filename: &str, content: &str) -> (TempDir, PathBuf) {
+    let mut files = HashMap::new();
+    files.insert(filename, content);
+    create_test_project_with_files(files)
 }

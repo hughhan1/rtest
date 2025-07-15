@@ -1,7 +1,7 @@
 //! Test that multiple syntax errors are collected and reported
 
-use rtest::collection::CollectionError;
 use rtest::collection_integration::{collect_tests_rust, display_collection_results};
+use rtest::CollectionError;
 use std::fs;
 use tempfile::TempDir;
 

@@ -3,9 +3,33 @@
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List
 
 from test_utils import run_rtest
+
+
+class CollectionResult:
+    """Result from running test collection.
+
+    Provides flexible access to output as either string or list of lines.
+    """
+
+    def __init__(self, returncode: int, stdout: str, stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self._output = stdout + stderr if stderr else stdout
+        self._output_lines = self._output.split("\n")
+
+    @property
+    def output(self) -> str:
+        """Get output as a single string."""
+        return self._output
+
+    @property
+    def output_lines(self) -> List[str]:
+        """Get output as a list of lines."""
+        return self._output_lines
 
 
 @contextmanager
@@ -34,18 +58,17 @@ def create_test_project(files: Dict[str, str]) -> Iterator[Path]:
         yield project_path
 
 
-def run_collection(project_path: Path) -> Tuple[str, List[str]]:
-    """Run test collection and return output and lines.
+def run_collection(project_path: Path) -> CollectionResult:
+    """Run test collection and return result with flexible output access.
 
     Args:
         project_path: Path to the project directory
 
     Returns:
-        Tuple of (full output string, list of output lines)
+        CollectionResult with returncode, output as string, and output as lines
     """
-    output = run_rtest(["--collect-only"], cwd=str(project_path))
-    output_lines = output.split("\n")
-    return output, output_lines
+    returncode, stdout, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
+    return CollectionResult(returncode, stdout, stderr)
 
 
 def assert_tests_found(output_lines: List[str], expected_tests: List[str]) -> None:
