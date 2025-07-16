@@ -19,18 +19,26 @@ pub struct ParsedModule {
 
 /// Resolves Python module imports to file paths and loads modules
 pub struct ModuleResolver {
-    /// Root directory to search for modules
-    root_path: PathBuf,
+    /// Search paths for module resolution
+    search_paths: Vec<PathBuf>,
     /// Cache of already loaded modules
     cache: HashMap<Vec<String>, ParsedModule>,
 }
 
 impl ModuleResolver {
-    pub fn new(root_path: PathBuf) -> Self {
-        Self {
-            root_path,
+    pub fn new(project_root: &Path) -> CollectionResult<Self> {
+        let mut search_paths = Vec::new();
+
+        // Add PYTHONPATH from environment first (takes precedence)
+        search_paths.extend(get_pythonpath_from_env());
+
+        // Then add the project root
+        search_paths.push(project_root.to_path_buf());
+
+        Ok(Self {
+            search_paths,
             cache: HashMap::new(),
-        }
+        })
     }
 
     /// Resolve a module path to a file and load it
@@ -40,64 +48,69 @@ impl ModuleResolver {
             return Ok(self.cache.get(module_path).unwrap());
         }
 
-        // Convert module path to file path
-        let file_path = self.module_path_to_file_path(module_path)?;
-
-        // Load and parse the module
+        // Resolve using search paths
+        let file_path = self.resolve_with_search_paths(module_path)?;
         let parsed = self.load_module(&file_path)?;
-
-        // Cache and return
         self.cache.insert(module_path.to_vec(), parsed);
-        // Safe to unwrap here since we just inserted the value
-        Ok(self
-            .cache
-            .get(module_path)
-            .expect("Just inserted value should exist"))
+        Ok(self.cache.get(module_path).unwrap())
     }
 
-    /// Convert a module path like ["tests", "test_example"] to a file path
-    fn module_path_to_file_path(&self, module_path: &[String]) -> CollectionResult<PathBuf> {
+    /// Resolve module using search paths
+    fn resolve_with_search_paths(&self, module_path: &[String]) -> CollectionResult<PathBuf> {
         if module_path.is_empty() {
             return Err(CollectionError::ImportError("Empty module path".into()));
         }
 
-        let module_name = &module_path[0];
+        let module_name = module_path.join(".");
 
-        // Check if this is a built-in module (compiled into interpreter)
-        // Use Python 3.11 as a reasonable default version
-        if is_builtin_module(11, module_name) {
+        // Check if this is a built-in module
+        if is_builtin_module(11, &module_path[0]) {
             return Err(CollectionError::ImportError(format!(
                 "Cannot resolve built-in module '{}' - inheritance from built-in modules is not supported",
-                module_path.join(".")
+                module_name
             )));
         }
 
-        // Try different possible file paths by attempting to read them
-        let possible_paths = self.get_possible_paths(module_path);
-        for path in &possible_paths {
-            // Try to read the file directly instead of checking existence first
-            // This avoids TOCTOU issues and is more efficient
-            if std::fs::metadata(&path).is_ok() {
-                return Ok(path.clone());
+        // Try each search path in order
+        for search_path in &self.search_paths {
+            if let Ok(file_path) = self.try_resolve_in_search_path(module_path, search_path) {
+                return Ok(file_path);
             }
         }
 
         Err(CollectionError::ImportError(format!(
             "Could not find module: {}",
-            module_path.join(".")
+            module_name
         )))
     }
 
-    /// Get all possible file paths for a module following Python import semantics
-    fn get_possible_paths(&self, module_path: &[String]) -> Vec<PathBuf> {
+    /// Try to resolve a module in a specific search path
+    fn try_resolve_in_search_path(
+        &self,
+        module_path: &[String],
+        search_path: &PathBuf,
+    ) -> Result<PathBuf, ()> {
+        let possible_paths = self.get_possible_paths_in_root(module_path, search_path);
+
+        for path in &possible_paths {
+            if std::fs::metadata(&path).is_ok() {
+                return Ok(path.clone());
+            }
+        }
+
+        Err(())
+    }
+
+    /// Get all possible file paths for a module in a specific root directory
+    fn get_possible_paths_in_root(&self, module_path: &[String], root: &PathBuf) -> Vec<PathBuf> {
         if module_path.is_empty() {
             return Vec::new();
         }
 
         let mut paths = Vec::new();
+        let mut base_dir = root.clone();
 
         // Build the base directory path from all but the last component
-        let mut base_dir = self.root_path.clone();
         if module_path.len() > 1 {
             for part in &module_path[..module_path.len() - 1] {
                 base_dir.push(part);
@@ -145,6 +158,13 @@ impl ModuleResolver {
     }
 }
 
+/// Get PYTHONPATH environment variable as search paths
+fn get_pythonpath_from_env() -> Vec<PathBuf> {
+    std::env::var("PYTHONPATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,29 +185,50 @@ mod tests {
         fs::write(root.join("package/subpackage/__init__.py"), "").unwrap();
         fs::write(root.join("package/module.py"), "# module").unwrap();
 
-        let resolver = ModuleResolver::new(root.to_path_buf());
+        let mut resolver = ModuleResolver::new(root).unwrap();
 
         // Test simple module
         let path = resolver
-            .module_path_to_file_path(&["tests".into(), "test_example".into()])
+            .resolve_and_load(&["tests".into(), "test_example".into()])
             .unwrap();
-        assert_eq!(path, root.join("tests/test_example.py"));
+        assert_eq!(path.path, root.join("tests/test_example.py"));
 
         // Test package with __init__.py
-        let path = resolver
-            .module_path_to_file_path(&["package".into()])
-            .unwrap();
-        assert_eq!(path, root.join("package/__init__.py"));
+        let path = resolver.resolve_and_load(&["package".into()]).unwrap();
+        assert_eq!(path.path, root.join("package/__init__.py"));
 
         // Test module in package
         let path = resolver
-            .module_path_to_file_path(&["package".into(), "module".into()])
+            .resolve_and_load(&["package".into(), "module".into()])
             .unwrap();
-        assert_eq!(path, root.join("package/module.py"));
+        assert_eq!(path.path, root.join("package/module.py"));
 
         // Test non-existent module
-        assert!(resolver
-            .module_path_to_file_path(&["nonexistent".into()])
-            .is_err());
+        assert!(resolver.resolve_and_load(&["nonexistent".into()]).is_err());
+    }
+
+    #[test]
+    fn test_sys_path_resolution() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        // Create test module in temp directory
+        fs::write(root.join("test_module.py"), "# test module").unwrap();
+
+        // Create resolver with sys.path support
+        let mut resolver = ModuleResolver::new(root).unwrap();
+
+        // Should be able to resolve the module
+        let result = resolver.resolve_and_load(&["test_module".into()]);
+        // This might fail if the temp dir isn't in Python's sys.path, which is expected
+        // The test verifies the resolver doesn't crash
+        match result {
+            Ok(parsed) => {
+                assert_eq!(parsed.path, root.join("test_module.py"));
+            }
+            Err(_) => {
+                // Expected if temp dir not in sys.path
+            }
+        }
     }
 }

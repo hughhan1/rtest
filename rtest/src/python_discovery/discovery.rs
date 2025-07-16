@@ -63,7 +63,7 @@ pub fn discover_tests_with_inheritance(
     root_path: &Path,
 ) -> CollectionResult<(Vec<TestInfo>, Vec<CollectionWarning>)> {
     let module_path = path_to_module_path(path, root_path);
-    let mut module_resolver = ModuleResolver::new(root_path.to_path_buf());
+    let mut module_resolver = ModuleResolver::new(root_path)?;
     let mut discovery = SemanticTestDiscovery::new(config.clone());
 
     discovery.discover_tests(path, source, module_path, &mut module_resolver)

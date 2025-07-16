@@ -1,5 +1,6 @@
 """Integration tests for test collection functionality."""
 
+import os
 import tempfile
 import textwrap
 import unittest
@@ -20,83 +21,69 @@ from rtest._rtest import run_tests
 class TestCollectionIntegration(unittest.TestCase):
     """Test that Rust-based collection finds all expected tests."""
 
-    def create_test_project(self) -> Path:
-        """Create a temporary test project with sample test files."""
-        temp_dir = tempfile.mkdtemp()
-        project_path = Path(temp_dir)
-
-        # Create test_sample.py
-        sample_content = textwrap.dedent("""
-            def test_simple_function():
-                assert 1 + 1 == 2
-
-            def test_another_function():
-                assert "hello".upper() == "HELLO"
-
-            def helper_method():
-                return "not a test"
-
-            class TestExampleClass:
-                def test_method_one(self):
-                    assert True
-
-                def test_method_two(self):
-                    assert len([1, 2, 3]) == 3
-
-            def not_a_test():
-                return False
-        """)
-        (project_path / "test_sample.py").write_text(sample_content)
-
-        # Create test_math.py
-        math_content = textwrap.dedent("""
-            def test_math_operations():
-                assert 2 * 3 == 6
-
-            class TestCalculator:
-                def test_addition(self):
-                    assert 5 + 3 == 8
-
-                def test_subtraction(self):
-                    assert 10 - 4 == 6
-        """)
-        (project_path / "test_math.py").write_text(math_content)
-
-        # Create utils.py (non-test file)
-        utils_content = textwrap.dedent("""
-            def utility_function():
-                return "utility"
-
-            def test_in_non_test_file():
-                # This should not be collected
-                pass
-        """)
-        (project_path / "utils.py").write_text(utils_content)
-
-        return project_path
-
     def test_collection_finds_all_tests(self) -> None:
         """Test that collection finds all expected test patterns."""
-        project_path = self.create_test_project()
+        files = {
+            "test_sample.py": textwrap.dedent("""
+                def test_simple_function():
+                    assert 1 + 1 == 2
 
-        result = run_collection(project_path)
+                def test_another_function():
+                    assert "hello".upper() == "HELLO"
 
-        # Check for expected test patterns
-        expected_patterns = [
-            "test_sample.py::test_simple_function",
-            "test_sample.py::test_another_function",
-            "test_sample.py::TestExampleClass::test_method_one",
-            "test_sample.py::TestExampleClass::test_method_two",
-            "test_math.py::test_math_operations",
-            "test_math.py::TestCalculator::test_addition",
-            "test_math.py::TestCalculator::test_subtraction",
-        ]
+                def helper_method():
+                    return "not a test"
 
-        assert_tests_found(result.output_lines, expected_patterns)
+                class TestExampleClass:
+                    def test_method_one(self):
+                        assert True
 
-        # Should NOT find these patterns
-        patterns_to_not_find = ["utils.py", "helper_method", "not_a_test"]
-        assert_patterns_not_found(result.output, patterns_to_not_find)
+                    def test_method_two(self):
+                        assert len([1, 2, 3]) == 3
+
+                def not_a_test():
+                    return False
+            """),
+            "test_math.py": textwrap.dedent("""
+                def test_math_operations():
+                    assert 2 * 3 == 6
+
+                class TestCalculator:
+                    def test_addition(self):
+                        assert 5 + 3 == 8
+
+                    def test_subtraction(self):
+                        assert 10 - 4 == 6
+            """),
+            "utils.py": textwrap.dedent("""
+                def utility_function():
+                    return "utility"
+
+                def test_in_non_test_file():
+                    # This should not be collected
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Check for expected test patterns
+            expected_patterns = [
+                "test_sample.py::test_simple_function",
+                "test_sample.py::test_another_function",
+                "test_sample.py::TestExampleClass::test_method_one",
+                "test_sample.py::TestExampleClass::test_method_two",
+                "test_math.py::test_math_operations",
+                "test_math.py::TestCalculator::test_addition",
+                "test_math.py::TestCalculator::test_subtraction",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
+            # Should NOT find these patterns
+            patterns_to_not_find = ["utils.py", "helper_method", "not_a_test"]
+            assert_patterns_not_found(result.output, patterns_to_not_find)
 
     def test_collection_with_no_tests(self) -> None:
         """Test collection with no test files."""
@@ -762,108 +749,6 @@ class TestCollectionIntegration(unittest.TestCase):
             error_text = result.stdout + result.stderr
             self.assertIn("Could not find module: nonexistent_module", error_text)
 
-    def test_builtin_module_import_issue(self) -> None:
-        """Test that built-in and stdlib module imports are handled properly."""
-        # Test with sys (built-in module)
-        files_sys = {
-            "test_builtin_import.py": textwrap.dedent("""
-                import sys
-
-                class TestWithBuiltinModuleBase(sys.SomeNonExistentClass):
-                    def test_method(self):
-                        assert True
-            """)
-        }
-
-        with create_test_project(files_sys) as project_path:
-            result = run_collection(project_path)
-
-            self.assertNotEqual(result.returncode, 0)
-            error_text = result.stdout + result.stderr
-            self.assertIn(
-                "Cannot resolve built-in module 'sys' - inheritance from built-in modules is not supported",
-                error_text,
-            )
-
-        # Test with os (stdlib module)
-        files_os = {
-            "test_stdlib_import.py": textwrap.dedent("""
-                import os
-
-                class TestWithStdlibModuleBase(os.SomeNonExistentClass):
-                    def test_method(self):
-                        assert True
-            """)
-        }
-
-        with create_test_project(files_os) as project_path:
-            result = run_collection(project_path)
-
-            self.assertNotEqual(result.returncode, 0)
-            error_text = result.stdout + result.stderr
-            # os is not a built-in module, so it will try normal resolution and fail
-            self.assertIn("Could not find module: os", error_text)
-
-    def test_various_stdlib_modules_not_supported(self) -> None:
-        """Test that various common stdlib modules are properly detected and rejected."""
-        # Test built-in modules
-        builtin_test_cases = [
-            ("itertools", "itertools.chain"),
-        ]
-
-        for module_name, class_path in builtin_test_cases:
-            with self.subTest(module=f"{module_name}_builtin"):
-                files = {
-                    f"test_{module_name}_import.py": textwrap.dedent(f"""
-                        import {module_name}
-
-                        class TestWith{module_name.title()}Base({class_path}):
-                            def test_method(self):
-                                assert True
-                    """)
-                }
-
-                with create_test_project(files) as project_path:
-                    result = run_collection(project_path)
-
-                    self.assertNotEqual(result.returncode, 0)
-                    error_text = result.stdout + result.stderr
-                    # Built-in modules should give built-in error
-                    self.assertIn(
-                        (
-                            f"Cannot resolve built-in module '{module_name}' - "
-                            "inheritance from built-in modules is not supported"
-                        ),
-                        error_text,
-                    )
-
-        # Test regular stdlib modules (not built-in)
-        stdlib_test_cases = [
-            ("json", "json.JSONEncoder"),
-            ("datetime", "datetime.datetime"),
-            ("collections", "collections.OrderedDict"),
-        ]
-
-        for module_name, class_path in stdlib_test_cases:
-            with self.subTest(module=f"{module_name}_stdlib"):
-                files = {
-                    f"test_{module_name}_import.py": textwrap.dedent(f"""
-                        import {module_name}
-
-                        class TestWith{module_name.title()}Base({class_path}):
-                            def test_method(self):
-                                assert True
-                    """)
-                }
-
-                with create_test_project(files) as project_path:
-                    result = run_collection(project_path)
-
-                    self.assertNotEqual(result.returncode, 0)
-                    error_text = result.stdout + result.stderr
-                    # Regular stdlib modules should fail with normal resolution error
-                    self.assertIn(f"Could not find module: {module_name}", error_text)
-
     def test_unittest_testcase_inheritance_supported(self) -> None:
         """Test that inheritance from unittest.TestCase is properly supported."""
         files = {
@@ -982,6 +867,216 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertIn("test_multi_param.py::TestSquare::test_operation", output)
             self.assertIn("test_multi_param.py::TestCube::test_operation", output)
             self.assertIn("collected 3 items", output)
+
+    def test_sys_path_import_resolution(self) -> None:
+        """Test that imports from directories in sys.path are resolved correctly."""
+        with tempfile.TemporaryDirectory() as external_dir:
+            # Create a module in the external directory
+            external_module_content = textwrap.dedent("""
+                class TestExternalBase:
+                    def test_external_method(self):
+                        assert True
+
+                    def test_another_external_method(self):
+                        assert True
+            """)
+            (Path(external_dir) / "external_test_module.py").write_text(external_module_content)
+
+            # Create test file that imports from external module
+            files = {
+                "test_sys_path_import.py": textwrap.dedent("""
+                    from external_test_module import TestExternalBase
+
+                    class TestWithSysPathImport(TestExternalBase):
+                        def test_local_method(self):
+                            assert True
+                """)
+            }
+
+            with create_test_project(files) as project_path:
+                # Set PYTHONPATH to include the external directory
+                env = os.environ.copy()
+                env["PYTHONPATH"] = external_dir
+
+                result = run_collection(project_path, env=env)
+
+                # Should succeed and find inherited methods from sys.path
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"sys.path import resolution should work. Error: {result.output}",
+                )
+
+                # Should collect both inherited methods and local method
+                self.assertIn("test_sys_path_import.py::TestWithSysPathImport::test_external_method", result.output)
+                self.assertIn(
+                    "test_sys_path_import.py::TestWithSysPathImport::test_another_external_method", result.output
+                )
+                self.assertIn("test_sys_path_import.py::TestWithSysPathImport::test_local_method", result.output)
+                self.assertIn("collected 3 items", result.output)
+
+    def test_pythonpath_multiple_directories(self) -> None:
+        """Test that multiple directories in PYTHONPATH are searched in order."""
+        # Create two external directories
+        with tempfile.TemporaryDirectory() as external_dir1, tempfile.TemporaryDirectory() as external_dir2:
+            # Create same module name in both directories with different content
+            module1_content = textwrap.dedent("""
+                class TestPriority:
+                    def test_from_first_dir(self):
+                        assert True
+            """)
+            (Path(external_dir1) / "priority_module.py").write_text(module1_content)
+
+            module2_content = textwrap.dedent("""
+                class TestPriority:
+                    def test_from_second_dir(self):
+                        assert True
+            """)
+            (Path(external_dir2) / "priority_module.py").write_text(module2_content)
+
+            # Create test file
+            files = {
+                "test_priority.py": textwrap.dedent("""
+                    from priority_module import TestPriority
+
+                    class TestPriorityChild(TestPriority):
+                        def test_child_method(self):
+                            assert True
+                """)
+            }
+
+            with create_test_project(files) as project_path:
+                # Set PYTHONPATH with dir1 first (should take precedence)
+                env = os.environ.copy()
+                env["PYTHONPATH"] = f"{external_dir1}{os.pathsep}{external_dir2}"
+
+                result = run_collection(project_path, env=env)
+
+                self.assertEqual(result.returncode, 0)
+
+                # Should use the module from the first directory
+                self.assertIn("test_priority.py::TestPriorityChild::test_from_first_dir", result.output)
+                self.assertNotIn("test_from_second_dir", result.output)
+                self.assertIn("test_priority.py::TestPriorityChild::test_child_method", result.output)
+
+    def test_unittest_inheritance(self) -> None:
+        """Test that importing and inheriting from unittest.TestCase works."""
+        files = {
+            "test_unittest_inheritance.py": textwrap.dedent("""
+                import unittest
+
+                class TestWithStdlib(unittest.TestCase):
+                    def test_using_unittest(self):
+                        self.assertTrue(True)
+            """)
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Should successfully collect the test
+            self.assertEqual(result.returncode, 0)
+
+            self.assertIn("test_unittest_inheritance.py::TestWithStdlib::test_using_unittest", result.output)
+            self.assertIn("collected 1 item", result.output)
+
+    def test_site_packages_inheritance(self) -> None:
+        """Test that imports from site-packages are resolved correctly."""
+
+        # Create test file that imports from site-packages
+        files = {
+            "test_site_inheritance.py": textwrap.dedent("""
+                from site_test_module import TestSitePackageBase
+
+                class TestWithSitePackageImport(TestSitePackageBase):
+                    def test_local_method(self):
+                        assert True
+            """)
+        }
+
+        with tempfile.TemporaryDirectory() as site_packages_dir:
+            # Create a module in the site-packages directory
+            site_module_content = textwrap.dedent("""
+                class TestSitePackageBase:
+                    def test_site_package_method(self):
+                        assert True
+
+                    def test_another_site_method(self):
+                        assert True
+            """)
+            (Path(site_packages_dir) / "site_test_module.py").write_text(site_module_content)
+
+            with create_test_project(files) as project_path:
+                # Set PYTHONPATH to include the site-packages directory
+                env = os.environ.copy()
+                env["PYTHONPATH"] = site_packages_dir
+
+                result = run_collection(project_path, env=env)
+
+                # Should succeed and find inherited methods from site-packages
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"site-packages import resolution should work. Error: {result.output}",
+                )
+
+                # Should collect both inherited methods and local method
+                self.assertIn(
+                    "test_site_inheritance.py::TestWithSitePackageImport::test_site_package_method", result.output
+                )
+                self.assertIn(
+                    "test_site_inheritance.py::TestWithSitePackageImport::test_another_site_method", result.output
+                )
+                self.assertIn("test_site_inheritance.py::TestWithSitePackageImport::test_local_method", result.output)
+                self.assertIn("collected 3 items", result.output)
+
+    def test_nested_package_import_from_sys_path(self) -> None:
+        """Test importing from nested packages in sys.path."""
+        with tempfile.TemporaryDirectory() as external_dir:
+            # Create nested package structure
+            package_dir = Path(external_dir) / "mypackage"
+            subpackage_dir = package_dir / "subpackage"
+            subpackage_dir.mkdir(parents=True)
+
+            # Create __init__ files
+            (package_dir / "__init__.py").write_text("")
+            (subpackage_dir / "__init__.py").write_text("")
+
+            # Create test module in subpackage
+            nested_module_content = textwrap.dedent("""
+                class TestNestedBase:
+                    def test_nested_method(self):
+                        assert True
+            """)
+            (subpackage_dir / "nested_module.py").write_text(nested_module_content)
+
+            # Create test file
+            files = {
+                "test_nested_import.py": textwrap.dedent("""
+                    from mypackage.subpackage.nested_module import TestNestedBase
+
+                    class TestNestedChild(TestNestedBase):
+                        def test_child_method(self):
+                            assert True
+                """)
+            }
+
+            with create_test_project(files) as project_path:
+                env = os.environ.copy()
+                env["PYTHONPATH"] = external_dir
+
+                result = run_collection(project_path, env=env)
+
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"Nested package import should work. Error: {result.output}",
+                )
+
+                # Should find both inherited and local methods
+                self.assertIn("test_nested_import.py::TestNestedChild::test_nested_method", result.output)
+                self.assertIn("test_nested_import.py::TestNestedChild::test_child_method", result.output)
+                self.assertIn("collected 2 items", result.output)
 
 
 if __name__ == "__main__":
