@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::process::Command;
+use tempfile::TempDir;
 
 mod common;
 use common::{create_test_file, create_test_project_with_files, get_rtest_binary};
@@ -1001,59 +1002,275 @@ class TestImportStyle2(test_base_module.TestBase2):
     assert!(stdout.contains("test_import_patterns.py::TestImportStyle2::test_style2_method"));
 }
 
-/// Test handling of stdlib/builtin module inheritance attempts
+/// Test sys.path import resolution
 #[test]
-fn test_stdlib_module_inheritance() {
-    // Test with sys (built-in module)
-    let (_temp_dir, project_path) = create_test_file(
-        "test_sys_inherit.py",
-        r#"import sys
+fn test_sys_path_import_resolution() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    let external_path = temp_dir.path().join("external_libs");
 
-class TestWithSysBase(sys.SomeNonExistentClass):
-    def test_method(self):
+    std::fs::create_dir_all(&project_path).expect("Failed to create project directory");
+    std::fs::create_dir_all(&external_path).expect("Failed to create external directory");
+
+    // Create base test class in external directory
+    let base_content = r#"class BaseTestClass:
+    def test_base_method(self):
         assert True
+"#;
+    let base_path = external_path.join("base_module.py");
+    std::fs::write(&base_path, base_content).expect("Failed to write base module");
+
+    // Create test file that inherits from external module
+    let test_content = r#"from base_module import BaseTestClass
+
+class TestDerived(BaseTestClass):
+    def test_derived_method(self):
+        assert True
+"#;
+    let test_path = project_path.join("test_inheritance.py");
+    std::fs::write(&test_path, test_content).expect("Failed to write test file");
+
+    // Run test collection with PYTHONPATH set
+    let mut cmd = Command::new(get_rtest_binary());
+    cmd.args(["--collect-only"])
+        .current_dir(&project_path)
+        .env("PYTHONPATH", external_path.to_str().unwrap());
+
+    let output = cmd.output().expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "Command should succeed");
+
+    // Should find both inherited and derived tests
+    assert!(stdout.contains("test_inheritance.py::TestDerived::test_base_method"));
+    assert!(stdout.contains("test_inheritance.py::TestDerived::test_derived_method"));
+    assert!(stdout.contains("collected 2 items"));
+}
+
+/// Test PYTHONPATH priority over project directory
+#[test]
+fn test_pythonpath_multiple_directories() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    let external1 = temp_dir.path().join("external1");
+    let external2 = temp_dir.path().join("external2");
+
+    std::fs::create_dir_all(&project_path).expect("Failed to create project directory");
+    std::fs::create_dir_all(&external1).expect("Failed to create external1 directory");
+    std::fs::create_dir_all(&external2).expect("Failed to create external2 directory");
+
+    // Create same module in multiple locations
+    let module1_content = r#"class SharedModule:
+    def test_from_external1(self):
+        assert True
+"#;
+    std::fs::write(external1.join("shared.py"), module1_content)
+        .expect("Failed to write to external1");
+
+    let module2_content = r#"class SharedModule:
+    def test_from_external2(self):
+        assert True
+"#;
+    std::fs::write(external2.join("shared.py"), module2_content)
+        .expect("Failed to write to external2");
+
+    let project_module_content = r#"class SharedModule:
+    def test_from_project(self):
+        assert True
+"#;
+    std::fs::write(project_path.join("shared.py"), project_module_content)
+        .expect("Failed to write to project");
+
+    // Create test that imports the shared module
+    let test_content = r#"from shared import SharedModule
+
+class TestPriority(SharedModule):
+    def test_priority_method(self):
+        assert True
+"#;
+    std::fs::write(project_path.join("test_priority.py"), test_content)
+        .expect("Failed to write test file");
+
+    // Test with external1 first in PYTHONPATH
+    let pythonpath = format!(
+        "{}{}{}",
+        external1.to_str().unwrap(),
+        if cfg!(windows) { ";" } else { ":" },
+        external2.to_str().unwrap()
+    );
+
+    let mut cmd = Command::new(get_rtest_binary());
+    cmd.args(["--collect-only"])
+        .current_dir(&project_path)
+        .env("PYTHONPATH", &pythonpath);
+
+    let output = cmd.output().expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    eprintln!("=== test_pythonpath_multiple_directories debug ===");
+    eprintln!("Exit status: {:?}", output.status);
+    eprintln!("Stdout: {stdout}");
+    eprintln!("Stderr: {stderr}");
+    eprintln!("PYTHONPATH: {pythonpath}");
+    eprintln!("================================================");
+
+    assert!(output.status.success(), "Command should succeed");
+
+    // Should use external1's version (first in PYTHONPATH)
+    assert!(stdout.contains("test_priority.py::TestPriority::test_from_external1"));
+    assert!(stdout.contains("test_priority.py::TestPriority::test_priority_method"));
+    assert!(!stdout.contains("test_from_external2"));
+    assert!(!stdout.contains("test_from_project"));
+}
+
+/// Test importing and inheriting from site-packages
+#[test]
+fn test_site_packages_inheritance() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    let site_packages = temp_dir.path().join("site-packages");
+
+    std::fs::create_dir_all(&project_path).expect("Failed to create project directory");
+    std::fs::create_dir_all(&site_packages).expect("Failed to create site-packages directory");
+
+    // Create a mock third-party test utilities module
+    let utils_content = r#"class ThirdPartyTestBase:
+    def test_third_party_method(self):
+        assert True
+"#;
+    std::fs::write(
+        site_packages.join("test_utils_third_party.py"),
+        utils_content,
+    )
+    .expect("Failed to write third party module");
+
+    // Create test that uses third-party module
+    let test_content = r#"from test_utils_third_party import ThirdPartyTestBase
+
+class TestWithThirdParty(ThirdPartyTestBase):
+    def test_our_method(self):
+        assert True
+"#;
+    std::fs::write(project_path.join("test_third_party.py"), test_content)
+        .expect("Failed to write test file");
+
+    // Run with site-packages in PYTHONPATH
+    let mut cmd = Command::new(get_rtest_binary());
+    cmd.args(["--collect-only"])
+        .current_dir(&project_path)
+        .env("PYTHONPATH", site_packages.to_str().unwrap());
+
+    let output = cmd.output().expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "Command should succeed");
+
+    // Should find both methods
+    assert!(stdout.contains("test_third_party.py::TestWithThirdParty::test_third_party_method"));
+    assert!(stdout.contains("test_third_party.py::TestWithThirdParty::test_our_method"));
+    assert!(stdout.contains("collected 2 items"));
+}
+
+/// Test nested package imports from sys.path
+#[test]
+fn test_nested_package_import_from_sys_path() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    let external_path = temp_dir.path().join("external");
+
+    std::fs::create_dir_all(&project_path).expect("Failed to create project directory");
+    std::fs::create_dir_all(&external_path).expect("Failed to create external directory");
+
+    // Create nested package structure
+    let package_path = external_path.join("mypackage");
+    let subpackage_path = package_path.join("testing");
+    std::fs::create_dir_all(&subpackage_path).expect("Failed to create package directories");
+
+    // Create __init__.py files
+    std::fs::write(package_path.join("__init__.py"), "").expect("Failed to write package init");
+    std::fs::write(subpackage_path.join("__init__.py"), "")
+        .expect("Failed to write subpackage init");
+
+    // Create base test class in nested package
+    let base_content = r#"class PackageTestBase:
+    def test_package_base_method(self):
+        assert True
+"#;
+    std::fs::write(subpackage_path.join("base.py"), base_content)
+        .expect("Failed to write base module");
+
+    // Create test that imports from nested package
+    let test_content = r#"from mypackage.testing.base import PackageTestBase
+
+class TestNestedImport(PackageTestBase):
+    def test_nested_method(self):
+        assert True
+"#;
+    std::fs::write(project_path.join("test_nested.py"), test_content)
+        .expect("Failed to write test file");
+
+    // Run with external path in PYTHONPATH
+    let mut cmd = Command::new(get_rtest_binary());
+    cmd.args(["--collect-only"])
+        .current_dir(&project_path)
+        .env("PYTHONPATH", external_path.to_str().unwrap());
+
+    let output = cmd.output().expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    eprintln!("=== test_nested_package_import_from_sys_path debug ===");
+    eprintln!("Exit status: {:?}", output.status);
+    eprintln!("Stdout: {stdout}");
+    eprintln!("Stderr: {stderr}");
+    eprintln!("======================================================");
+
+    assert!(output.status.success(), "Command should succeed");
+
+    // Should find both methods
+    assert!(stdout.contains("test_nested.py::TestNestedImport::test_package_base_method"));
+    assert!(stdout.contains("test_nested.py::TestNestedImport::test_nested_method"));
+    assert!(stdout.contains("collected 2 items"));
+}
+
+/// Test unittest inheritance
+#[test]
+fn test_unittest_inheritance() {
+    let mut files = HashMap::new();
+
+    files.insert(
+        "test_unittest_inheritance.py",
+        r#"import unittest
+
+class TestWithStdlib(unittest.TestCase):
+    def test_using_unittest(self):
+        self.assertTrue(True)
 "#,
     );
 
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
     let output = Command::new(get_rtest_binary())
-        .args(["--collect-only", "test_sys_inherit.py"])
+        .args(["--collect-only"])
         .current_dir(&project_path)
         .output()
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}{stderr}");
 
-    assert!(!output.status.success());
+    // Should successfully collect the test
     assert!(
-        combined.contains("Cannot resolve built-in module 'sys'")
-            || combined.contains("inheritance from built-in modules is not supported")
+        output.status.success(),
+        "Command should succeed. Error: {stderr}"
     );
 
-    // Test with regular stdlib module
-    let (_temp_dir2, project_path2) = create_test_file(
-        "test_json_inherit.py",
-        r#"import json
-
-class TestWithJsonBase(json.JSONEncoder):
-    def test_method(self):
-        assert True
-"#,
-    );
-
-    let output2 = Command::new(get_rtest_binary())
-        .args(["--collect-only", "test_json_inherit.py"])
-        .current_dir(&project_path2)
-        .output()
-        .expect("Failed to execute command");
-
-    let combined2 = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output2.stdout),
-        String::from_utf8_lossy(&output2.stderr)
-    );
-
-    assert!(!output2.status.success());
-    assert!(combined2.contains("Could not find module: json"));
+    let combined = format!("{stdout}{stderr}");
+    assert!(combined.contains("test_unittest_inheritance.py::TestWithStdlib::test_using_unittest"));
+    assert!(combined.contains("collected 1 item"));
 }

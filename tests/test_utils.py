@@ -3,15 +3,16 @@
 import os
 import subprocess
 import sys
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
-def run_rtest(args: List[str], cwd: Optional[str] = None) -> tuple[int, str, str]:
+def run_rtest(args: List[str], cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
     """Helper to run rtest binary and capture output.
 
     Args:
         args: List of command line arguments
         cwd: Working directory for the subprocess
+        env: Environment variables to use (if None, uses current environment)
 
     Returns:
         tuple: (returncode, stdout, stderr)
@@ -36,5 +37,6 @@ def run_rtest(args: List[str], cwd: Optional[str] = None) -> tuple[int, str, str
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=env,
     )
     return result.returncode, result.stdout, result.stderr

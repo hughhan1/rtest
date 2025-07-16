@@ -592,23 +592,23 @@ impl SemanticTestDiscovery {
                 if let Stmt::ClassDef(class_def) = stmt {
                     let class_name = class_def.name.as_str();
 
-                    if self.is_test_class(class_name) {
-                        let has_init = self.class_has_init(class_def);
-                        let test_methods = self.collect_test_methods(class_def);
-                        let imports = self.collect_imports_from_module(&parsed_module.module);
-                        let base_classes =
-                            self.collect_base_class_names(class_def, module_path, &imports)?;
+                    // Always collect class info for external modules, even if they don't match test patterns
+                    // They might be used as base classes
+                    let has_init = self.class_has_init(class_def);
+                    let test_methods = self.collect_test_methods(class_def);
+                    let imports = self.collect_imports_from_module(&parsed_module.module);
+                    let base_classes =
+                        self.collect_base_class_names(class_def, module_path, &imports)?;
 
-                        let info = TestClassInfo {
-                            name: class_name.to_string(),
-                            has_init,
-                            test_methods,
-                            base_classes,
-                        };
+                    let info = TestClassInfo {
+                        name: class_name.to_string(),
+                        has_init,
+                        test_methods,
+                        base_classes,
+                    };
 
-                        self.class_cache
-                            .insert((module_path.to_vec(), class_name.to_string()), info);
-                    }
+                    self.class_cache
+                        .insert((module_path.to_vec(), class_name.to_string()), info);
                 }
             }
         }

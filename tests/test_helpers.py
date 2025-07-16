@@ -3,7 +3,7 @@
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterator, List
+from typing import Dict, Iterator, List, Optional
 
 from test_utils import run_rtest
 
@@ -58,16 +58,17 @@ def create_test_project(files: Dict[str, str]) -> Iterator[Path]:
         yield project_path
 
 
-def run_collection(project_path: Path) -> CollectionResult:
+def run_collection(project_path: Path, env: Optional[Dict[str, str]] = None) -> CollectionResult:
     """Run test collection and return result with flexible output access.
 
     Args:
         project_path: Path to the project directory
+        env: Optional environment variables to use
 
     Returns:
         CollectionResult with returncode, output as string, and output as lines
     """
-    returncode, stdout, stderr = run_rtest(["--collect-only"], cwd=str(project_path))
+    returncode, stdout, stderr = run_rtest(["--collect-only"], cwd=str(project_path), env=env)
     return CollectionResult(returncode, stdout, stderr)
 
 
