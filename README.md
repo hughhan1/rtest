@@ -104,6 +104,48 @@ test_example
 
 However, when `rtest` executes tests using pytest as the executor, passing the base function name (`test_example`) to pytest results in identical behavior - pytest automatically runs all parametrized variants. This means test execution is functionally equivalent between the tools, but collection counts may differ.
 
+### Test Class Inheritance Collection
+When a test class inherits from another test class, `rtest` collects inherited test methods differently than `pytest`. While `pytest` shows inherited methods under each subclass that inherits them, `rtest` currently shows inherited methods only under the base class where they are defined. For example:
+
+```python
+# test_example.py
+class TestAddNumbers:
+    def test_add_positive_numbers(self):
+        pass
+    
+    def test_add_negative_numbers(self):
+        pass
+
+# test_floating_numbers.py  
+from tests.test_example import TestAddNumbers
+
+class TestAddFloatingNumbers(TestAddNumbers):
+    def test_add_simple_floats(self):
+        pass
+```
+
+**pytest collection shows:**
+```
+test_example.py::TestAddNumbers::test_add_positive_numbers
+test_example.py::TestAddNumbers::test_add_negative_numbers
+test_floating_numbers.py::TestAddNumbers::test_add_positive_numbers
+test_floating_numbers.py::TestAddNumbers::test_add_negative_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_positive_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_negative_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_simple_floats
+```
+
+**rtest collection shows:**
+```
+test_example.py::TestAddNumbers::test_add_positive_numbers
+test_example.py::TestAddNumbers::test_add_negative_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_positive_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_negative_numbers
+test_floating_numbers.py::TestAddFloatingNumbers::test_add_simple_floats
+```
+
+We believe this difference is desirable, in that `TestAddNumbers` isn't collected twice from different modules.
+
 ## Contributing
 
 We welcome contributions! See [Contributing Guide](CONTRIBUTING.rst).
@@ -116,6 +158,4 @@ MIT - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-This project takes inspiration from [Astral](https://astral.sh) and leverages their excellent Rust crates:
-- [`ruff_python_ast`](https://github.com/astral-sh/ruff/tree/main/crates/ruff_python_ast) - Python AST utilities
-- [`ruff_python_parser`](https://github.com/astral-sh/ruff/tree/main/crates/ruff_python_parser) - Python parser implementation
+This project takes inspiration from [Astral](https://astral.sh) and leverages crates from [`ruff`].

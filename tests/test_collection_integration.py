@@ -1078,6 +1078,40 @@ class TestCollectionIntegration(unittest.TestCase):
                 self.assertIn("test_nested_import.py::TestNestedChild::test_child_method", result.output)
                 self.assertIn("collected 2 items", result.output)
 
+    def test_module_resolution_with_nested_directories(self) -> None:
+        """Test that module resolution uses session root for imports from nested directories."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir)
+            subdir_path = project_path / "tests" / "unit"
+            subdir_path.mkdir(parents=True)
+
+            # Create a base test module in project root
+            base_content = textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """)
+            (project_path / "test_base.py").write_text(base_content)
+
+            # Create a test file in nested directory that imports from root
+            nested_content = textwrap.dedent("""
+                from test_base import TestBase
+
+                class TestNested(TestBase):
+                    def test_nested_method(self):
+                        assert True
+            """)
+            (subdir_path / "test_nested.py").write_text(nested_content)
+
+            # Run collection from project root
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0)
+            # Should find both the base test and the nested test with inheritance
+            self.assertIn("test_base.py::TestBase::test_base_method", result.output)
+            self.assertIn("tests/unit/test_nested.py::TestNested::test_base_method", result.output)
+            self.assertIn("tests/unit/test_nested.py::TestNested::test_nested_method", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()
