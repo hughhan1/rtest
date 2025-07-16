@@ -1274,3 +1274,55 @@ class TestWithStdlib(unittest.TestCase):
     assert!(combined.contains("test_unittest_inheritance.py::TestWithStdlib::test_using_unittest"));
     assert!(combined.contains("collected 1 item"));
 }
+
+/// Test module resolution with nested directory structure
+#[test]
+fn test_module_resolution_nested_directories() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let project_path = temp_dir.path().join("test_project");
+    let subdir_path = project_path.join("tests").join("unit");
+
+    std::fs::create_dir_all(&subdir_path).expect("Failed to create nested directories");
+
+    // Create a base test module in project root
+    let base_content = r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#;
+    std::fs::write(project_path.join("test_base.py"), base_content)
+        .expect("Failed to write base module");
+
+    // Create a test file in nested directory that imports from root
+    let nested_content = r#"from test_base import TestBase
+
+class TestNested(TestBase):
+    def test_nested_method(self):
+        assert True
+"#;
+    std::fs::write(subdir_path.join("test_nested.py"), nested_content)
+        .expect("Failed to write nested test file");
+
+    // Run collection from project root
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // With session root resolution, the import should work
+    assert!(
+        output.status.success(),
+        "Command failed with exit status: {:?}\nstdout: {}\nstderr: {}",
+        output.status,
+        stdout,
+        stderr
+    );
+
+    // Should find both the base test and the nested test with inheritance
+    assert!(stdout.contains("test_base.py::TestBase::test_base_method"));
+    assert!(stdout.contains("tests/unit/test_nested.py::TestNested::test_base_method"));
+    assert!(stdout.contains("tests/unit/test_nested.py::TestNested::test_nested_method"));
+}

@@ -272,12 +272,11 @@ impl Collector for Module {
             python_functions: self.session().config.python_functions.clone(),
         };
 
-        // Use the directory containing this file as the root path for module resolution
-        // This ensures that relative imports work correctly regardless of the working directory
-        let file_dir = self.path.parent().unwrap_or(&self.session().rootpath);
+        // Use the session's root path for module resolution
+        let root_path = &self.session().rootpath;
 
         let (tests, warnings) =
-            discover_tests_with_inheritance(&self.path, &source, &discovery_config, file_dir)?;
+            discover_tests_with_inheritance(&self.path, &source, &discovery_config, root_path)?;
 
         // Print warnings directly (following pytest's approach)
         for warning in &warnings {
