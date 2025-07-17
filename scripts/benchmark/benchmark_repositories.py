@@ -11,6 +11,7 @@ performance between rtest and pytest using hyperfine.
 import argparse
 import json
 import logging
+import platform
 import shutil
 import subprocess
 import sys
@@ -175,7 +176,12 @@ def run_command(cmd: List[str], cwd: str, timeout: int = DEFAULT_TIMEOUT) -> sub
     """Execute a command and return the result."""
     logger.debug(f"Running command: {' '.join(cmd)} in {cwd}")
     try:
-        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+        if result.stdout:
+            logger.debug(f"Command STDOUT:\n{result.stdout}")
+        if result.stderr:
+            logger.debug(f"Command STDERR:\n{result.stderr}")
+        return result
     except subprocess.TimeoutExpired:
         # Return a fake CompletedProcess for timeout
         result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(cmd, -1)
@@ -215,49 +221,55 @@ class RepositoryManager:
         return repo_path
 
     def setup_repository(self, repo_config: RepositoryConfig, repo_path: Path) -> bool:
-        """Set up repository dependencies using uv."""
+        """Set up repository dependencies using venv and pip."""
         logger.info(f"Setting up {repo_config.name}...")
 
-        benchmark_dir = repo_path / ".benchmark"
-        benchmark_dir.mkdir(exist_ok=True)
+        # Check if requirements.txt exists, if not compile from pyproject.toml
+        requirements_path = repo_path / "requirements.txt"
+        if not requirements_path.exists():
+            pyproject_path = repo_path / "pyproject.toml"
+            if pyproject_path.exists():
+                logger.info("No requirements.txt found, compiling from pyproject.toml...")
+                result = run_command(
+                    ["uv", "pip", "compile", "pyproject.toml", "-o", "requirements.txt"], str(repo_path)
+                )
+                if result.returncode != 0:
+                    logger.error(f"Failed to compile requirements.txt: {result.stderr}")
+                    return False
+            else:
+                logger.warning(f"No requirements.txt or pyproject.toml found for {repo_config.name}")
+                # Create a minimal requirements.txt
+                requirements_path.write_text("")
 
-        dependencies = f'"pytest", "rtest @ file://{self.project_root}"'
-
-        # Create pyproject.toml for isolated environment
-        pyproject_path = benchmark_dir / "pyproject.toml"
-        pyproject_path.write_text(
-            f"""
-[project]
-name = "benchmark-{repo_config.name}"
-version = "0.1.0"
-dependencies = [{dependencies}]
-requires-python = ">=3.12"
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-""".strip()
-        )
-
-        # Sync dependencies
-        result = run_command(["uv", "sync"], str(benchmark_dir))
+        # Create virtual environment
+        venv_path = repo_path / ".venv"
+        logger.info("Creating virtual environment...")
+        result = run_command(["python3", "-m", "venv", str(venv_path)], str(repo_path))
         if result.returncode != 0:
-            logger.error(f"Failed to sync dependencies: {result.stderr}")
+            logger.error(f"Failed to create virtual environment: {result.stderr}")
             return False
 
-        # Install repository package
-        result = run_command(["uv", "add", "--editable", str(repo_path)], str(benchmark_dir))
+        # Determine pip executable path based on OS
+        if platform.system() == "Windows":
+            pip_executable = venv_path / "Scripts" / "pip3"
+        else:
+            pip_executable = venv_path / "bin" / "pip3"
+
+        # Install requirements
+        logger.info("Installing requirements...")
+        result = run_command([str(pip_executable), "install", "-r", "requirements.txt"], str(repo_path))
         if result.returncode != 0:
-            # Check if it's a Python version issue
-            if "does not satisfy Python" in result.stderr or "depends on Python>=" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} requires a different Python version")
-                logger.info(f"Skipping {repo_config.name} due to Python version requirements")
-            # Check if it's a build/compilation issue
-            elif "Failed to build" in result.stderr or "build backend returned an error" in result.stderr:
-                logger.warning(f"Repository {repo_config.name} failed to build")
-                logger.info(f"Skipping {repo_config.name} due to build requirements")
-            else:
-                logger.error(f"Failed to install repository package: {result.stderr}")
+            logger.error(f"Failed to install requirements: {result.stderr}")
+            # Continue anyway, some tests might still work
+
+        logger.info("Installing pytest, pytest-xdist, and rtest...")
+        # Install rtest from the project root
+        result = run_command(
+            [str(pip_executable), "install", "pytest", "pytest-xdist", f"rtest @ file://{self.project_root}"],
+            str(repo_path),
+        )
+        if result.returncode != 0:
+            logger.error(f"Failed to install pytest, pytest-xdist, and rtest: {result.stderr}")
             return False
 
         return True
@@ -265,6 +277,9 @@ build-backend = "setuptools.build_meta"
 
 class HyperfineRunner:
     """Runs benchmarks using hyperfine."""
+
+    def __init__(self, show_output: bool = False):
+        self.show_output = show_output
 
     def run_benchmark(
         self, repo_config: RepositoryConfig, repo_path: Path, benchmark_config: BenchmarkConfig
@@ -280,12 +295,36 @@ class HyperfineRunner:
 
         logger.info(f"Running {benchmark_config.description} on {repo_config.name}")
 
-        benchmark_dir = repo_path / ".benchmark"
-        base_cmd = ["uv", "run", "--project", str(benchmark_dir)]
-
         # Build commands
-        pytest_cmd = self._build_command(base_cmd, "pytest", benchmark_config.pytest_args, repo_config.test_dir)
-        rtest_cmd = self._build_command(base_cmd, "rtest", benchmark_config.rtest_args, repo_config.test_dir)
+        pytest_cmd = self._build_command("pytest", benchmark_config.pytest_args, repo_config.test_dir)
+        rtest_cmd = self._build_command("rtest", benchmark_config.rtest_args, repo_config.test_dir)
+
+        # First, run each command individually to check for errors and capture output
+        logger.info("Running pytest command to check for errors...")
+        pytest_cmd_list = self._build_command_list("pytest", benchmark_config.pytest_args, repo_config.test_dir)
+        pytest_check = run_command(pytest_cmd_list, str(repo_path), timeout=benchmark_config.timeout)
+        if pytest_check.returncode != 0:
+            logger.error(f"pytest command failed with exit code {pytest_check.returncode}")
+            logger.error(f"pytest stdout:\n{pytest_check.stdout}")
+            logger.error(f"pytest stderr:\n{pytest_check.stderr}")
+            return ErrorResult(
+                repository=repo_config.name,
+                benchmark=benchmark_config.description,
+                error=f"pytest failed with exit code {pytest_check.returncode}: {pytest_check.stderr}",
+            )
+
+        logger.info("Running rtest command to check for errors...")
+        rtest_cmd_list = self._build_command_list("rtest", benchmark_config.rtest_args, repo_config.test_dir)
+        rtest_check = run_command(rtest_cmd_list, str(repo_path), timeout=benchmark_config.timeout)
+        if rtest_check.returncode != 0:
+            logger.error(f"rtest command failed with exit code {rtest_check.returncode}")
+            logger.error(f"rtest stdout:\n{rtest_check.stdout}")
+            logger.error(f"rtest stderr:\n{rtest_check.stderr}")
+            return ErrorResult(
+                repository=repo_config.name,
+                benchmark=benchmark_config.description,
+                error=f"rtest failed with exit code {rtest_check.returncode}: {rtest_check.stderr}",
+            )
 
         # Run hyperfine
         json_output = f"{repo_config.name}_benchmark.json"
@@ -303,14 +342,17 @@ class HyperfineRunner:
         # Parse results
         return self._parse_results(repo_path, json_output, repo_config.name, benchmark_config.description)
 
-    def _build_command(self, base_cmd: List[str], tool: str, args: str, test_dir: str) -> str:
+    def _build_command(self, cmd: str, args: str, test_dir: str) -> str:
         """Build command string for hyperfine."""
-        cmd_parts = base_cmd + [tool] + args.split() + [test_dir]
-        return " ".join(cmd_parts)
+        return " ".join(self._build_command_list(cmd, args, test_dir))
+
+    def _build_command_list(self, cmd: str, args: str, test_dir: str) -> List[str]:
+        """Build command list for subprocess."""
+        return [cmd] + args.split() + [test_dir]
 
     def _build_hyperfine_command(self, pytest_cmd: str, rtest_cmd: str, json_output: str) -> List[str]:
         """Build hyperfine command."""
-        return [
+        cmd = [
             "hyperfine",
             "--warmup",
             str(HYPERFINE_WARMUP),
@@ -324,10 +366,13 @@ class HyperfineRunner:
             "pytest",
             "--command-name",
             "rtest",
-            "--ignore-failure",
-            pytest_cmd,
-            rtest_cmd,
         ]
+
+        if self.show_output:
+            cmd.insert(1, "--show-output")
+
+        cmd.extend([pytest_cmd, rtest_cmd])
+        return cmd
 
     def _parse_results(
         self, repo_path: Path, json_output: str, repo_name: str, benchmark_desc: str
@@ -449,7 +494,7 @@ class ResultFormatter:
 class BenchmarkOrchestrator:
     """Orchestrates the entire benchmarking process."""
 
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, show_output: bool = False):
         self.repositories, self.benchmark_configs = ConfigLoader.load_config(config_path)
         self.output_dir = Path(tempfile.mkdtemp(prefix="rtest_benchmark_results_"))
         self.temp_dir = Path(tempfile.mkdtemp(prefix="rtest_benchmark_repos_"))
@@ -458,7 +503,7 @@ class BenchmarkOrchestrator:
         self.project_root = config_path.parent.parent.parent.absolute()
 
         self.repo_manager = RepositoryManager(self.temp_dir, self.project_root)
-        self.hyperfine_runner = HyperfineRunner()
+        self.hyperfine_runner = HyperfineRunner(show_output=show_output)
 
         logger.info(f"Repository clone directory: {self.temp_dir}")
         logger.info(f"Results output directory: {self.output_dir}")
@@ -532,6 +577,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", help="Set logging level"
     )
+    parser.add_argument("--show-output", action="store_true", help="Show hyperfine output during benchmarks")
 
     return parser.parse_args()
 
@@ -560,7 +606,7 @@ def main() -> None:
         return
 
     try:
-        orchestrator = BenchmarkOrchestrator(config_path)
+        orchestrator = BenchmarkOrchestrator(config_path, show_output=args.show_output)
 
         # Run benchmarks
         benchmark_types = ["collect_only"] if args.collect_only else ["collect_only", "execution"]
