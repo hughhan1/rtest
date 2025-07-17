@@ -335,3 +335,134 @@ This single file replaces the previous `.claude/README.md` to eliminate redundan
 - **.claude/CLAUDE.md** → Developers & Claude AI (comprehensive development guide)
 
 **Built for high-velocity, high-quality development of performance-critical testing tools.**
+
+---
+
+## 📋 Quality Gates
+
+### Before Commit
+Run these checks before every commit:
+```bash
+cargo check
+cargo clippy -- -D warnings
+cargo fmt --check
+uv run ruff check .
+uv run ruff format --check .
+cargo test
+uv run pytest tests/ --tb=short
+```
+
+### Before Push
+Additional checks before pushing:
+```bash
+cargo test --release
+uv run maturin build
+uv run pytest tests/ -v
+```
+
+## 🏗️ File Templates
+
+### Rust Module Template
+```rust
+//! Brief module description.
+//!
+//! More detailed module documentation here.
+
+use std::collections::HashMap;
+
+/// Public struct documentation
+#[derive(Debug, Clone)]
+pub struct NewStruct {
+    field: String,
+}
+
+impl NewStruct {
+    /// Constructor documentation
+    pub fn new(field: String) -> Self {
+        Self { field }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_struct_creation() {
+        let instance = NewStruct::new("test".into());
+        assert_eq!(instance.field, "test");
+    }
+}
+```
+
+### Python Module Template
+```python
+"""Brief module description.
+
+More detailed module documentation here.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+
+class NewClass:
+    """Brief class description.
+    
+    Args:
+        param: Parameter description.
+    """
+    
+    def __init__(self, param: str) -> None:
+        self._param = param
+    
+    def method(self) -> str:
+        """Brief method description.
+        
+        Returns:
+            Description of return value.
+        """
+        return self._param
+
+
+def function(arg: str) -> str:
+    """Brief function description.
+    
+    Args:
+        arg: Argument description.
+        
+    Returns:
+        Description of return value.
+    """
+    return arg
+```
+
+## 🔄 CI/CD Configuration
+
+### GitHub Actions Matrix
+The CI pipeline tests across multiple configurations:
+- **Operating Systems**: ubuntu-latest, macos-latest, windows-latest
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Rust Version**: stable
+
+### CI Pipeline Steps
+1. Setup Rust toolchain
+2. Setup Python environment
+3. Install dependencies
+4. Run Rust tests
+5. Run Python tests
+6. Build wheels with maturin
+7. Upload artifacts
+
+## 🔧 Additional Troubleshooting
+
+### Common Build Issues
+- **Maturin issues**: Check Python environment and maturin version compatibility
+- **Rust compilation errors**: Ensure Rust toolchain is up to date with `rustup update`
+- **Linking errors**: Verify PyO3 version compatibility with Python version
+
+### Common Test Failures
+- **Rust test failures**: Use `cargo test --verbose -- --nocapture` for detailed output
+- **Python test failures**: Use `uv run pytest -vvv -s` for maximum verbosity
+- **Integration test issues**: Verify test environment setup and file permissions
