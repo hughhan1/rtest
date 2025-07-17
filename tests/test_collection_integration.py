@@ -1109,8 +1109,11 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             # Should find both the base test and the nested test with inheritance
             self.assertIn("test_base.py::TestBase::test_base_method", result.output)
-            self.assertIn("tests/unit/test_nested.py::TestNested::test_base_method", result.output)
-            self.assertIn("tests/unit/test_nested.py::TestNested::test_nested_method", result.output)
+
+            # Use platform-agnostic path construction
+            nested_test_path = str(Path("tests", "unit", "test_nested.py"))
+            self.assertIn(f"{nested_test_path}::TestNested::test_base_method", result.output)
+            self.assertIn(f"{nested_test_path}::TestNested::test_nested_method", result.output)
 
 
 if __name__ == "__main__":

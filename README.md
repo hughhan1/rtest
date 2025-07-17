@@ -146,6 +146,18 @@ test_floating_numbers.py::TestAddFloatingNumbers::test_add_simple_floats
 
 We believe this difference is desirable, in that `TestAddNumbers` isn't collected twice from different modules.
 
+### Path Separator Handling
+`rtest` uses platform-specific path separators in test nodeids, while `pytest` normalizes all paths to use forward slashes (`/`) regardless of platform. For example:
+
+**On Windows:**
+- pytest shows: `tests/unit/test_example.py::test_function`
+- rtest shows: `tests\unit\test_example.py::test_function`
+
+**On Unix/macOS:**
+- Both show: `tests/unit/test_example.py::test_function`
+
+This difference is intentional as `rtest` preserves the native path format of the operating system.
+
 ## Contributing
 
 We welcome contributions! See [Contributing Guide](CONTRIBUTING.rst).
