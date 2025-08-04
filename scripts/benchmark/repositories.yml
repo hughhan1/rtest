@@ -28,6 +28,6 @@ benchmark_configs:
     
   execution:
     description: "Test execution performance"
-    pytest_args: "--maxfail=3 -x"
+    pytest_args: "--maxfail=3 -x -n 8"
     rtest_args: "--maxfail=3 -x"
     timeout: 300
