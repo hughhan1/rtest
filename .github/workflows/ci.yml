@@ -231,9 +231,13 @@ jobs:
         wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
         sudo dpkg -i hyperfine_1.18.0_amd64.deb
     
-    - name: Run benchmark for ${{ matrix.repository }}
+    - name: Run collection benchmark for ${{ matrix.repository }}
       run: |
         uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }} --collect-only
+    
+    - name: Run execution benchmark for ${{ matrix.repository }}
+      run: |
+        uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }}
     
     - name: Upload results
       uses: actions/upload-artifact@v4

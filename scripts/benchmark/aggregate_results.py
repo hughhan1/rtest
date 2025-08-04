@@ -31,15 +31,17 @@ def aggregate_results(results_dir: Path, output_file: Path) -> List[Dict[str, Un
         json_files = list(result_dir.glob("*/*.json"))
 
         if json_files:
-            # Use the first JSON file found
-            with open(json_files[0]) as f:
-                results = cast(List[Dict[str, Union[str, float]]], json.load(f))
-                all_results.extend(results)
+            # Process all JSON files found
+            for json_file in sorted(json_files):
+                with open(json_file) as f:
+                    results = cast(List[Dict[str, Union[str, float]]], json.load(f))
+                    all_results.extend(results)
 
-            # Pretty print for summary
-            print("```json")
-            print(json.dumps(results, indent=2))
-            print("```")
+                # Pretty print for summary
+                print("```json")
+                print(json.dumps(results, indent=2))
+                print("```")
+                print()
         else:
             print("No results found")
 
