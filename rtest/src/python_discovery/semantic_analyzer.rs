@@ -1,6 +1,6 @@
 //! Semantic analysis for test discovery with import resolution.
 
-use ruff_python_ast::{Expr, Mod, ModModule, Stmt, StmtClassDef, StmtImportFrom};
+use ruff_python_ast::{Expr, Mod, ModModule, Stmt, StmtClassDef};
 use ruff_python_parser::{parse, Mode, ParseOptions};
 use ruff_python_semantic::{Module as SemanticModule, ModuleKind, ModuleSource, SemanticModel};
 use ruff_text_size::Ranged;
@@ -19,8 +19,8 @@ use crate::python_discovery::{
 struct ImportInfo {
     module_path: Vec<String>,
     imported_name: String,
-    #[allow(dead_code)]
-    local_name: String,
+    /// The level of relative import (0 for absolute, 1 for '.', 2 for '..', etc.)
+    relative_level: usize,
 }
 
 /// Resolved base class information
@@ -165,25 +165,28 @@ impl SemanticTestDiscovery {
 
         for stmt in &module.body {
             match stmt {
-                Stmt::ImportFrom(StmtImportFrom {
-                    module: Some(module_name),
-                    names,
-                    ..
-                }) => {
-                    let module_path: Vec<String> =
-                        module_name.split('.').map(String::from).collect();
+                Stmt::ImportFrom(import_from) => {
+                    let level = import_from.level as usize;
 
-                    for alias in names {
+                    // Get module path, handling both absolute and relative imports
+                    let module_path = if let Some(module_name) = &import_from.module {
+                        module_name.split('.').map(String::from).collect()
+                    } else {
+                        // Pure relative import (e.g., "from . import something")
+                        Vec::new()
+                    };
+
+                    for alias in &import_from.names {
                         let imported_name = alias.name.to_string();
                         let local_name =
                             Self::get_alias_name_or_default(alias.asname.as_ref(), &imported_name);
 
                         imports.insert(
-                            local_name.clone(),
+                            local_name,
                             ImportInfo {
                                 module_path: module_path.clone(),
                                 imported_name,
-                                local_name,
+                                relative_level: level,
                             },
                         );
                     }
@@ -199,7 +202,7 @@ impl SemanticTestDiscovery {
                             ImportInfo {
                                 module_path: parts,
                                 imported_name: String::new(),
-                                local_name: alias.name.to_string(),
+                                relative_level: 0,
                             },
                         );
                     }
@@ -274,7 +277,7 @@ impl SemanticTestDiscovery {
 
         if let Some(arguments) = &class_def.arguments {
             for base in arguments.args.iter() {
-                match self.resolve_base_class(
+                let resolved = self.resolve_base_class(
                     base,
                     current_module_path,
                     imports,
@@ -288,7 +291,9 @@ impl SemanticTestDiscovery {
                             name: None,
                         },
                     ),
-                ) {
+                )?;
+
+                match resolved {
                     Some(resolved) => base_classes.push(resolved),
                     None => {
                         return Err(CollectionError::ImportError(format!(
@@ -343,7 +348,10 @@ impl SemanticTestDiscovery {
         // Collect inherited methods
         if let Some(arguments) = &class_def.arguments {
             for base_expr in arguments.args.iter() {
-                match self.resolve_base_class(base_expr, current_module_path, imports, semantic) {
+                let resolved =
+                    self.resolve_base_class(base_expr, current_module_path, imports, semantic)?;
+
+                match resolved {
                     Some(resolved) => {
                         // Skip inheritance analysis for known stdlib modules that we can't analyze
                         if self.is_stdlib_module_to_skip(&resolved.module_path) {
@@ -422,7 +430,7 @@ impl SemanticTestDiscovery {
         // Check parent classes
         if let Some(arguments) = &class_def.arguments {
             for base_expr in arguments.args.iter() {
-                match self.resolve_base_class(
+                let resolved = self.resolve_base_class(
                     base_expr,
                     current_module_path,
                     imports,
@@ -436,7 +444,9 @@ impl SemanticTestDiscovery {
                             name: None,
                         },
                     ),
-                ) {
+                )?;
+
+                match resolved {
                     Some(resolved) => {
                         // Skip init check for known stdlib modules
                         if self.is_stdlib_module_to_skip(&resolved.module_path) {
@@ -634,41 +644,98 @@ impl SemanticTestDiscovery {
         current_module_path: &[String],
         imports: &HashMap<String, ImportInfo>,
         _semantic: &SemanticModel,
-    ) -> Option<ResolvedBaseClass> {
+    ) -> CollectionResult<Option<ResolvedBaseClass>> {
         match base_expr {
             Expr::Name(name_expr) => {
                 let name = name_expr.id.as_str();
                 // Check if it's an imported class
                 if let Some(import_info) = imports.get(name) {
-                    return Some(ResolvedBaseClass {
-                        module_path: import_info.module_path.clone(),
+                    // Handle relative imports by resolving them to absolute paths
+                    let module_path = if import_info.relative_level > 0 {
+                        // Resolve relative import to absolute path
+                        Self::resolve_relative_module_path(
+                            current_module_path,
+                            import_info.relative_level,
+                            &import_info.module_path,
+                        )?
+                    } else {
+                        import_info.module_path.clone()
+                    };
+
+                    return Ok(Some(ResolvedBaseClass {
+                        module_path,
                         class_name: import_info.imported_name.clone(),
                         is_local: false,
-                    });
+                    }));
                 }
 
                 // Otherwise, it's a local class
-                Some(ResolvedBaseClass {
+                Ok(Some(ResolvedBaseClass {
                     module_path: current_module_path.to_vec(),
                     class_name: name.to_string(),
                     is_local: true,
-                })
+                }))
             }
             Expr::Attribute(attr_expr) => {
                 // Handle module.Class pattern
                 if let Expr::Name(module_name) = &*attr_expr.value {
                     if let Some(import_info) = imports.get(module_name.id.as_str()) {
-                        return Some(ResolvedBaseClass {
-                            module_path: import_info.module_path.clone(),
+                        // Handle relative imports
+                        let module_path = if import_info.relative_level > 0 {
+                            Self::resolve_relative_module_path(
+                                current_module_path,
+                                import_info.relative_level,
+                                &import_info.module_path,
+                            )?
+                        } else {
+                            import_info.module_path.clone()
+                        };
+
+                        return Ok(Some(ResolvedBaseClass {
+                            module_path,
                             class_name: attr_expr.attr.to_string(),
                             is_local: false,
-                        });
+                        }));
                     }
                 }
-                None
+                Ok(None)
             }
-            _ => None,
+            _ => Ok(None),
         }
+    }
+
+    /// Helper to resolve relative imports to absolute module paths
+    fn resolve_relative_module_path(
+        current_module_path: &[String],
+        relative_level: usize,
+        module_parts: &[String],
+    ) -> CollectionResult<Vec<String>> {
+        if relative_level == 0 {
+            // Not a relative import
+            return Ok(module_parts.to_vec());
+        }
+
+        // For relative imports, go up the module hierarchy
+        // Level 1 (.) = current package
+        // Level 2 (..) = parent package, etc.
+
+        if current_module_path.len() < relative_level {
+            // Can't resolve beyond top-level package
+            return Err(CollectionError::ImportError(format!(
+                "Attempted relative import beyond top-level package (level {} from depth {})",
+                relative_level,
+                current_module_path.len()
+            )));
+        }
+
+        // Go up the hierarchy by relative_level
+        let base_path = &current_module_path[..current_module_path.len() - relative_level];
+
+        // Combine with the module parts from the import
+        let mut result = base_path.to_vec();
+        result.extend_from_slice(module_parts);
+
+        Ok(result)
     }
 
     fn is_test_function(&self, name: &str) -> bool {
