@@ -250,6 +250,306 @@ fn test_syntax_error_handling() {
     );
 }
 
+/// Test relative imports in same directory
+#[test]
+fn test_relative_import_same_directory() {
+    let mut files = HashMap::new();
+
+    // Need __init__.py to make it a package for relative imports
+    files.insert("__init__.py", "");
+
+    files.insert(
+        "test_base.py",
+        r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#,
+    );
+
+    files.insert(
+        "test_derived.py",
+        r#"from .test_base import TestBase
+
+class TestDerived(TestBase):
+    def test_derived_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find both test methods from TestDerived (inherited + own)
+    assert!(stdout.contains("test_base.py::TestBase::test_base_method"));
+    assert!(stdout.contains("test_derived.py::TestDerived::test_base_method"));
+    assert!(stdout.contains("test_derived.py::TestDerived::test_derived_method"));
+}
+
+/// Test relative imports in package structure
+#[test]
+fn test_relative_import_package_structure() {
+    let mut files = HashMap::new();
+
+    // Create package with __init__.py
+    files.insert("tests/__init__.py", "");
+
+    files.insert(
+        "tests/test_base.py",
+        r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#,
+    );
+
+    files.insert(
+        "tests/test_derived.py",
+        r#"from .test_base import TestBase
+
+class TestDerived(TestBase):
+    def test_derived_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only", "tests/"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find both test methods from TestDerived
+    assert!(stdout.contains("tests/test_base.py::TestBase::test_base_method"));
+    assert!(stdout.contains("tests/test_derived.py::TestDerived::test_base_method"));
+    assert!(stdout.contains("tests/test_derived.py::TestDerived::test_derived_method"));
+}
+
+/// Test parent directory relative imports
+#[test]
+fn test_relative_import_parent_directory() {
+    let mut files = HashMap::new();
+
+    // Create package structure
+    files.insert("package/__init__.py", "");
+    files.insert("package/subpackage/__init__.py", "");
+
+    files.insert(
+        "package/test_base.py",
+        r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#,
+    );
+
+    files.insert(
+        "package/subpackage/test_derived.py",
+        r#"from ..test_base import TestBase
+
+class TestDerived(TestBase):
+    def test_derived_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only", "package/subpackage/"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find both test methods from TestDerived
+    assert!(stdout.contains("test_base_method"));
+    assert!(stdout.contains("test_derived_method"));
+    assert!(stdout.contains("TestDerived"));
+}
+
+/// Test multi-level relative imports
+#[test]
+fn test_relative_import_multi_level() {
+    let mut files = HashMap::new();
+
+    // Create deep package structure
+    files.insert("package/__init__.py", "");
+    files.insert("package/level1/__init__.py", "");
+    files.insert("package/level1/level2/__init__.py", "");
+
+    files.insert(
+        "package/test_base.py",
+        r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#,
+    );
+
+    files.insert(
+        "package/level1/level2/test_derived.py",
+        r#"from ...test_base import TestBase
+
+class TestDerived(TestBase):
+    def test_derived_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only", "package/level1/level2/"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find both test methods from TestDerived
+    assert!(stdout.contains("test_base_method"));
+    assert!(stdout.contains("test_derived_method"));
+    assert!(stdout.contains("TestDerived"));
+}
+
+/// Test relative imports beyond top-level package from root (should fail with Empty module path)
+#[test]
+fn test_relative_import_beyond_top_level() {
+    let mut files = HashMap::new();
+
+    // Create a test file at root that tries to inherit from parent import
+    // This will resolve to an empty path and fail with "Empty module path"
+    files.insert(
+        "test_beyond.py",
+        r#"from .. import base
+
+class TestBeyond(base.TestBase):
+    def test_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{}{}", stdout, stderr);
+
+    // Should fail with an import error
+    assert!(
+        !output.status.success(),
+        "Test collection should fail for beyond-top-level import"
+    );
+    // Files at root level trying to import from parent resolve to empty path
+    // which triggers "Attempted relative import beyond top-level package" error from the module resolver
+    assert!(
+        combined.contains("ImportError: Attempted relative import beyond top-level package (level 2 from depth 1)"),
+        "Expected 'ImportError: Attempted relative import beyond top-level package (level 2 from depth 1)' for root-level file but got: {}",
+        combined
+    );
+}
+
+/// Test relative imports beyond top-level from subpackage (should also fail with Empty module path)
+#[test]
+fn test_relative_import_beyond_top_level_from_subpackage() {
+    let mut files = HashMap::new();
+
+    // Create a package with a test that tries to import from beyond root
+    // package/test_beyond.py has module path ["package", "test_beyond"] (length 2)
+    // Using ... (level 3) tries to go up 3 levels, which is beyond the top
+    files.insert("package/__init__.py", "");
+    files.insert(
+        "package/test_beyond.py",
+        r#"from ... import base
+
+class TestBeyond(base.TestBase):
+    def test_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{}{}", stdout, stderr);
+
+    // Should fail with an import error
+    assert!(
+        !output.status.success(),
+        "Test collection should fail for beyond-top-level import"
+    );
+    // Currently we get "Empty module path" as the final error even though our check should trigger
+    // This happens because the error path eventually leads to an empty module path
+    assert!(
+        combined.contains("ImportError: Attempted relative import beyond top-level package (level 3 from depth 2)"),
+        "Expected 'ImportError: Attempted relative import beyond top-level package (level 3 from depth 2)' for beyond-top-level import but got: {}",
+        combined
+    );
+}
+
+/// Test relative imports with aliases
+#[test]
+fn test_relative_import_with_alias() {
+    let mut files = HashMap::new();
+
+    files.insert("__init__.py", "");
+
+    files.insert(
+        "test_base.py",
+        r#"class TestBase:
+    def test_base_method(self):
+        assert True
+"#,
+    );
+
+    files.insert(
+        "test_alias.py",
+        r#"from .test_base import TestBase as BaseTest
+
+class TestWithAlias(BaseTest):
+    def test_alias_method(self):
+        assert True
+"#,
+    );
+
+    let (_temp_dir, project_path) = create_test_project_with_files(files);
+
+    let output = Command::new(get_rtest_binary())
+        .args(["--collect-only"])
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find both test methods from TestWithAlias (inherited + own)
+    assert!(stdout.contains("test_base.py::TestBase::test_base_method"));
+    assert!(stdout.contains("test_alias.py::TestWithAlias::test_base_method"));
+    assert!(stdout.contains("test_alias.py::TestWithAlias::test_alias_method"));
+}
+
 /// Test cross-module inheritance with multi-level chains
 #[test]
 fn test_cross_module_multi_level_inheritance() {

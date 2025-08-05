@@ -1,4 +1,4 @@
-//! Rustic core library for Python test collection and execution.
+//! rtest core library for Python test collection and execution.
 
 pub mod cli;
 pub mod collection;

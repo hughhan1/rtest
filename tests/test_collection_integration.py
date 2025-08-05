@@ -478,6 +478,226 @@ class TestCollectionIntegration(unittest.TestCase):
 
             assert_tests_found(result.output_lines, expected_patterns)
 
+    def test_relative_import_same_directory(self) -> None:
+        """Test relative imports in the same directory."""
+        files = {
+            "__init__.py": "",
+            "test_base.py": textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """),
+            "test_derived.py": textwrap.dedent("""
+                from .test_base import TestBase
+
+                class TestDerived(TestBase):
+                    def test_derived_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                "test_base.py::TestBase::test_base_method",
+                "test_derived.py::TestDerived::test_base_method",
+                "test_derived.py::TestDerived::test_derived_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
+    def test_relative_import_package_structure(self) -> None:
+        """Test relative imports in package structure."""
+        files = {
+            "tests/__init__.py": "",
+            "tests/test_base.py": textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """),
+            "tests/test_derived.py": textwrap.dedent("""
+                from .test_base import TestBase
+
+                class TestDerived(TestBase):
+                    def test_derived_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                "tests/test_base.py::TestBase::test_base_method",
+                "tests/test_derived.py::TestDerived::test_base_method",
+                "tests/test_derived.py::TestDerived::test_derived_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
+    def test_relative_import_parent_directory(self) -> None:
+        """Test relative imports from parent directory."""
+        files = {
+            "package/__init__.py": "",
+            "package/test_base.py": textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """),
+            "package/subpackage/__init__.py": "",
+            "package/subpackage/test_derived.py": textwrap.dedent("""
+                from ..test_base import TestBase
+
+                class TestDerived(TestBase):
+                    def test_derived_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                # TestBase from test_base.py should be collected
+                "package/test_base.py::TestBase::test_base_method",
+                # TestDerived inherits the method
+                "package/subpackage/test_derived.py::TestDerived::test_base_method",
+                "package/subpackage/test_derived.py::TestDerived::test_derived_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
+    def test_relative_import_multi_level(self) -> None:
+        """Test multi-level relative imports."""
+        files = {
+            "package/__init__.py": "",
+            "package/test_base.py": textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """),
+            "package/level1/__init__.py": "",
+            "package/level1/test_intermediate.py": textwrap.dedent("""
+                from ..test_base import TestBase
+
+                class TestIntermediate(TestBase):
+                    def test_intermediate_method(self):
+                        assert True
+            """),
+            "package/level1/level2/__init__.py": "",
+            "package/level1/level2/test_derived.py": textwrap.dedent("""
+                from ...test_base import TestBase
+                from ..test_intermediate import TestIntermediate
+
+                class TestDerivedFromBase(TestBase):
+                    def test_derived_base_method(self):
+                        assert True
+
+                class TestDerivedFromIntermediate(TestIntermediate):
+                    def test_derived_intermediate_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                # Base class from test_base.py
+                "package/test_base.py::TestBase::test_base_method",
+                # Intermediate class from test_intermediate.py
+                "package/level1/test_intermediate.py::TestIntermediate::test_base_method",
+                "package/level1/test_intermediate.py::TestIntermediate::test_intermediate_method",
+                # Derived from base
+                "package/level1/level2/test_derived.py::TestDerivedFromBase::test_base_method",
+                "package/level1/level2/test_derived.py::TestDerivedFromBase::test_derived_base_method",
+                # Derived from intermediate
+                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_base_method",
+                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_intermediate_method",
+                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_derived_intermediate_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
+    def test_relative_import_beyond_top_level(self) -> None:
+        """Test that relative imports beyond top-level package fail."""
+        files = {
+            "test_beyond.py": textwrap.dedent("""
+                from .. import base
+
+                class TestBeyond(base.TestBase):
+                    def test_method(self):
+                        assert True
+            """)
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Should fail with import error
+            self.assertNotEqual(result.returncode, 0, "Test collection should fail for beyond-top-level import")
+            error_text = result.stdout + result.stderr
+            self.assertIn(
+                "Attempted relative import beyond top-level package (level 2 from depth 1)",
+                error_text,
+            )
+
+    def test_relative_import_beyond_top_level_from_subpackage(self) -> None:
+        """Test that relative imports beyond top-level from subpackage fail with Empty module path error."""
+        files = {
+            "package/__init__.py": "",
+            "package/test_beyond.py": textwrap.dedent("""
+                from ... import base
+
+                class TestBeyond(base.TestBase):
+                    def test_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Should fail with an import error
+            self.assertNotEqual(result.returncode, 0, "Test collection should fail for beyond-top-level import")
+            error_text = result.stdout + result.stderr
+            # Currently we get "Empty module path" as the final error
+            # This happens because the error path eventually leads to an empty module path
+            self.assertIn(
+                "ImportError: Attempted relative import beyond top-level package (level 3 from depth 2)",
+                error_text,
+            )
+
+    def test_relative_import_with_alias(self) -> None:
+        """Test relative imports with aliases."""
+        files = {
+            "__init__.py": "",
+            "test_base.py": textwrap.dedent("""
+                class TestBase:
+                    def test_base_method(self):
+                        assert True
+            """),
+            "test_alias.py": textwrap.dedent("""
+                from .test_base import TestBase as BaseTest
+
+                class TestWithAlias(BaseTest):
+                    def test_alias_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                "test_base.py::TestBase::test_base_method",
+                "test_alias.py::TestWithAlias::test_base_method",
+                "test_alias.py::TestWithAlias::test_alias_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+
     def test_inheritance_from_non_test_class(self) -> None:
         """Test that inheritance from non-test classes is handled correctly."""
         files = {
