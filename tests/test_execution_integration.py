@@ -399,9 +399,6 @@ class TestExecutionIntegration(unittest.TestCase):
             # Depending on whether pytest-timeout is installed, behavior may vary
             self.assertIsNotNone(returncode)
 
-    # Skipping test_execute_output_capture - rtest doesn't support -s flag yet
-    # def test_execute_output_capture(self) -> None:
-
     def test_execute_multiple_files_parallel(self) -> None:
         """Test execution with multiple files in parallel."""
         files = {}
@@ -586,6 +583,30 @@ class TestExecutionIntegration(unittest.TestCase):
 
             # Doctest support depends on pytest configuration
             self.assertIsNotNone(returncode)
+
+    def test_execute_with_env_vars(self) -> None:
+        """Test that environment variables are correctly passed to pytest."""
+        files = {
+            "test_env.py": textwrap.dedent("""
+                import os
+
+                def test_env_var():
+                    assert os.environ.get("TEST_VAR") == "test_value"
+
+                def test_debug_env():
+                    assert os.environ.get("DEBUG") == "1"
+            """)
+        }
+
+        with create_test_project(files) as project_path:
+            # Run with environment variables
+            returncode, stdout, stderr = run_rtest(
+                ["--env", "TEST_VAR=test_value", "--env", "DEBUG=1"], cwd=str(project_path)
+            )
+
+            self.assertEqual(returncode, 0, "Tests with env vars should pass")
+            output = stdout + stderr
+            self.assertIn("2 passed", output)
 
 
 if __name__ == "__main__":

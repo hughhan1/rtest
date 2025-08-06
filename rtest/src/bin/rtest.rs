@@ -81,6 +81,7 @@ pub fn main() {
                 adjusted_tests,
                 vec![],
                 Some(&subproject_root),
+                &runner.env_vars,
             );
 
             if exit_code != 0 {
@@ -98,6 +99,7 @@ pub fn main() {
             &args.dist,
             &rootpath,
             true, // CLI uses subprojects
+            &runner.env_vars,
         );
         std::process::exit(exit_code);
     }

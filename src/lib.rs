@@ -11,6 +11,7 @@ use std::env;
 pub struct PytestRunner {
     pub program: String,
     pub initial_args: Vec<String>,
+    pub env_vars: Vec<(String, String)>,
 }
 
 impl PytestRunner {
@@ -26,6 +27,36 @@ impl PytestRunner {
         Self {
             program: python_path,
             initial_args,
+            env_vars: vec![],
+        }
+    }
+
+    pub fn from_current_python_with_env(py: Python, env_vars: Vec<String>) -> Self {
+        let python_path = py
+            .import("sys")
+            .and_then(|sys| sys.getattr("executable"))
+            .and_then(|exe| exe.extract::<String>())
+            .unwrap_or_else(|_| "python3".to_string());
+
+        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
+
+        // Parse environment variables from KEY=VALUE format
+        let parsed_env_vars: Vec<(String, String)> = env_vars
+            .iter()
+            .filter_map(|env_str| {
+                if let Some((key, value)) = env_str.split_once('=') {
+                    Some((key.to_string(), value.to_string()))
+                } else {
+                    eprintln!("Warning: Invalid environment variable format: {}", env_str);
+                    None
+                }
+            })
+            .collect();
+
+        Self {
+            program: python_path,
+            initial_args,
+            env_vars: parsed_env_vars,
         }
     }
 }
@@ -94,6 +125,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         test_nodes,
         filtered_args,
         Some(&rootpath),
+        &runner.env_vars,
     )
 }
 
@@ -118,7 +150,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
     };
     let worker_count = determine_worker_count(num_processes, args.maxprocesses);
 
-    let runner = PytestRunner::from_current_python(py);
+    let runner = PytestRunner::from_current_python_with_env(py, args.env.clone());
 
     let rootpath = match env::current_dir() {
         Ok(dir) => dir,
@@ -159,6 +191,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             test_nodes,
             vec![],
             Some(&rootpath),
+            &runner.env_vars,
         )
     } else {
         execute_tests_parallel(
@@ -169,6 +202,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             &args.dist,
             &rootpath,
             false, // Python bindings don't use subprojects
+            &runner.env_vars,
         )
     };
     std::process::exit(exit_code);
