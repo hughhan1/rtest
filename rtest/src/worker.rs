@@ -40,9 +40,15 @@ impl WorkerPool {
         tests: Vec<String>,
         pytest_args: Vec<String>,
         working_dir: Option<PathBuf>,
+        env_vars: Vec<(String, String)>,
     ) {
         let handle = thread::spawn(move || {
             let mut cmd = Command::new(&program);
+
+            // Set environment variables
+            for (key, value) in env_vars {
+                cmd.env(key, value);
+            }
 
             for arg in initial_args {
                 cmd.arg(arg);
@@ -155,6 +161,7 @@ mod tests {
             vec!["hello".into()],
             vec!["world".into()],
             None,
+            vec![],
         );
 
         assert_eq!(pool.worker_count(), 1);
@@ -179,6 +186,7 @@ mod tests {
             vec!["worker0".into()],
             vec![],
             None,
+            vec![],
         );
 
         pool.spawn_worker(
@@ -188,6 +196,7 @@ mod tests {
             vec!["worker1".into()],
             vec![],
             None,
+            vec![],
         );
 
         assert_eq!(pool.worker_count(), 2);
@@ -214,6 +223,7 @@ mod tests {
             vec![],
             vec![],
             None,
+            vec![],
         );
 
         let results = pool.wait_for_all();
@@ -234,6 +244,7 @@ mod tests {
             vec!["test1".into()],
             vec!["final".into()],
             None,
+            vec![],
         );
 
         let results = pool.wait_for_all();
@@ -259,6 +270,7 @@ mod tests {
             vec![],
             vec![],
             None,
+            vec![],
         );
 
         let results = pool.wait_for_all();
@@ -280,6 +292,7 @@ mod tests {
             vec!["worker2".into()],
             vec![],
             None,
+            vec![],
         );
 
         pool.spawn_worker(
@@ -289,6 +302,7 @@ mod tests {
             vec!["worker0".into()],
             vec![],
             None,
+            vec![],
         );
 
         pool.spawn_worker(
@@ -298,6 +312,7 @@ mod tests {
             vec!["worker1".into()],
             vec![],
             None,
+            vec![],
         );
 
         let results = pool.wait_for_all();

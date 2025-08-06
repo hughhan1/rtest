@@ -4,6 +4,7 @@ use std::path::Path;
 pub struct PytestRunner {
     pub program: String,
     pub initial_args: Vec<String>,
+    pub env_vars: Vec<(String, String)>,
 }
 
 impl PytestRunner {
@@ -11,18 +12,25 @@ impl PytestRunner {
         let program = "python3".into();
         let initial_args = vec!["-m".into(), "pytest".into()];
 
-        // Apply environment variables (though this is typically done before command execution)
-        // For now, we'll just acknowledge them, but a real implementation would set them
-        // on the Command object before spawning.
-        for env_var in env_vars {
-            println!("Note: Environment variable '{env_var}' would be set for pytest.");
-        }
+        // Parse environment variables from KEY=VALUE format
+        let parsed_env_vars: Vec<(String, String)> = env_vars
+            .iter()
+            .filter_map(|env_str| {
+                if let Some((key, value)) = env_str.split_once('=') {
+                    Some((key.to_string(), value.to_string()))
+                } else {
+                    eprintln!("Warning: Invalid environment variable format: {}", env_str);
+                    None
+                }
+            })
+            .collect();
 
         println!("Pytest command: {} {}", program, initial_args.join(" "));
 
         PytestRunner {
             program,
             initial_args,
+            env_vars: parsed_env_vars,
         }
     }
 }
@@ -36,6 +44,7 @@ pub fn execute_tests_parallel(
     dist_mode: &str,
     rootpath: &Path,
     use_subprojects: bool,
+    env_vars: &[(String, String)],
 ) -> i32 {
     println!("Running tests with {worker_count} workers using {dist_mode} distribution");
 
@@ -72,6 +81,7 @@ pub fn execute_tests_parallel(
                         batch,
                         vec![],
                         Some(subproject_root.clone()),
+                        env_vars.to_vec(),
                     );
                     worker_id += 1;
                 }
@@ -121,6 +131,7 @@ pub fn execute_tests_parallel(
                     tests,
                     vec![],
                     Some(rootpath.to_path_buf()),
+                    env_vars.to_vec(),
                 );
             }
         }

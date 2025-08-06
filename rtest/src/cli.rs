@@ -4,7 +4,7 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Environment variables to set for pytest (e.g., 'KEY=VALUE')
-    #[arg(long, short, num_args = 0..)]
+    #[arg(long, short)]
     pub env: Vec<String>,
 
     /// Number of processes to run tests in parallel
