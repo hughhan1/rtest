@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use rtest::{
-    cli::Args, collect_tests_rust, determine_worker_count, display_collection_results,
-    execute_tests, execute_tests_parallel, subproject, PytestRunner,
+    cli::Args, determine_worker_count, execute_tests, execute_tests_parallel, resolve_test_nodes,
+    subproject, PytestRunner,
 };
 use std::env;
 
@@ -33,30 +33,8 @@ pub fn main() {
             std::process::exit(1);
         }
     };
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
-        Ok((nodes, errors)) => (nodes, errors),
-        Err(e) => {
-            eprintln!("FATAL: {e}");
-            std::process::exit(1);
-        }
-    };
 
-    display_collection_results(&test_nodes, &errors);
-
-    // Exit early if there are collection errors to prevent test execution
-    if !errors.errors.is_empty() {
-        std::process::exit(1);
-    }
-
-    if test_nodes.is_empty() {
-        println!("No tests found.");
-        std::process::exit(0);
-    }
-
-    // Exit after collection if --collect-only flag is set
-    if args.collect_only {
-        std::process::exit(0);
-    }
+    let test_nodes = resolve_test_nodes(&args.files, args.collect_only, rootpath.clone());
 
     if worker_count == 1 || args.dist == "no" {
         // Group tests by subproject

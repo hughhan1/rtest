@@ -725,6 +725,32 @@ class TestExecutionIntegration(unittest.TestCase):
             # Doctest support depends on pytest configuration
             self.assertIsNotNone(returncode)
 
+    def test_execute_specific_test_node(self) -> None:
+        """Test execution of a specific test using :: syntax."""
+        files = {
+            "test_selection.py": textwrap.dedent("""
+                def test_one():
+                    assert True
+
+                def test_two():
+                    assert False  # This should not run
+
+                def test_three():
+                    assert True
+            """)
+        }
+
+        with create_test_project(files) as project_path:
+            # Select only test_one using :: syntax
+            returncode, stdout, stderr = run_rtest(["test_selection.py::test_one"], cwd=str(project_path))
+
+            self.assertEqual(returncode, 0, "Selected test should pass")
+            output = stdout + stderr
+            self.assertIn("1 passed", output)
+            # Ensure only one test ran (not all three)
+            self.assertNotIn("failed", output.lower())
+            self.assertNotIn("3 passed", output)
+
 
 if __name__ == "__main__":
     unittest.main()

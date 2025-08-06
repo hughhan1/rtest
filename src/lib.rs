@@ -4,7 +4,7 @@ use clap::Parser;
 use pyo3::prelude::*;
 use rtest::{
     cli::Args, collect_tests_rust, determine_worker_count, display_collection_results,
-    execute_tests, execute_tests_parallel,
+    execute_tests, execute_tests_parallel, resolve_test_nodes,
 };
 use std::env;
 
@@ -71,22 +71,33 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         )
     };
 
-    let collection_result = collect_tests_rust(rootpath.clone(), &filtered_args);
+    // Check if any arguments contain :: indicating specific test node IDs
+    let has_specific_tests = filtered_args.iter().any(|f| f.contains("::"));
 
-    let (test_nodes, errors) = match collection_result {
-        Ok((nodes, errs)) => (nodes, errs),
-        Err(e) => {
-            eprintln!("Collection failed: {e}");
-            return 1;
+    let test_nodes = if has_specific_tests {
+        // If specific test node IDs are provided, pass them directly to pytest
+        filtered_args.clone()
+    } else {
+        // Otherwise, perform normal collection
+        let collection_result = collect_tests_rust(rootpath.clone(), &filtered_args);
+
+        let (nodes, errors) = match collection_result {
+            Ok((nodes, errs)) => (nodes, errs),
+            Err(e) => {
+                eprintln!("Collection failed: {e}");
+                return 1;
+            }
+        };
+
+        display_collection_results(&nodes, &errors);
+
+        if nodes.is_empty() {
+            println!("No tests found.");
+            return 0;
         }
+
+        nodes
     };
-
-    display_collection_results(&test_nodes, &errors);
-
-    if test_nodes.is_empty() {
-        println!("No tests found.");
-        return 0;
-    }
 
     execute_tests(
         &runner.program,
@@ -127,30 +138,8 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             std::process::exit(1);
         }
     };
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
-        Ok((nodes, errors)) => (nodes, errors),
-        Err(e) => {
-            eprintln!("FATAL: {e}");
-            std::process::exit(1);
-        }
-    };
 
-    display_collection_results(&test_nodes, &errors);
-
-    // Exit early if there are collection errors to prevent test execution
-    if !errors.errors.is_empty() {
-        std::process::exit(1);
-    }
-
-    if test_nodes.is_empty() {
-        println!("No tests found.");
-        std::process::exit(0);
-    }
-
-    // Exit after collection if --collect-only flag is set
-    if args.collect_only {
-        std::process::exit(0);
-    }
+    let test_nodes = resolve_test_nodes(&args.files, args.collect_only, rootpath.clone());
 
     let exit_code = if worker_count == 1 {
         execute_tests(
