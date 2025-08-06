@@ -529,9 +529,9 @@ class TestCollectionIntegration(unittest.TestCase):
             result = run_collection(project_path)
 
             expected_patterns = [
-                "tests/test_base.py::TestBase::test_base_method",
-                "tests/test_derived.py::TestDerived::test_base_method",
-                "tests/test_derived.py::TestDerived::test_derived_method",
+                f"{Path('tests/test_base.py')}::TestBase::test_base_method",
+                f"{Path('tests/test_derived.py')}::TestDerived::test_base_method",
+                f"{Path('tests/test_derived.py')}::TestDerived::test_derived_method",
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)
@@ -560,10 +560,10 @@ class TestCollectionIntegration(unittest.TestCase):
 
             expected_patterns = [
                 # TestBase from test_base.py should be collected
-                "package/test_base.py::TestBase::test_base_method",
+                f"{Path('package/test_base.py')}::TestBase::test_base_method",
                 # TestDerived inherits the method
-                "package/subpackage/test_derived.py::TestDerived::test_base_method",
-                "package/subpackage/test_derived.py::TestDerived::test_derived_method",
+                f"{Path('package/subpackage/test_derived.py')}::TestDerived::test_base_method",
+                f"{Path('package/subpackage/test_derived.py')}::TestDerived::test_derived_method",
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)
@@ -605,17 +605,17 @@ class TestCollectionIntegration(unittest.TestCase):
 
             expected_patterns = [
                 # Base class from test_base.py
-                "package/test_base.py::TestBase::test_base_method",
+                f"{Path('package/test_base.py')}::TestBase::test_base_method",
                 # Intermediate class from test_intermediate.py
-                "package/level1/test_intermediate.py::TestIntermediate::test_base_method",
-                "package/level1/test_intermediate.py::TestIntermediate::test_intermediate_method",
+                f"{Path('package/level1/test_intermediate.py')}::TestIntermediate::test_base_method",
+                f"{Path('package/level1/test_intermediate.py')}::TestIntermediate::test_intermediate_method",
                 # Derived from base
-                "package/level1/level2/test_derived.py::TestDerivedFromBase::test_base_method",
-                "package/level1/level2/test_derived.py::TestDerivedFromBase::test_derived_base_method",
+                f"{Path('package/level1/level2/test_derived.py')}::TestDerivedFromBase::test_base_method",
+                f"{Path('package/level1/level2/test_derived.py')}::TestDerivedFromBase::test_derived_base_method",
                 # Derived from intermediate
-                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_base_method",
-                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_intermediate_method",
-                "package/level1/level2/test_derived.py::TestDerivedFromIntermediate::test_derived_intermediate_method",
+                f"{Path('package/level1/level2/test_derived.py')}::TestDerivedFromIntermediate::test_base_method",
+                f"{Path('package/level1/level2/test_derived.py')}::TestDerivedFromIntermediate::test_intermediate_method",
+                f"{Path('package/level1/level2/test_derived.py')}::TestDerivedFromIntermediate::test_derived_intermediate_method",
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)

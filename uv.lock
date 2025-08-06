@@ -218,7 +218,7 @@ wheels = [
 
 [[package]]
 name = "rtest"
-version = "0.0.31"
+version = "0.0.33"
 source = { editable = "." }
 dependencies = [
     { name = "pytest" },
