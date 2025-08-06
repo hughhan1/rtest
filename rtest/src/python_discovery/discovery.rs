@@ -116,28 +116,29 @@ pub fn test_info_to_function(test: &TestInfo, module_path: &Path, module_nodeid:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indoc::indoc;
     use std::path::PathBuf;
 
     #[test]
     fn test_discover_tests() {
-        let source = r#"
-def test_simple():
-    pass
+        let source = indoc! {r#"
+            def test_simple():
+                pass
 
-def not_a_test():
-    pass
+            def not_a_test():
+                pass
 
-class TestClass:
-    def test_method(self):
-        pass
-    
-    def not_a_test_method(self):
-        pass
+            class TestClass:
+                def test_method(self):
+                    pass
+                
+                def not_a_test_method(self):
+                    pass
 
-class NotATestClass:
-    def test_ignored(self):
-        pass
-"#;
+            class NotATestClass:
+                def test_ignored(self):
+                    pass
+        "#};
 
         let config = TestDiscoveryConfig::default();
         let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();

@@ -1049,6 +1049,7 @@ version = "0.0.33"
 dependencies = [
  "clap",
  "glob",
+ "indoc",
  "log",
  "num_cpus",
  "regex",
@@ -1069,6 +1070,7 @@ name = "rtest-py"
 version = "0.0.33"
 dependencies = [
  "clap",
+ "indoc",
  "pyo3",
  "rtest",
  "tempfile",

@@ -59,6 +59,7 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indoc::indoc;
     use std::fs;
     use tempfile::TempDir;
 
@@ -67,10 +68,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let pyproject_path = temp_dir.path().join("pyproject.toml");
 
-        let content = r#"
-[tool.pytest.ini_options]
-testpaths = ["tests", "test"]
-"#;
+        let content = indoc! {r#"
+            [tool.pytest.ini_options]
+            testpaths = ["tests", "test"]
+        "#};
 
         fs::write(&pyproject_path, content).unwrap();
 
@@ -92,10 +93,10 @@ testpaths = ["tests", "test"]
         let temp_dir = TempDir::new().unwrap();
         let pyproject_path = temp_dir.path().join("pyproject.toml");
 
-        let content = r#"
-[tool.pytest.ini_options]
-filterwarnings = ["error"]
-"#;
+        let content = indoc! {r#"
+            [tool.pytest.ini_options]
+            filterwarnings = ["error"]
+        "#};
 
         fs::write(&pyproject_path, content).unwrap();
 
