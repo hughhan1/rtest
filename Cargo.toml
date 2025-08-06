@@ -17,3 +17,4 @@ clap = { version = "4.5.4", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.0"
+indoc = "2.0"
