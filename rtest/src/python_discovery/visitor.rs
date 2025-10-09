@@ -4,7 +4,7 @@ use crate::python_discovery::{
     discovery::{TestDiscoveryConfig, TestInfo},
     pattern,
 };
-use ruff_python_ast::{Expr, ModModule, Stmt, StmtClassDef, StmtFunctionDef};
+use ruff_python_ast::{Expr, ExprAttribute, ExprCall, ModModule, Stmt, StmtClassDef, StmtFunctionDef};
 use std::collections::{HashMap, HashSet};
 
 /// Visitor to discover test functions and classes in Python AST
@@ -14,6 +14,196 @@ pub(crate) struct TestDiscoveryVisitor {
     current_class: Option<String>,
     /// Maps class names to (methods, has_init) for inheritance resolution
     class_methods: HashMap<String, (Vec<TestInfo>, bool)>,
+}
+
+/// Information about a single parametrize decorator
+#[derive(Debug, Clone)]
+struct ParametrizeInfo {
+    /// Parameter names (e.g., "x,y" or "value")
+    param_names: Vec<String>,
+    /// List of parameter value tuples
+    values: Vec<Vec<String>>,
+}
+
+/// Extract parametrize decorators from a function
+fn extract_parametrize_decorators(func: &StmtFunctionDef) -> Vec<ParametrizeInfo> {
+    let mut parametrize_infos = Vec::new();
+
+    for decorator in &func.decorator_list {
+        if let Some(info) = parse_parametrize_decorator(&decorator.expression) {
+            parametrize_infos.push(info);
+        }
+    }
+
+    parametrize_infos
+}
+
+/// Parse a single decorator expression to see if it's pytest.mark.parametrize
+fn parse_parametrize_decorator(expr: &Expr) -> Option<ParametrizeInfo> {
+    // Check if this is a Call expression
+    if let Expr::Call(ExprCall { func, arguments, .. }) = expr {
+        // Check if it's pytest.mark.parametrize
+        if is_parametrize_call(func) {
+            // Extract arguments: first arg is param names, second is values
+            if arguments.args.len() >= 2 {
+                let param_names = extract_param_names(&arguments.args[0])?;
+                let values = extract_param_values(&arguments.args[1])?;
+                return Some(ParametrizeInfo { param_names, values });
+            }
+        }
+    }
+    None
+}
+
+/// Check if an expression is pytest.mark.parametrize
+fn is_parametrize_call(expr: &Expr) -> bool {
+    // Looking for: pytest.mark.parametrize
+    if let Expr::Attribute(ExprAttribute { value, attr, .. }) = expr {
+        if attr.as_str() == "parametrize" {
+            if let Expr::Attribute(ExprAttribute {
+                value: inner_value,
+                attr: inner_attr,
+                ..
+            }) = value.as_ref()
+            {
+                if inner_attr.as_str() == "mark" {
+                    if let Expr::Name(name) = inner_value.as_ref() {
+                        return name.id.as_str() == "pytest";
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Extract parameter names from the first argument
+fn extract_param_names(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::StringLiteral(s) => {
+            let param_str = s.value.to_str();
+            // Split by comma and trim whitespace
+            Some(
+                param_str
+                    .split(',')
+                    .map(|p| p.trim().to_string())
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Extract parameter values from the second argument (list of values)
+fn extract_param_values(expr: &Expr) -> Option<Vec<Vec<String>>> {
+    match expr {
+        Expr::List(list) => {
+            let mut all_values = Vec::new();
+            for elem in &list.elts {
+                // Check if element is a tuple (multiple params) or single value
+                match elem {
+                    Expr::Tuple(tuple) => {
+                        // Multiple parameters: convert tuple elements to strings
+                        let param_values: Vec<String> =
+                            tuple.elts.iter().map(format_param_value).collect();
+                        all_values.push(param_values);
+                    }
+                    _ => {
+                        // Single parameter: wrap in vec
+                        let formatted = format_param_value(elem);
+                        all_values.push(vec![formatted]);
+                    }
+                }
+            }
+            Some(all_values)
+        }
+        _ => None,
+    }
+}
+
+/// Format a parameter value for display in test name
+fn format_param_value(expr: &Expr) -> String {
+    match expr {
+        Expr::NumberLiteral(num) => {
+            // Handle int, float, and complex numbers
+            match &num.value {
+                ruff_python_ast::Number::Int(i) => i.to_string(),
+                ruff_python_ast::Number::Float(f) => {
+                    // Format float, removing unnecessary decimals
+                    if f.fract() == 0.0 {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
+                }
+                ruff_python_ast::Number::Complex { real, imag } => {
+                    format!("{}+{}j", real, imag)
+                }
+            }
+        }
+        Expr::StringLiteral(s) => {
+            // Return the string value without quotes if it's simple
+            s.value.to_str().to_string()
+        }
+        Expr::BooleanLiteral(b) => {
+            if b.value {
+                "True".to_string()
+            } else {
+                "False".to_string()
+            }
+        }
+        Expr::NoneLiteral(_) => "None".to_string(),
+        Expr::Tuple(tuple) => {
+            // Format tuple elements separated by hyphens
+            let elements: Vec<String> = tuple.elts.iter().map(format_param_value).collect();
+            elements.join("-")
+        }
+        Expr::List(list) => {
+            // Format list similar to tuple
+            let elements: Vec<String> = list.elts.iter().map(format_param_value).collect();
+            format!("[{}]", elements.join("-"))
+        }
+        Expr::UnaryOp(unary) => {
+            // Handle negative numbers
+            if let ruff_python_ast::UnaryOp::USub = unary.op {
+                format!("-{}", format_param_value(&unary.operand))
+            } else {
+                format!("{:?}", expr)
+            }
+        }
+        _ => {
+            // For complex expressions, use a simple representation
+            format!("{:?}", expr).chars().take(20).collect()
+        }
+    }
+}
+
+/// Generate all parameter combinations from multiple parametrize decorators
+fn generate_param_combinations(parametrize_infos: &[ParametrizeInfo]) -> Vec<String> {
+    if parametrize_infos.is_empty() {
+        return vec![];
+    }
+
+    // Start with the first parametrize decorator
+    let mut combinations = parametrize_infos[0]
+        .values
+        .iter()
+        .map(|v| v.join("-"))
+        .collect::<Vec<_>>();
+
+    // For stacked decorators, create cartesian product
+    for info in parametrize_infos.iter().skip(1) {
+        let mut new_combinations = Vec::new();
+        for existing in &combinations {
+            for value_set in &info.values {
+                let new_combo = format!("{}-{}", value_set.join("-"), existing);
+                new_combinations.push(new_combo);
+            }
+        }
+        combinations = new_combinations;
+    }
+
+    combinations
 }
 
 impl TestDiscoveryVisitor {
@@ -64,12 +254,29 @@ impl TestDiscoveryVisitor {
                         if let Stmt::FunctionDef(func) = stmt {
                             let method_name = func.name.as_str();
                             if self.is_test_function(method_name) {
-                                methods.push(TestInfo {
-                                    name: method_name.into(),
-                                    line: func.range.start().to_u32() as usize,
-                                    is_method: true,
-                                    class_name: Some(name.into()),
-                                });
+                                // Check for parametrize decorators
+                                let parametrize_infos = extract_parametrize_decorators(func);
+
+                                if parametrize_infos.is_empty() {
+                                    methods.push(TestInfo {
+                                        name: method_name.into(),
+                                        line: func.range.start().to_u32() as usize,
+                                        is_method: true,
+                                        class_name: Some(name.into()),
+                                    });
+                                } else {
+                                    // Generate test items for each parameter combination
+                                    let combinations = generate_param_combinations(&parametrize_infos);
+                                    for combo in combinations {
+                                        let parametrized_name = format!("{}[{}]", method_name, combo);
+                                        methods.push(TestInfo {
+                                            name: parametrized_name,
+                                            line: func.range.start().to_u32() as usize,
+                                            is_method: true,
+                                            class_name: Some(name.into()),
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
@@ -92,12 +299,30 @@ impl TestDiscoveryVisitor {
     fn visit_function(&mut self, func: &StmtFunctionDef) {
         let name = func.name.as_str();
         if self.is_test_function(name) {
-            self.tests.push(TestInfo {
-                name: name.into(),
-                line: func.range.start().to_u32() as usize,
-                is_method: self.current_class.is_some(),
-                class_name: self.current_class.clone(),
-            });
+            // Check for parametrize decorators
+            let parametrize_infos = extract_parametrize_decorators(func);
+
+            if parametrize_infos.is_empty() {
+                // No parametrize decorators - create single test
+                self.tests.push(TestInfo {
+                    name: name.into(),
+                    line: func.range.start().to_u32() as usize,
+                    is_method: self.current_class.is_some(),
+                    class_name: self.current_class.clone(),
+                });
+            } else {
+                // Generate test items for each parameter combination
+                let combinations = generate_param_combinations(&parametrize_infos);
+                for combo in combinations {
+                    let parametrized_name = format!("{}[{}]", name, combo);
+                    self.tests.push(TestInfo {
+                        name: parametrized_name,
+                        line: func.range.start().to_u32() as usize,
+                        is_method: self.current_class.is_some(),
+                        class_name: self.current_class.clone(),
+                    });
+                }
+            }
         }
     }
 
