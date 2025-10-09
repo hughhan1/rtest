@@ -1,6 +1,6 @@
 //! Semantic analysis for test discovery with import resolution.
 
-use ruff_python_ast::{Expr, Mod, ModModule, Stmt, StmtClassDef};
+use ruff_python_ast::{Expr, ExprAttribute, ExprCall, Mod, ModModule, Stmt, StmtClassDef, StmtFunctionDef};
 use ruff_python_parser::{parse, Mode, ParseOptions};
 use ruff_python_semantic::{Module as SemanticModule, ModuleKind, ModuleSource, SemanticModel};
 use ruff_text_size::Ranged;
@@ -45,6 +45,173 @@ pub struct TestClassInfo {
     pub has_init: bool,
     pub test_methods: Vec<TestMethodInfo>,
     pub base_classes: Vec<ResolvedBaseClass>,
+}
+
+/// Information about a single parametrize decorator
+#[derive(Debug, Clone)]
+struct ParametrizeInfo {
+    /// Parameter names (e.g., ["x", "y"] or ["value"])
+    param_names: Vec<String>,
+    /// List of parameter value tuples
+    values: Vec<Vec<String>>,
+}
+
+/// Extract parametrize decorators from a function
+fn extract_parametrize_decorators(func: &StmtFunctionDef) -> Vec<ParametrizeInfo> {
+    let mut parametrize_infos = Vec::new();
+
+    for decorator in &func.decorator_list {
+        if let Some(info) = parse_parametrize_decorator(&decorator.expression) {
+            parametrize_infos.push(info);
+        }
+    }
+
+    parametrize_infos
+}
+
+/// Parse a single decorator expression to see if it's pytest.mark.parametrize
+fn parse_parametrize_decorator(expr: &Expr) -> Option<ParametrizeInfo> {
+    if let Expr::Call(ExprCall { func, arguments, .. }) = expr {
+        if is_parametrize_call(func) {
+            if arguments.args.len() >= 2 {
+                let param_names = extract_param_names(&arguments.args[0])?;
+                let values = extract_param_values(&arguments.args[1])?;
+                return Some(ParametrizeInfo { param_names, values });
+            }
+        }
+    }
+    None
+}
+
+/// Check if an expression is pytest.mark.parametrize
+fn is_parametrize_call(expr: &Expr) -> bool {
+    if let Expr::Attribute(ExprAttribute { value, attr, .. }) = expr {
+        if attr.as_str() == "parametrize" {
+            if let Expr::Attribute(ExprAttribute {
+                value: inner_value,
+                attr: inner_attr,
+                ..
+            }) = value.as_ref()
+            {
+                if inner_attr.as_str() == "mark" {
+                    if let Expr::Name(name) = inner_value.as_ref() {
+                        return name.id.as_str() == "pytest";
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Extract parameter names from the first argument
+fn extract_param_names(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::StringLiteral(s) => {
+            let param_str = s.value.to_str();
+            Some(
+                param_str
+                    .split(',')
+                    .map(|p| p.trim().to_string())
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Extract parameter values from the second argument (list of values)
+fn extract_param_values(expr: &Expr) -> Option<Vec<Vec<String>>> {
+    match expr {
+        Expr::List(list) => {
+            let mut all_values = Vec::new();
+            for elem in &list.elts {
+                match elem {
+                    Expr::Tuple(tuple) => {
+                        let param_values: Vec<String> =
+                            tuple.elts.iter().map(format_param_value).collect();
+                        all_values.push(param_values);
+                    }
+                    _ => {
+                        let formatted = format_param_value(elem);
+                        all_values.push(vec![formatted]);
+                    }
+                }
+            }
+            Some(all_values)
+        }
+        _ => None,
+    }
+}
+
+/// Format a parameter value for display in test name
+fn format_param_value(expr: &Expr) -> String {
+    match expr {
+        Expr::NumberLiteral(num) => match &num.value {
+            ruff_python_ast::Number::Int(i) => i.to_string(),
+            ruff_python_ast::Number::Float(f) => {
+                if f.fract() == 0.0 {
+                    format!("{:.0}", f)
+                } else {
+                    f.to_string()
+                }
+            }
+            ruff_python_ast::Number::Complex { real, imag } => {
+                format!("{}+{}j", real, imag)
+            }
+        },
+        Expr::StringLiteral(s) => s.value.to_str().to_string(),
+        Expr::BooleanLiteral(b) => {
+            if b.value {
+                "True".to_string()
+            } else {
+                "False".to_string()
+            }
+        }
+        Expr::NoneLiteral(_) => "None".to_string(),
+        Expr::Tuple(tuple) => {
+            let elements: Vec<String> = tuple.elts.iter().map(format_param_value).collect();
+            elements.join("-")
+        }
+        Expr::List(list) => {
+            let elements: Vec<String> = list.elts.iter().map(format_param_value).collect();
+            format!("[{}]", elements.join("-"))
+        }
+        Expr::UnaryOp(unary) => {
+            if let ruff_python_ast::UnaryOp::USub = unary.op {
+                format!("-{}", format_param_value(&unary.operand))
+            } else {
+                format!("{:?}", expr).chars().take(20).collect()
+            }
+        }
+        _ => format!("{:?}", expr).chars().take(20).collect(),
+    }
+}
+
+/// Generate all parameter combinations from multiple parametrize decorators
+fn generate_param_combinations(parametrize_infos: &[ParametrizeInfo]) -> Vec<String> {
+    if parametrize_infos.is_empty() {
+        return vec![];
+    }
+
+    let mut combinations = parametrize_infos[0]
+        .values
+        .iter()
+        .map(|v| v.join("-"))
+        .collect::<Vec<_>>();
+
+    for info in parametrize_infos.iter().skip(1) {
+        let mut new_combinations = Vec::new();
+        for existing in &combinations {
+            for value_set in &info.values {
+                let new_combo = format!("{}-{}", value_set.join("-"), existing);
+                new_combinations.push(new_combo);
+            }
+        }
+        combinations = new_combinations;
+    }
+
+    combinations
 }
 
 /// Enhanced test discovery with semantic analysis
@@ -117,12 +284,30 @@ impl SemanticTestDiscovery {
         for stmt in &ast_module.body {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.is_test_function(func.name.as_str()) {
-                    all_tests.push(TestInfo {
-                        name: func.name.to_string(),
-                        line: func.range().start().to_u32() as usize,
-                        is_method: false,
-                        class_name: None,
-                    });
+                    // Check for parametrize decorators
+                    let parametrize_infos = extract_parametrize_decorators(func);
+
+                    if parametrize_infos.is_empty() {
+                        // No parametrize decorators - create single test
+                        all_tests.push(TestInfo {
+                            name: func.name.to_string(),
+                            line: func.range().start().to_u32() as usize,
+                            is_method: false,
+                            class_name: None,
+                        });
+                    } else {
+                        // Generate test items for each parameter combination
+                        let combinations = generate_param_combinations(&parametrize_infos);
+                        for combo in combinations {
+                            let parametrized_name = format!("{}[{}]", func.name, combo);
+                            all_tests.push(TestInfo {
+                                name: parametrized_name,
+                                line: func.range().start().to_u32() as usize,
+                                is_method: false,
+                                class_name: None,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -255,10 +440,26 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    methods.push(TestMethodInfo {
-                        name: method_name.to_string(),
-                        line: func.range().start().to_u32() as usize,
-                    });
+                    // Check for parametrize decorators
+                    let parametrize_infos = extract_parametrize_decorators(func);
+
+                    if parametrize_infos.is_empty() {
+                        // No parametrize decorators - create single test method
+                        methods.push(TestMethodInfo {
+                            name: method_name.to_string(),
+                            line: func.range().start().to_u32() as usize,
+                        });
+                    } else {
+                        // Generate test items for each parameter combination
+                        let combinations = generate_param_combinations(&parametrize_infos);
+                        for combo in combinations {
+                            let parametrized_name = format!("{}[{}]", method_name, combo);
+                            methods.push(TestMethodInfo {
+                                name: parametrized_name,
+                                line: func.range().start().to_u32() as usize,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -392,13 +593,33 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
+                    // Track base method name for override detection
                     own_method_names.insert(method_name.to_string());
-                    all_tests.push(TestInfo {
-                        name: method_name.to_string(),
-                        line: func.range().start().to_u32() as usize,
-                        is_method: true,
-                        class_name: Some(class_name.to_string()),
-                    });
+
+                    // Check for parametrize decorators
+                    let parametrize_infos = extract_parametrize_decorators(func);
+
+                    if parametrize_infos.is_empty() {
+                        // No parametrize decorators - create single test
+                        all_tests.push(TestInfo {
+                            name: method_name.to_string(),
+                            line: func.range().start().to_u32() as usize,
+                            is_method: true,
+                            class_name: Some(class_name.to_string()),
+                        });
+                    } else {
+                        // Generate test items for each parameter combination
+                        let combinations = generate_param_combinations(&parametrize_infos);
+                        for combo in combinations {
+                            let parametrized_name = format!("{}[{}]", method_name, combo);
+                            all_tests.push(TestInfo {
+                                name: parametrized_name,
+                                line: func.range().start().to_u32() as usize,
+                                is_method: true,
+                                class_name: Some(class_name.to_string()),
+                            });
+                        }
+                    }
                 }
             }
         }
