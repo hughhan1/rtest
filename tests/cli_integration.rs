@@ -605,19 +605,24 @@ class TestMultiLevel(TestDerived):
 
     assert!(output.status.success(), "Command should succeed");
 
-    // Should find all tests including inherited ones
+    // Should find all tests including inherited ones and imported test classes
     assert!(stdout.contains("test_base.py::TestBase::test_base_method"));
     assert!(stdout.contains("test_base.py::TestBase::test_another_base_method"));
+    assert!(stdout.contains("test_derived.py::TestBase::test_base_method"));
+    assert!(stdout.contains("test_derived.py::TestBase::test_another_base_method"));
     assert!(stdout.contains("test_derived.py::TestDerived::test_base_method"));
     assert!(stdout.contains("test_derived.py::TestDerived::test_another_base_method"));
     assert!(stdout.contains("test_derived.py::TestDerived::test_derived_method"));
+    assert!(stdout.contains("test_multi_level.py::TestDerived::test_base_method"));
+    assert!(stdout.contains("test_multi_level.py::TestDerived::test_another_base_method"));
+    assert!(stdout.contains("test_multi_level.py::TestDerived::test_derived_method"));
     assert!(stdout.contains("test_multi_level.py::TestMultiLevel::test_base_method"));
     assert!(stdout.contains("test_multi_level.py::TestMultiLevel::test_another_base_method"));
     assert!(stdout.contains("test_multi_level.py::TestMultiLevel::test_derived_method"));
     assert!(stdout.contains("test_multi_level.py::TestMultiLevel::test_multi_level_method"));
 
-    // Should collect 9 tests total (2 + 3 + 4)
-    assert!(stdout.contains("collected 9 items"));
+    // Should collect 14 tests total (2 + 2+3 + 3+4) including imported test classes
+    assert!(stdout.contains("collected 14 items"));
 }
 
 /// Test multiple inheritance pattern
@@ -662,17 +667,20 @@ class TestMultipleInheritance(TestMixinA, TestMixinB):
 
     assert!(output.status.success(), "Command should succeed");
 
-    // Check for all expected patterns
+    // Check for all expected patterns including imported test classes
     assert!(stdout.contains("test_mixins.py::TestMixinA::test_mixin_a_method"));
     assert!(stdout.contains("test_mixins.py::TestMixinB::test_mixin_b_method"));
     assert!(stdout.contains("test_mixins.py::TestMixinB::test_mixin_b_another"));
+    assert!(stdout.contains("test_multiple.py::TestMixinA::test_mixin_a_method"));
+    assert!(stdout.contains("test_multiple.py::TestMixinB::test_mixin_b_method"));
+    assert!(stdout.contains("test_multiple.py::TestMixinB::test_mixin_b_another"));
     assert!(stdout.contains("test_multiple.py::TestMultipleInheritance::test_mixin_a_method"));
     assert!(stdout.contains("test_multiple.py::TestMultipleInheritance::test_mixin_b_method"));
     assert!(stdout.contains("test_multiple.py::TestMultipleInheritance::test_mixin_b_another"));
     assert!(stdout.contains("test_multiple.py::TestMultipleInheritance::test_own_method"));
 
-    // Should collect 7 tests total
-    assert!(stdout.contains("collected 7 items"));
+    // Should collect 10 tests total (3 + 1+2+4) including imported test classes
+    assert!(stdout.contains("collected 10 items"));
 }
 
 /// Test diamond inheritance pattern
@@ -852,6 +860,12 @@ class TestLevel5(TestLevel4):
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    eprintln!("=== test_deep_inheritance_chain debug ===");
+    eprintln!("Stdout: {stdout}");
+    eprintln!("Stderr: {stderr}");
+    eprintln!("================================================");
 
     assert!(output.status.success(), "Command should succeed");
 
@@ -865,8 +879,8 @@ class TestLevel5(TestLevel4):
         );
     }
 
-    // Total: 1 + 2 + 3 + 4 + 5 = 15 tests
-    assert!(stdout.contains("collected 15 items"));
+    // With imported classes: 1 + (1+2) + (2+3) + (3+4) + (4+5) = 1 + 3 + 5 + 7 + 9 = 25 tests
+    assert!(stdout.contains("collected 25 items"));
 }
 
 /// Test inheritance from non-test classes

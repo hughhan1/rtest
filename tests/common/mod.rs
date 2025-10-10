@@ -165,3 +165,219 @@ pub fn create_test_file(filename: &str, content: &str) -> (TempDir, PathBuf) {
     files.insert(filename, content);
     create_test_project_with_files(files)
 }
+
+/// Runs pytest --collect-only and returns the output
+#[allow(dead_code)]
+pub fn run_pytest_collection(project_path: &PathBuf, files: &[&str]) -> Result<String, String> {
+    // Get the rtest project root (where pyproject.toml is)
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Get the Python executable from the venv directly
+    let python_exe = manifest_dir.join(".venv/bin/python");
+    if !python_exe.exists() {
+        return Err(
+            "Python venv not found. Run 'uv sync --dev' to set up the environment.".to_string(),
+        );
+    }
+
+    // Create both pytest.ini AND setup.py to mark this as the root
+    let pytest_ini_path = project_path.join("pytest.ini");
+    let pytest_ini_content = "[pytest]\n\
+        testpaths = .\n\
+        python_files = test_*.py *_test.py\n\
+        python_classes = Test*\n\
+        python_functions = test_*\n";
+    fs::write(&pytest_ini_path, pytest_ini_content)
+        .map_err(|e| format!("Failed to create pytest.ini: {}", e))?;
+
+    // Create a setup.py to stop pytest from walking up further
+    let setup_py_path = project_path.join("setup.py");
+    fs::write(&setup_py_path, "# Marker file\n")
+        .map_err(|e| format!("Failed to create setup.py: {}", e))?;
+
+    // Use the venv python directly
+    let mut cmd = Command::new(&python_exe);
+    cmd.arg("-m")
+        .arg("pytest")
+        .arg("--collect-only")
+        .arg("-q") // Quiet mode for cleaner output
+        .arg("-p")
+        .arg("no:cacheprovider") // Disable pytest cache
+        .current_dir(project_path); // Run pytest in the temp test directory
+
+    // Always specify what to collect - either files or "."
+    if files.is_empty() {
+        cmd.arg(".");
+    } else {
+        for file in files {
+            cmd.arg(file);
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute pytest: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() && stdout.is_empty() && stderr.contains("No module named pytest") {
+        return Err(
+            "pytest not found. Run 'uv sync --dev' to install development dependencies."
+                .to_string(),
+        );
+    }
+
+    Ok(format!("{}{}", stdout, stderr))
+}
+
+/// Runs rtest --collect-only and returns the output
+#[allow(dead_code)]
+pub fn run_rtest_collection(project_path: &PathBuf, files: &[&str]) -> Result<String, String> {
+    let rtest_binary = get_rtest_binary();
+
+    let mut cmd = Command::new(&rtest_binary);
+    cmd.arg("--collect-only").current_dir(project_path);
+
+    // Add specific files if provided, otherwise collect all
+    for file in files {
+        cmd.arg(file);
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute rtest: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(format!("{}{}", stdout, stderr))
+}
+
+/// Extracts test node IDs from collection output
+/// Returns a sorted vector of test identifiers
+#[allow(dead_code)]
+pub fn parse_collected_tests(output: &str) -> Vec<String> {
+    let mut tests = Vec::new();
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+
+        // Look for lines containing test identifiers (with ::)
+        if trimmed.contains("::") && trimmed.contains("test_") {
+            // Extract the test identifier
+            // Handle both pytest format: "  <Module test_file.py>"
+            // and rtest format: "test_file.py::test_function"
+
+            // Try to find the test identifier pattern
+            if let Some(test_id) = extract_test_id(trimmed) {
+                tests.push(test_id);
+            }
+        }
+    }
+
+    // Sort for consistent comparison
+    tests.sort();
+    tests.dedup(); // Remove duplicates
+    tests
+}
+
+/// Helper to extract test ID from a line
+fn extract_test_id(line: &str) -> Option<String> {
+    // Handle format like: "test_file.py::test_function"
+    // or "test_file.py::TestClass::test_method"
+
+    // Find the part that looks like a test identifier
+    let parts: Vec<&str> = line.split_whitespace().collect();
+
+    for part in parts {
+        if part.contains("::") && part.contains(".py") {
+            // Normalize path separators to forward slashes
+            let normalized = part.replace('\\', "/");
+            return Some(normalized);
+        }
+    }
+
+    None
+}
+
+/// Compares two sets of collected tests and returns the differences
+#[allow(dead_code)]
+pub fn compare_test_collections(
+    rtest_tests: &[String],
+    pytest_tests: &[String],
+) -> (Vec<String>, Vec<String>) {
+    use std::collections::HashSet;
+
+    let rtest_set: HashSet<_> = rtest_tests.iter().collect();
+    let pytest_set: HashSet<_> = pytest_tests.iter().collect();
+
+    // Tests in rtest but not in pytest
+    let only_rtest: Vec<String> = rtest_set
+        .difference(&pytest_set)
+        .map(|s| (*s).clone())
+        .collect();
+
+    // Tests in pytest but not in rtest
+    let only_pytest: Vec<String> = pytest_set
+        .difference(&rtest_set)
+        .map(|s| (*s).clone())
+        .collect();
+
+    (only_rtest, only_pytest)
+}
+
+/// Formats the diff between rtest and pytest collection results
+#[allow(dead_code)]
+pub fn format_diff(rtest_tests: &[String], pytest_tests: &[String]) -> String {
+    let (only_rtest, only_pytest) = compare_test_collections(rtest_tests, pytest_tests);
+
+    let mut diff = String::new();
+
+    diff.push_str(&format!(
+        "\n=== Collection Comparison ===\n\
+         rtest collected: {} tests\n\
+         pytest collected: {} tests\n\n",
+        rtest_tests.len(),
+        pytest_tests.len()
+    ));
+
+    if !only_rtest.is_empty() {
+        diff.push_str(&format!(
+            "Tests found by rtest but NOT by pytest ({}):\n",
+            only_rtest.len()
+        ));
+        for test in &only_rtest {
+            diff.push_str(&format!("  + {}\n", test));
+        }
+        diff.push('\n');
+    }
+
+    if !only_pytest.is_empty() {
+        diff.push_str(&format!(
+            "Tests found by pytest but NOT by rtest ({}):\n",
+            only_pytest.len()
+        ));
+        for test in &only_pytest {
+            diff.push_str(&format!("  - {}\n", test));
+        }
+        diff.push('\n');
+    }
+
+    if only_rtest.is_empty() && only_pytest.is_empty() {
+        diff.push_str("✓ Collections match perfectly!\n");
+    }
+
+    diff
+}
+
+/// Asserts that rtest and pytest collections match, with detailed diff on failure
+#[allow(dead_code)]
+pub fn assert_collections_match(rtest_tests: &[String], pytest_tests: &[String], context: &str) {
+    let (only_rtest, only_pytest) = compare_test_collections(rtest_tests, pytest_tests);
+
+    if !only_rtest.is_empty() || !only_pytest.is_empty() {
+        let diff = format_diff(rtest_tests, pytest_tests);
+        panic!("Collection mismatch for {}: {}", context, diff);
+    }
+}
