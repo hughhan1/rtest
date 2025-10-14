@@ -1633,12 +1633,8 @@ class TestNested(TestBase):
     // Should find both the base test and the nested test with inheritance
     assert!(stdout.contains("test_base.py::TestBase::test_base_method"));
 
-    // Use platform-agnostic path construction
-    let nested_test_path = std::path::Path::new("tests")
-        .join("unit")
-        .join("test_nested.py")
-        .display()
-        .to_string();
+    // Use forward slashes for node IDs (pytest convention, cross-platform)
+    let nested_test_path = "tests/unit/test_nested.py";
     assert!(stdout.contains(&format!(
         "{}::TestNested::test_base_method",
         nested_test_path

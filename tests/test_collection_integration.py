@@ -1347,7 +1347,7 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertIn("test_base.py::TestBase::test_base_method", result.output)
 
             # Use platform-agnostic path construction with forward slashes (pytest convention)
-            nested_test_path = "tests/unit/test_nested.py"
+            nested_test_path = Path("tests", "unit", "test_nested.py").as_posix()
             self.assertIn(f"{nested_test_path}::TestNested::test_base_method", result.output)
             self.assertIn(f"{nested_test_path}::TestNested::test_nested_method", result.output)
 

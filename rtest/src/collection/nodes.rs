@@ -159,7 +159,7 @@ impl Directory {
             .strip_prefix(&session.rootpath)
             .unwrap_or(&path)
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/"); // Normalize to forward slashes for cross-platform compatibility
 
         Self {
             path,
