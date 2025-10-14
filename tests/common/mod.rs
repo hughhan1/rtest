@@ -172,8 +172,13 @@ pub fn run_pytest_collection(project_path: &PathBuf, files: &[&str]) -> Result<S
     // Get the rtest project root (where pyproject.toml is)
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    // Get the Python executable from the venv directly
-    let python_exe = manifest_dir.join(".venv/bin/python");
+    // Get the Python executable from the venv - platform-aware
+    let python_exe = if cfg!(target_os = "windows") {
+        manifest_dir.join(".venv/Scripts/python.exe")
+    } else {
+        manifest_dir.join(".venv/bin/python")
+    };
+
     if !python_exe.exists() {
         return Err(
             "Python venv not found. Run 'uv sync --dev' to set up the environment.".to_string(),
