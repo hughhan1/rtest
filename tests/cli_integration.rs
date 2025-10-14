@@ -862,11 +862,6 @@ class TestLevel5(TestLevel4):
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    eprintln!("=== test_deep_inheritance_chain debug ===");
-    eprintln!("Stdout: {stdout}");
-    eprintln!("Stderr: {stderr}");
-    eprintln!("================================================");
-
     assert!(output.status.success(), "Command should succeed");
 
     // Level 5 should have all 5 methods
