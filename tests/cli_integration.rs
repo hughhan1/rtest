@@ -860,7 +860,7 @@ class TestLevel5(TestLevel4):
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let _stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(output.status.success(), "Command should succeed");
 

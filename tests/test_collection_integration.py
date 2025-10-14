@@ -253,8 +253,12 @@ class TestCollectionIntegration(unittest.TestCase):
 
             assert_tests_found(result.output_lines, expected_patterns)
 
-            # Should collect 9 tests total (2 + 3 + 4)
-            self.assertIn("collected 9 items", result.output)
+            # Should collect 14 tests total:
+            # - test_base.py: TestBase (2 tests)
+            # - test_derived.py: TestBase (2) + TestDerived (3) = 5 tests
+            # - test_multi_level.py: TestDerived (3) + TestMultiLevel (4) = 7 tests
+            # pytest collects imported classes as separate test classes
+            self.assertIn("collected 14 items", result.output)
 
     def test_multiple_inheritance(self) -> None:
         """Test that collection handles multiple inheritance correctly."""
@@ -297,7 +301,10 @@ class TestCollectionIntegration(unittest.TestCase):
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)
-            self.assertIn("collected 7 items", result.output)
+            # Should collect 10 items total:
+            # - test_mixins.py: TestMixinA (1) + TestMixinB (2) = 3 tests
+            # - test_multiple.py: TestMixinA (1) + TestMixinB (2) + TestMultipleInheritance (4) = 7 tests
+            self.assertIn("collected 10 items", result.output)
 
     def test_diamond_inheritance(self) -> None:
         """Test diamond inheritance pattern."""
@@ -438,8 +445,14 @@ class TestCollectionIntegration(unittest.TestCase):
 
             assert_tests_found(result.output_lines, expected_patterns)
 
-            # Total: 1 + 2 + 3 + 4 + 5 = 15 tests
-            self.assertIn("collected 15 items", result.output)
+            # Total: 25 tests
+            # - test_level1.py: TestLevel1 (1 test)
+            # - test_level2.py: TestLevel1 (1) + TestLevel2 (2) = 3 tests
+            # - test_level3.py: TestLevel2 (2) + TestLevel3 (3) = 5 tests
+            # - test_level4.py: TestLevel3 (3) + TestLevel4 (4) = 7 tests
+            # - test_level5.py: TestLevel4 (4) + TestLevel5 (5) = 9 tests
+            # 1 + 3 + 5 + 7 + 9 = 25 tests
+            self.assertIn("collected 25 items", result.output)
 
     def test_mixed_local_and_imported_inheritance(self) -> None:
         """Test mixing local and imported base classes."""
@@ -1133,7 +1146,8 @@ class TestCollectionIntegration(unittest.TestCase):
                     "test_sys_path_import.py::TestWithSysPathImport::test_another_external_method", result.output
                 )
                 self.assertIn("test_sys_path_import.py::TestWithSysPathImport::test_local_method", result.output)
-                self.assertIn("collected 3 items", result.output)
+                # pytest also collects the imported TestExternalBase class (2 tests) + 3 from child = 5 total
+                self.assertIn("collected 5 items", result.output)
 
     def test_pythonpath_multiple_directories(self) -> None:
         """Test that multiple directories in PYTHONPATH are searched in order."""
@@ -1248,7 +1262,8 @@ class TestCollectionIntegration(unittest.TestCase):
                     "test_site_inheritance.py::TestWithSitePackageImport::test_another_site_method", result.output
                 )
                 self.assertIn("test_site_inheritance.py::TestWithSitePackageImport::test_local_method", result.output)
-                self.assertIn("collected 3 items", result.output)
+                # pytest also collects the imported TestSitePackageBase class (2 tests) + 3 from child = 5 total
+                self.assertIn("collected 5 items", result.output)
 
     def test_nested_package_import_from_sys_path(self) -> None:
         """Test importing from nested packages in sys.path."""
@@ -1296,7 +1311,8 @@ class TestCollectionIntegration(unittest.TestCase):
                 # Should find both inherited and local methods
                 self.assertIn("test_nested_import.py::TestNestedChild::test_nested_method", result.output)
                 self.assertIn("test_nested_import.py::TestNestedChild::test_child_method", result.output)
-                self.assertIn("collected 2 items", result.output)
+                # pytest also collects the imported TestNestedBase class
+                self.assertIn("collected 3 items", result.output)
 
     def test_module_resolution_with_nested_directories(self) -> None:
         """Test that module resolution uses session root for imports from nested directories."""
