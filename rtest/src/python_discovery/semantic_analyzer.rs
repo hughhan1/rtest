@@ -117,8 +117,22 @@ fn is_parametrize_call(expr: &Expr) -> bool {
 fn extract_param_names(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::StringLiteral(s) => {
+            // Handle string format: "x,y,expected"
             let param_str = s.value.to_str();
             Some(param_str.split(',').map(|p| p.trim().to_string()).collect())
+        }
+        Expr::Tuple(tuple) => {
+            // Handle tuple format: ("x", "y", "expected")
+            let mut param_names = Vec::new();
+            for elem in &tuple.elts {
+                if let Expr::StringLiteral(s) = elem {
+                    param_names.push(s.value.to_str().to_string());
+                } else {
+                    // If any element is not a string literal, fail
+                    return None;
+                }
+            }
+            Some(param_names)
         }
         _ => None,
     }
@@ -295,7 +309,7 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.is_test_function(func.name.as_str()) {
                     let parametrize_infos = extract_parametrize_decorators(func);
-                    
+
                     if parametrize_infos.is_empty() {
                         // Non-parametrized test
                         all_tests.push(TestInfo {
@@ -353,24 +367,26 @@ impl SemanticTestDiscovery {
                     } else {
                         import_info.module_path.clone()
                     };
-                    
+
                     // Load the module and collect the class
                     self.ensure_module_loaded(&resolved_module, module_resolver)?;
-                    
+
                     // Create a resolved base class reference
                     let resolved = ResolvedBaseClass {
                         module_path: resolved_module,
                         class_name: import_info.imported_name.clone(),
                         is_local: false,
                     };
-                    
+
                     // Check if class has __init__ (including inherited)
                     if self.base_class_has_init(&resolved, module_resolver)? {
                         continue;
                     }
-                    
+
                     // Get all methods from this imported class (including inherited)
-                    if let Some(methods) = self.get_base_class_methods(&resolved, module_resolver)? {
+                    if let Some(methods) =
+                        self.get_base_class_methods(&resolved, module_resolver)?
+                    {
                         for method in methods {
                             all_tests.push(TestInfo {
                                 name: method.name.clone(),
@@ -498,7 +514,7 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     let parametrize_infos = extract_parametrize_decorators(func);
-                    
+
                     if parametrize_infos.is_empty() {
                         // Non-parametrized method
                         methods.push(TestMethodInfo {
@@ -650,9 +666,9 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     own_method_names.insert(method_name.to_string());
-                    
+
                     let parametrize_infos = extract_parametrize_decorators(func);
-                    
+
                     if parametrize_infos.is_empty() {
                         // Non-parametrized method
                         all_tests.push(TestInfo {
@@ -1174,6 +1190,40 @@ def test_add(x, y, expected):
     }
 
     #[test]
+    fn test_parametrize_tuple_format() {
+        let source = r#"
+import pytest
+
+@pytest.mark.parametrize(("x", "y", "expected"), [
+    (1, 2, 3),
+    (5, 5, 10),
+    (10, -5, 5),
+])
+def test_add(x, y, expected):
+    assert x + y == expected
+"#;
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test_param.py");
+        fs::write(&test_path, source).unwrap();
+
+        let config = TestDiscoveryConfig::default();
+        let mut module_resolver =
+            crate::python_discovery::ModuleResolver::new(temp_dir.path()).unwrap();
+        let module_path = vec!["test_param".to_string()];
+        let mut discovery = SemanticTestDiscovery::new(config);
+
+        let (tests, _warnings) = discovery
+            .discover_tests(&test_path, source, module_path, &mut module_resolver)
+            .unwrap();
+
+        assert_eq!(tests.len(), 3);
+        assert_eq!(tests[0].name, "test_add[1-2-3]");
+        assert_eq!(tests[1].name, "test_add[5-5-10]");
+        assert_eq!(tests[2].name, "test_add[10--5-5]");
+    }
+
+    #[test]
     fn test_parametrize_stacked() {
         let source = r#"
 import pytest
@@ -1281,14 +1331,17 @@ class TestDerived(TestBase):
             )
             .unwrap();
 
-        // Should have: 3 parametrized inherited tests + 1 own method = 4 tests
-        assert_eq!(tests.len(), 4);
+        // Should have (matching pytest behavior):
+        // - TestBase (imported): 3 parametrized tests
+        // - TestDerived: 3 inherited parametrized tests + 1 own method = 4
+        // Total: 7 tests
+        assert_eq!(tests.len(), 7);
 
         let param_tests: Vec<_> = tests
             .iter()
             .filter(|t| t.name.starts_with("test_param"))
             .collect();
-        assert_eq!(param_tests.len(), 3);
+        assert_eq!(param_tests.len(), 6); // 3 from TestBase + 3 from TestDerived
         assert!(param_tests.iter().any(|t| t.name == "test_param[1]"));
         assert!(param_tests.iter().any(|t| t.name == "test_param[2]"));
         assert!(param_tests.iter().any(|t| t.name == "test_param[3]"));
@@ -1339,14 +1392,30 @@ class TestDerived(TestBase):
             )
             .unwrap();
 
-        // Should only have the overridden parametrized tests from TestDerived (not TestBase's)
-        assert_eq!(tests.len(), 3);
+        // Should have (matching pytest behavior):
+        // - TestBase (imported): 2 parametrized tests with [1], [2]
+        // - TestDerived: 3 overridden parametrized tests with [10], [20], [30]
+        // Total: 5 tests
+        assert_eq!(tests.len(), 5);
+
+        // TestDerived should have the overridden parameters
+        let derived_tests: Vec<_> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestDerived"))
+            .collect();
+        assert_eq!(derived_tests.len(), 3);
         assert!(tests.iter().any(|t| t.name == "test_param[10]"));
         assert!(tests.iter().any(|t| t.name == "test_param[20]"));
         assert!(tests.iter().any(|t| t.name == "test_param[30]"));
-        // Should NOT have the base class's parametrized tests
-        assert!(!tests.iter().any(|t| t.name == "test_param[1]"));
-        assert!(!tests.iter().any(|t| t.name == "test_param[2]"));
+
+        // TestBase (imported) should have its original parameters
+        let base_tests: Vec<_> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestBase"))
+            .collect();
+        assert_eq!(base_tests.len(), 2);
+        assert!(tests.iter().any(|t| t.name == "test_param[1]"));
+        assert!(tests.iter().any(|t| t.name == "test_param[2]"));
     }
 
     #[test]

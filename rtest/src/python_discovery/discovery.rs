@@ -1,13 +1,10 @@
 //! Test discovery types and main entry point.
 
-use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
+use crate::collection::error::{CollectionResult, CollectionWarning};
 use crate::collection::nodes::Function;
 use crate::collection::types::Location;
 use crate::python_discovery::module_resolver::ModuleResolver;
 use crate::python_discovery::semantic_analyzer::SemanticTestDiscovery;
-use crate::python_discovery::visitor::TestDiscoveryVisitor;
-use ruff_python_ast::Mod;
-use ruff_python_parser::{parse, Mode, ParseOptions};
 use std::path::Path;
 
 /// Information about a discovered test
@@ -34,25 +31,6 @@ impl Default for TestDiscoveryConfig {
             python_functions: vec!["test*".into()],
         }
     }
-}
-
-/// Parse a Python file and discover test functions/methods
-pub fn discover_tests(
-    path: &Path,
-    source: &str,
-    config: &TestDiscoveryConfig,
-) -> CollectionResult<Vec<TestInfo>> {
-    let parsed = parse(source, ParseOptions::from(Mode::Module)).map_err(|e| {
-        CollectionError::ParseError(format!("Failed to parse {}: {:?}", path.display(), e))
-    })?;
-
-    let mut visitor = TestDiscoveryVisitor::new(config);
-    let module = parsed.into_syntax();
-    if let Mod::Module(module) = module {
-        visitor.visit_module(&module);
-    }
-
-    Ok(visitor.into_tests())
 }
 
 /// Discover tests with cross-module inheritance support
@@ -117,7 +95,8 @@ pub fn test_info_to_function(test: &TestInfo, module_path: &Path, module_nodeid:
 mod tests {
     use super::*;
     use indoc::indoc;
-    use std::path::PathBuf;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_discover_tests() {
@@ -140,8 +119,13 @@ mod tests {
                     pass
         "#};
 
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.py");
+        fs::write(&test_path, source).unwrap();
+
         let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
 
         assert_eq!(tests.len(), 2);
 
@@ -169,8 +153,13 @@ class TestWithoutInit:
         pass
 "#;
 
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.py");
+        fs::write(&test_path, source).unwrap();
+
         let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
 
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_should_be_collected");
@@ -200,8 +189,13 @@ def not_a_test():
     pass
 "#;
 
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.py");
+        fs::write(&test_path, source).unwrap();
+
         let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
 
         assert_eq!(tests.len(), 5);
 
@@ -232,15 +226,21 @@ class TestMultiLevel(TestDerived):
         pass
 "#;
 
-        let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.py");
+        fs::write(&test_path, source).unwrap();
 
-        // Should collect:
+        let config = TestDiscoveryConfig::default();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
+
+        // Should collect (matching pytest behavior):
         // - TestBase: test_base_method, test_another_base_method (2)
         // - TestDerived: test_base_method, test_another_base_method (inherited), test_derived_method (3)
-        // - TestMultiLevel: test_derived_method (inherited), test_multi_level_method (2)
-        // Total: 7 tests
-        assert_eq!(tests.len(), 7);
+        // - TestMultiLevel: test_base_method, test_another_base_method (inherited from TestBase),
+        //                   test_derived_method (inherited from TestDerived), test_multi_level_method (4)
+        // Total: 9 tests
+        assert_eq!(tests.len(), 9);
 
         // Check that TestBase has its own methods
         let base_tests: Vec<&TestInfo> = tests
@@ -262,7 +262,7 @@ class TestMultiLevel(TestDerived):
         assert!(derived_method_names.contains(&"test_another_base_method"));
         assert!(derived_method_names.contains(&"test_derived_method"));
 
-        // Check that TestMultiLevel has inherited and its own methods
+        // Check that TestMultiLevel has ALL inherited methods plus its own
         let multi_tests: Vec<&TestInfo> = tests
             .iter()
             .filter(|t| {
@@ -271,9 +271,11 @@ class TestMultiLevel(TestDerived):
                     .map_or(false, |c| c == "TestMultiLevel")
             })
             .collect();
-        assert_eq!(multi_tests.len(), 2);
+        assert_eq!(multi_tests.len(), 4);
 
         let multi_method_names: Vec<&str> = multi_tests.iter().map(|t| t.name.as_str()).collect();
+        assert!(multi_method_names.contains(&"test_base_method"));
+        assert!(multi_method_names.contains(&"test_another_base_method"));
         assert!(multi_method_names.contains(&"test_derived_method"));
         assert!(multi_method_names.contains(&"test_multi_level_method"));
     }
@@ -293,8 +295,13 @@ class TestDerivedFromInitClass(TestBaseWithInit):
         pass
 "#;
 
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.py");
+        fs::write(&test_path, source).unwrap();
+
         let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
 
         // Both classes should be skipped because base class has __init__
         assert_eq!(tests.len(), 0);
@@ -302,9 +309,6 @@ class TestDerivedFromInitClass(TestBaseWithInit):
 
     #[test]
     fn test_cross_module_inheritance() {
-        use std::fs;
-        use tempfile::TempDir;
-
         // Create a temporary directory structure
         let temp_dir = TempDir::new().unwrap();
         let tests_dir = temp_dir.path().join("tests");
@@ -338,17 +342,29 @@ class TestDerived(TestBase):
             discover_tests_with_inheritance(&child_path, child_module, &config, temp_dir.path())
                 .unwrap();
 
-        // Should find 3 tests: 2 inherited from TestBase + 1 from TestDerived
-        assert_eq!(tests.len(), 3);
+        // Should find 5 tests (matching pytest behavior):
+        // - TestBase (imported): test_base_method, test_another_base_method (2)
+        // - TestDerived: test_base_method, test_another_base_method (inherited), test_derived_method (3)
+        // Total: 5 tests
+        assert_eq!(tests.len(), 5);
 
         let method_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
         assert!(method_names.contains(&"test_base_method"));
         assert!(method_names.contains(&"test_another_base_method"));
         assert!(method_names.contains(&"test_derived_method"));
 
-        // All should be under TestDerived class
-        assert!(tests
+        // Check TestBase imported class has 2 tests
+        let base_tests: Vec<&TestInfo> = tests
             .iter()
-            .all(|t| t.class_name.as_ref().map_or(false, |c| c == "TestDerived")));
+            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestBase"))
+            .collect();
+        assert_eq!(base_tests.len(), 2);
+
+        // Check TestDerived has 3 tests (2 inherited + 1 own)
+        let derived_tests: Vec<&TestInfo> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestDerived"))
+            .collect();
+        assert_eq!(derived_tests.len(), 3);
     }
 }
