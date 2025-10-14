@@ -64,9 +64,13 @@ jobs:
     - name: Run Rust unit tests
       run: |
         cd rtest && cargo test --lib
+      env:
+        RUST_BACKTRACE: 1
     
     - name: Run Rust integration tests
       run: cargo test
+      env:
+        RUST_BACKTRACE: 1
     
     - name: Test import
       run: |
