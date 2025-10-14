@@ -75,7 +75,7 @@ Summary
 pip install rtest
 ```
 
-_Requires Python 3.9+_
+Note: _Requires Python 3.9+_
 
 ### Basic Usage
 
@@ -92,8 +92,7 @@ Support executing tests, with parallelization built out of the box (bypassing
 
 ### Parametrized Test Discovery
 
-`rtest` currently discovers only the base function names for parametrized tests (created with
-`@pytest.mark.parametrize`), rather than expanding them into individual test items during collection. For example:
+`rtest` now discovers all function names for parametrized tests (created with `@pytest.mark.parametrize`)
 
 ```python
 @pytest.mark.parametrize("value", [1, 2, 3])
@@ -101,22 +100,17 @@ def test_example(value):
     assert value > 0
 ```
 
-**pytest collection shows:**
-
-```plaintext
-test_example[1]
-test_example[2]
-test_example[3]
-```
-
-**rtest collection shows:**
+**rtest and pytest collection shows:**
 
 ```plaintext
 test_example
 ```
 
-However, when `rtest` executes tests using pytest as the executor, passing the base function name (`test_example`) to
-pytest results in identical behavior - pytest automatically runs all parametrized variants. This means test execution is
+However, [Test IDs](https://docs.pytest.org/en/stable/example/parametrize.html#different-options-for-test-ids) are still
+not supported.
+
+When `rtest` executes tests using pytest as the executor, passing the base function name (`test_example`) to pytest
+results in identical behavior - pytest automatically runs all parametrized variants. This means test execution is
 functionally equivalent between the tools, but collection counts may differ.
 
 ### Test Class Inheritance Collection
