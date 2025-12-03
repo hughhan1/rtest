@@ -32,4 +32,14 @@ pub trait Collector: std::fmt::Debug {
     fn is_item(&self) -> bool {
         false
     }
+
+    /// Check if this test item originated from a parametrized decorator
+    fn is_parametrized(&self) -> bool {
+        false
+    }
+
+    /// Check if this test has parametrize values with uncertain formatting
+    fn has_uncertain_params(&self) -> bool {
+        false
+    }
 }

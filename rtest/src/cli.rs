@@ -23,6 +23,14 @@ pub struct Args {
     #[arg(long)]
     pub collect_only: bool,
 
+    /// Emit list of files with uncertain test collection (parametrized tests that may differ from pytest)
+    #[arg(long)]
+    pub emit_uncertain_files: Option<String>,
+
+    /// Mark ALL files with parametrized tests as uncertain (not just ones with complex patterns)
+    #[arg(long)]
+    pub all_parametrized_uncertain: bool,
+
     /// Test files or directories to run
     #[arg(help = "Test files or directories to run")]
     pub files: Vec<String>,

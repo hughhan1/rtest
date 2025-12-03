@@ -11,6 +11,15 @@ use std::rc::Rc;
 pub struct CollectionErrors {
     pub errors: Vec<(String, CollectionError)>,
     pub warnings: Vec<CollectionWarning>,
+    /// Files with parametrized tests that may differ from pytest's collection
+    pub uncertain_files: Vec<String>,
+}
+
+/// Options for test collection
+#[derive(Debug, Default)]
+pub struct CollectionOptions {
+    /// Mark ALL files with parametrized tests as uncertain (not just complex ones)
+    pub all_parametrized_uncertain: bool,
 }
 
 /// Run the Rust-based collection and return test node IDs
@@ -18,23 +27,40 @@ pub fn collect_tests_rust(
     rootpath: PathBuf,
     args: &[String],
 ) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
+    collect_tests_rust_with_options(rootpath, args, &CollectionOptions::default())
+}
+
+/// Run the Rust-based collection with options
+pub fn collect_tests_rust_with_options(
+    rootpath: PathBuf,
+    args: &[String],
+    options: &CollectionOptions,
+) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
     let session = Rc::new(Session::new(rootpath));
     let mut collection_errors = CollectionErrors {
         errors: Vec::new(),
         warnings: Vec::new(),
+        uncertain_files: Vec::new(),
     };
 
     match session.perform_collect(args) {
         Ok(collectors) => {
             let mut test_nodes = Vec::new();
+            let mut files_with_parametrized: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             for collector in collectors {
                 collect_items_recursive(
                     collector.as_ref(),
                     &mut test_nodes,
                     &mut collection_errors,
+                    options.all_parametrized_uncertain,
+                    &mut files_with_parametrized,
                 );
             }
+
+            // Convert set to vec for the output
+            collection_errors.uncertain_files = files_with_parametrized.into_iter().collect();
+            collection_errors.uncertain_files.sort();
 
             Ok((test_nodes, collection_errors))
         }
@@ -47,18 +73,49 @@ fn collect_items_recursive(
     collector: &dyn Collector,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
+    all_parametrized_uncertain: bool,
+    files_with_parametrized: &mut std::collections::HashSet<String>,
 ) {
     if collector.is_item() {
-        test_nodes.push(collector.nodeid().into());
+        let nodeid = collector.nodeid();
+        test_nodes.push(nodeid.into());
+
+        // Track files with parametrized tests that need uncertain handling
+        if collector.is_parametrized() {
+            // Extract file path from nodeid (format: "path/to/file.py::test_name" or "path/to/file.py::Class::test_name")
+            if let Some(file_path) = nodeid.split("::").next() {
+                // Mark files as uncertain when:
+                // 1. all_parametrized_uncertain flag is set (mark ALL parametrized files)
+                // 2. parametrize couldn't be expanded (is_parametrized=true but nodeid doesn't contain '[')
+                // 3. parametrize has uncertain values (e.g., attribute accesses like Enum.VALUE)
+                let was_expanded = nodeid.contains('[');
+                if all_parametrized_uncertain || !was_expanded || collector.has_uncertain_params() {
+                    files_with_parametrized.insert(file_path.to_string());
+                }
+            }
+        }
     } else {
         let report = collect_one_node(collector);
         match report.outcome {
             CollectionOutcome::Passed => {
                 for child in report.result {
-                    collect_items_recursive(child.as_ref(), test_nodes, collection_errors);
+                    collect_items_recursive(
+                        child.as_ref(),
+                        test_nodes,
+                        collection_errors,
+                        all_parametrized_uncertain,
+                        files_with_parametrized,
+                    );
                 }
             }
             CollectionOutcome::Failed => {
+                // Add failed files to uncertain list so hybrid approach falls back to pytest
+                // Extract file path from nodeid (nodeid for a file is just the path)
+                let file_path = report.nodeid.split("::").next().unwrap_or(&report.nodeid);
+                if file_path.ends_with(".py") {
+                    files_with_parametrized.insert(file_path.to_string());
+                }
+
                 if let Some(error) = report.error_type {
                     collection_errors
                         .errors

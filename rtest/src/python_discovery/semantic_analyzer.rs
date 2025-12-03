@@ -36,6 +36,8 @@ pub struct ResolvedBaseClass {
 pub struct TestMethodInfo {
     pub name: String,
     pub line: usize,
+    /// Whether this method has parametrize values with uncertain formatting
+    pub has_uncertain_params: bool,
 }
 
 /// Test class information including methods
@@ -50,10 +52,65 @@ pub struct TestClassInfo {
 /// Information about a single parametrize decorator
 #[derive(Debug, Clone)]
 struct ParametrizeInfo {
-    /// Parameter names (e.g., ["x", "y"] or ["value"])
+    /// Parameter names (e.g., ["a", "b", "threshold"])
     param_names: Vec<String>,
     /// List of parameter value tuples
-    values: Vec<Vec<String>>,
+    values: Vec<Vec<ParamValue>>,
+    /// Explicit IDs if provided via ids= parameter (e.g., ["case1", "case2"])
+    explicit_ids: Option<Vec<String>>,
+}
+
+/// Represents a parameter value and whether it needs auto-ID generation
+#[derive(Debug, Clone)]
+enum ParamValue {
+    /// Simple value that can be displayed as-is (e.g., "20", "True", "alice")
+    Simple(String),
+    /// Complex expression that needs auto-ID (e.g., Decimal(20) -> use "a0" instead)
+    Complex,
+    /// Attribute access (e.g., SalesLeadEventName.ARM_RESET) - we use the full path
+    /// but pytest's behavior varies (Enums keep path, string constants don't), so
+    /// files with these should be marked uncertain
+    AttributeAccess(String),
+}
+
+/// Check if a function has any parametrize decorator (even if we can't parse values)
+fn has_parametrize_decorator(func: &StmtFunctionDef) -> bool {
+    for decorator in &func.decorator_list {
+        if is_any_parametrize_call(&decorator.expression) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a class has any parametrize decorator
+fn class_has_parametrize_decorator(class: &StmtClassDef) -> bool {
+    for decorator in &class.decorator_list {
+        if is_any_parametrize_call(&decorator.expression) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if an expression is any form of parametrize call
+/// This includes:
+/// - pytest.mark.parametrize(...)
+/// - parametrize(...) - custom wrappers
+fn is_any_parametrize_call(expr: &Expr) -> bool {
+    if let Expr::Call(ExprCall { func, .. }) = expr {
+        // Check for pytest.mark.parametrize
+        if is_parametrize_call(func) {
+            return true;
+        }
+        // Check for bare parametrize(...) calls - custom helpers that wrap pytest
+        if let Expr::Name(name) = func.as_ref() {
+            if name.id.as_str() == "parametrize" {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Extract parametrize decorators from a function
@@ -69,18 +126,81 @@ fn extract_parametrize_decorators(func: &StmtFunctionDef) -> Vec<ParametrizeInfo
     parametrize_infos
 }
 
+/// Extract parametrize decorators from a class definition
+fn extract_class_parametrize_decorators(class: &StmtClassDef) -> Vec<ParametrizeInfo> {
+    let mut parametrize_infos = Vec::new();
+
+    for decorator in &class.decorator_list {
+        if let Some(info) = parse_parametrize_decorator(&decorator.expression) {
+            parametrize_infos.push(info);
+        }
+    }
+
+    parametrize_infos
+}
+
 /// Parse a single decorator expression to see if it's pytest.mark.parametrize
 fn parse_parametrize_decorator(expr: &Expr) -> Option<ParametrizeInfo> {
     if let Expr::Call(ExprCall { func, arguments, .. }) = expr {
         if is_parametrize_call(func) {
             if arguments.args.len() >= 2 {
                 let param_names = extract_param_names(&arguments.args[0])?;
-                let values = extract_param_values(&arguments.args[1])?;
-                return Some(ParametrizeInfo { param_names, values });
+                let values = extract_param_values(&arguments.args[1], param_names.len())?;
+
+                // Check for explicit ids= keyword argument
+                let explicit_ids = extract_explicit_ids(arguments);
+
+                return Some(ParametrizeInfo {
+                    param_names,
+                    values,
+                    explicit_ids,
+                });
             }
         }
     }
     None
+}
+
+/// Extract explicit IDs from the ids= keyword argument
+fn extract_explicit_ids(arguments: &ruff_python_ast::Arguments) -> Option<Vec<String>> {
+    for keyword in &arguments.keywords {
+        if let Some(arg) = &keyword.arg {
+            if arg.as_str() == "ids" {
+                return extract_ids_list(&keyword.value);
+            }
+        }
+    }
+    None
+}
+
+/// Extract a list of string IDs from an expression
+fn extract_ids_list(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::List(list) => {
+            let mut ids = Vec::new();
+            for elem in &list.elts {
+                if let Expr::StringLiteral(s) = elem {
+                    ids.push(s.value.to_str().to_string());
+                } else {
+                    // If any ID is not a string literal, fall back to auto-generation
+                    return None;
+                }
+            }
+            Some(ids)
+        }
+        Expr::Tuple(tuple) => {
+            let mut ids = Vec::new();
+            for elem in &tuple.elts {
+                if let Expr::StringLiteral(s) = elem {
+                    ids.push(s.value.to_str().to_string());
+                } else {
+                    return None;
+                }
+            }
+            Some(ids)
+        }
+        _ => None,
+    }
 }
 
 /// Check if an expression is pytest.mark.parametrize
@@ -121,18 +241,21 @@ fn extract_param_names(expr: &Expr) -> Option<Vec<String>> {
 }
 
 /// Extract parameter values from the second argument (list of values)
-fn extract_param_values(expr: &Expr) -> Option<Vec<Vec<String>>> {
+fn extract_param_values(expr: &Expr, param_count: usize) -> Option<Vec<Vec<ParamValue>>> {
     match expr {
         Expr::List(list) => {
             let mut all_values = Vec::new();
             for elem in &list.elts {
+                // Check if element is a tuple and matches parameter count
                 match elem {
-                    Expr::Tuple(tuple) => {
-                        let param_values: Vec<String> =
+                    Expr::Tuple(tuple) if tuple.elts.len() == param_count && param_count > 1 => {
+                        // Multiple parameters: unpack tuple
+                        let param_values: Vec<ParamValue> =
                             tuple.elts.iter().map(format_param_value).collect();
                         all_values.push(param_values);
                     }
                     _ => {
+                        // Single parameter or tuple as value: treat as single value
                         let formatted = format_param_value(elem);
                         all_values.push(vec![formatted]);
                     }
@@ -144,47 +267,100 @@ fn extract_param_values(expr: &Expr) -> Option<Vec<Vec<String>>> {
     }
 }
 
+/// Build full dotted path from an attribute expression
+/// e.g., SalesLeadEventName.ARM_RESET -> "SalesLeadEventName.ARM_RESET"
+fn format_attribute_path(attr: &ExprAttribute) -> String {
+    match attr.value.as_ref() {
+        Expr::Name(name) => {
+            // Simple case: Class.MEMBER
+            format!("{}.{}", name.id, attr.attr)
+        }
+        Expr::Attribute(inner_attr) => {
+            // Nested case: Module.Class.MEMBER
+            format!("{}.{}", format_attribute_path(inner_attr), attr.attr)
+        }
+        _ => {
+            // Fallback: just use attribute name
+            attr.attr.to_string()
+        }
+    }
+}
+
 /// Format a parameter value for display in test name
-fn format_param_value(expr: &Expr) -> String {
+/// Returns ParamValue::Simple for basic types, ParamValue::Complex for objects/calls
+fn format_param_value(expr: &Expr) -> ParamValue {
     match expr {
-        Expr::NumberLiteral(num) => match &num.value {
-            ruff_python_ast::Number::Int(i) => i.to_string(),
-            ruff_python_ast::Number::Float(f) => {
-                if f.fract() == 0.0 {
-                    format!("{:.0}", f)
-                } else {
-                    f.to_string()
+        Expr::NumberLiteral(num) => {
+            // Simple types: numbers are displayed as-is
+            let value_str = match &num.value {
+                ruff_python_ast::Number::Int(i) => i.to_string(),
+                ruff_python_ast::Number::Float(f) => {
+                    if f.fract() == 0.0 {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
                 }
+                ruff_python_ast::Number::Complex { real, imag } => {
+                    format!("{}+{}j", real, imag)
+                }
+            };
+            ParamValue::Simple(value_str)
+        }
+        Expr::StringLiteral(s) => {
+            let str_value = s.value.to_str();
+            // Check if string contains special characters that might be formatted differently
+            // by pytest (newlines, tabs, non-ASCII characters)
+            if str_value.contains('\n') || str_value.contains('\t') || str_value.contains('\r')
+                || str_value.chars().any(|c| !c.is_ascii())
+            {
+                // Mark as uncertain - pytest may format these differently
+                ParamValue::Complex
+            } else {
+                ParamValue::Simple(str_value.to_string())
             }
-            ruff_python_ast::Number::Complex { real, imag } => {
-                format!("{}+{}j", real, imag)
-            }
-        },
-        Expr::StringLiteral(s) => s.value.to_str().to_string(),
+        }
         Expr::BooleanLiteral(b) => {
-            if b.value {
+            // Simple type: booleans
+            ParamValue::Simple(if b.value {
                 "True".to_string()
             } else {
                 "False".to_string()
-            }
+            })
         }
-        Expr::NoneLiteral(_) => "None".to_string(),
-        Expr::Tuple(tuple) => {
-            let elements: Vec<String> = tuple.elts.iter().map(format_param_value).collect();
-            elements.join("-")
-        }
-        Expr::List(list) => {
-            let elements: Vec<String> = list.elts.iter().map(format_param_value).collect();
-            format!("[{}]", elements.join("-"))
+        Expr::NoneLiteral(_) => {
+            // Simple type: None
+            ParamValue::Simple("None".to_string())
         }
         Expr::UnaryOp(unary) => {
+            // Handle negative numbers as simple
             if let ruff_python_ast::UnaryOp::USub = unary.op {
-                format!("-{}", format_param_value(&unary.operand))
-            } else {
-                format!("{:?}", expr).chars().take(20).collect()
+                if let ParamValue::Simple(val) = format_param_value(&unary.operand) {
+                    return ParamValue::Simple(format!("-{}", val));
+                }
             }
+            // Other unary operations are complex
+            ParamValue::Complex
         }
-        _ => format!("{:?}", expr).chars().take(20).collect(),
+        Expr::Attribute(attr) => {
+            // Use full attribute path for class constants and enums
+            // e.g., SalesLeadEventName.ARM_RESET -> "SalesLeadEventName.ARM_RESET"
+            // However, pytest's behavior varies: Enums keep path, string constants don't
+            // Mark these as AttributeAccess so files can be flagged as uncertain
+            ParamValue::AttributeAccess(format_attribute_path(attr))
+        }
+        Expr::Name(name) => {
+            // Simple name references (e.g., variable names, imported constants)
+            ParamValue::Simple(name.id.to_string())
+        }
+        // Complex types: function calls, collections
+        Expr::Call(_) | Expr::Tuple(_) | Expr::List(_) | Expr::Dict(_) => {
+            ParamValue::Complex
+        }
+        _ => {
+            // Unknown expressions are complex
+            ParamValue::Complex
+        }
     }
 }
 
@@ -194,17 +370,21 @@ fn generate_param_combinations(parametrize_infos: &[ParametrizeInfo]) -> Vec<Str
         return vec![];
     }
 
+    // Start with the first parametrize decorator
     let mut combinations = parametrize_infos[0]
         .values
         .iter()
-        .map(|v| v.join("-"))
+        .enumerate()
+        .map(|(idx, v)| format_param_set_with_id(&parametrize_infos[0], v, idx))
         .collect::<Vec<_>>();
 
+    // For stacked decorators, create cartesian product
     for info in parametrize_infos.iter().skip(1) {
         let mut new_combinations = Vec::new();
         for existing in &combinations {
-            for value_set in &info.values {
-                let new_combo = format!("{}-{}", value_set.join("-"), existing);
+            for (idx, value_set) in info.values.iter().enumerate() {
+                let formatted = format_param_set_with_id(info, value_set, idx);
+                let new_combo = format!("{}-{}", formatted, existing);
                 new_combinations.push(new_combo);
             }
         }
@@ -212,6 +392,52 @@ fn generate_param_combinations(parametrize_infos: &[ParametrizeInfo]) -> Vec<Str
     }
 
     combinations
+}
+
+/// Format a parameter set, using explicit ID if available
+fn format_param_set_with_id(info: &ParametrizeInfo, values: &[ParamValue], set_index: usize) -> String {
+    // If we have explicit IDs and this index is valid, use it
+    if let Some(ref ids) = info.explicit_ids {
+        if set_index < ids.len() {
+            return ids[set_index].clone();
+        }
+    }
+    // Otherwise fall back to auto-generation
+    format_param_set(&info.param_names, values, set_index)
+}
+
+/// Format a single parameter set with auto-ID generation for complex values
+fn format_param_set(param_names: &[String], values: &[ParamValue], set_index: usize) -> String {
+    values
+        .iter()
+        .zip(param_names.iter())
+        .map(|(value, name)| match value {
+            ParamValue::Simple(s) => s.clone(),
+            ParamValue::AttributeAccess(s) => s.clone(), // Use the path, but file will be marked uncertain
+            ParamValue::Complex => {
+                // Generate auto-ID like "a0", "b1", etc.
+                format!("{}{}", name, set_index)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Check if any parameter values contain uncertain formatting (attribute accesses or complex expressions)
+/// These include:
+/// - AttributeAccess: e.g., Enum.VALUE - pytest's behavior varies for these
+/// - Complex: function calls, tuples, etc. - pytest evaluates these to get the actual value
+fn has_uncertain_param_values(parametrize_infos: &[ParametrizeInfo]) -> bool {
+    for info in parametrize_infos {
+        for value_set in &info.values {
+            for value in value_set {
+                if matches!(value, ParamValue::AttributeAccess(_) | ParamValue::Complex) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Enhanced test discovery with semantic analysis
@@ -287,15 +513,23 @@ impl SemanticTestDiscovery {
                     // Check for parametrize decorators
                     let parametrize_infos = extract_parametrize_decorators(func);
 
+                    // Check if function has any parametrize decorator, even if we couldn't parse it
+                    let has_any_parametrize = has_parametrize_decorator(func);
+
                     if parametrize_infos.is_empty() {
-                        // No parametrize decorators - create single test
+                        // No successfully parsed parametrize decorators - create single test
+                        // But mark as parametrized if the decorator exists but couldn't be parsed
                         all_tests.push(TestInfo {
                             name: func.name.to_string(),
                             line: func.range().start().to_u32() as usize,
                             is_method: false,
                             class_name: None,
+                            is_parametrized: has_any_parametrize,
+                            has_uncertain_params: false,
                         });
                     } else {
+                        // Check if any params have uncertain formatting (e.g., attribute accesses)
+                        let has_uncertain = has_uncertain_param_values(&parametrize_infos);
                         // Generate test items for each parameter combination
                         let combinations = generate_param_combinations(&parametrize_infos);
                         for combo in combinations {
@@ -305,6 +539,8 @@ impl SemanticTestDiscovery {
                                 line: func.range().start().to_u32() as usize,
                                 is_method: false,
                                 class_name: None,
+                                is_parametrized: true,
+                                has_uncertain_params: has_uncertain,
                             });
                         }
                     }
@@ -448,8 +684,11 @@ impl SemanticTestDiscovery {
                         methods.push(TestMethodInfo {
                             name: method_name.to_string(),
                             line: func.range().start().to_u32() as usize,
+                            has_uncertain_params: false,
                         });
                     } else {
+                        // Check if any params have uncertain formatting (e.g., attribute accesses)
+                        let has_uncertain = has_uncertain_param_values(&parametrize_infos);
                         // Generate test items for each parameter combination
                         let combinations = generate_param_combinations(&parametrize_infos);
                         for combo in combinations {
@@ -457,6 +696,7 @@ impl SemanticTestDiscovery {
                             methods.push(TestMethodInfo {
                                 name: parametrized_name,
                                 line: func.range().start().to_u32() as usize,
+                                has_uncertain_params: has_uncertain,
                             });
                         }
                     }
@@ -497,11 +737,9 @@ impl SemanticTestDiscovery {
                 match resolved {
                     Some(resolved) => base_classes.push(resolved),
                     None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for class '{}'",
-                            self.format_base_class_expr(base),
-                            class_def.name
-                        )));
+                        // Skip unresolvable base classes (e.g., Generic[T], Protocol, etc.)
+                        // These are typically typing constructs that don't affect test collection
+                        continue;
                     }
                 }
             }
@@ -546,6 +784,9 @@ impl SemanticTestDiscovery {
 
         let mut all_tests = Vec::new();
 
+        // Extract class-level parametrize decorators
+        let class_parametrize = extract_class_parametrize_decorators(class_def);
+
         // Collect inherited methods
         if let Some(arguments) = &class_def.arguments {
             for base_expr in arguments.args.iter() {
@@ -567,21 +808,23 @@ impl SemanticTestDiscovery {
                         {
                             for method in base_methods {
                                 // Create a copy with the current class name
+                                // Inherited parametrized methods are still parametrized
+                                let is_param = method.name.contains('[');
                                 all_tests.push(TestInfo {
                                     name: method.name.clone(),
                                     line: method.line,
                                     is_method: true,
                                     class_name: Some(class_name.to_string()),
+                                    is_parametrized: is_param,
+                                    has_uncertain_params: method.has_uncertain_params,
                                 });
                             }
                         }
                     }
                     None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for inheritance in class '{}'",
-                            self.format_base_class_expr(base_expr),
-                            class_name
-                        )));
+                        // Skip unresolvable base classes (e.g., Generic[T], Protocol, etc.)
+                        // These are typically typing constructs that don't affect test collection
+                        continue;
                     }
                 }
             }
@@ -596,18 +839,29 @@ impl SemanticTestDiscovery {
                     // Track base method name for override detection
                     own_method_names.insert(method_name.to_string());
 
-                    // Check for parametrize decorators
-                    let parametrize_infos = extract_parametrize_decorators(func);
+                    // Check for method-level parametrize decorators
+                    let mut parametrize_infos = extract_parametrize_decorators(func);
+
+                    // Combine with class-level decorators (class decorators apply to all methods)
+                    parametrize_infos.extend(class_parametrize.clone());
+
+                    // Check if method has any parametrize decorator, even if we couldn't parse it
+                    let has_any_parametrize = has_parametrize_decorator(func) || !class_parametrize.is_empty();
 
                     if parametrize_infos.is_empty() {
-                        // No parametrize decorators - create single test
+                        // No successfully parsed parametrize decorators - create single test
+                        // But mark as parametrized if the decorator exists but couldn't be parsed
                         all_tests.push(TestInfo {
                             name: method_name.to_string(),
                             line: func.range().start().to_u32() as usize,
                             is_method: true,
                             class_name: Some(class_name.to_string()),
+                            is_parametrized: has_any_parametrize,
+                            has_uncertain_params: false,
                         });
                     } else {
+                        // Check if any params have uncertain formatting (e.g., attribute accesses)
+                        let has_uncertain = has_uncertain_param_values(&parametrize_infos);
                         // Generate test items for each parameter combination
                         let combinations = generate_param_combinations(&parametrize_infos);
                         for combo in combinations {
@@ -617,6 +871,8 @@ impl SemanticTestDiscovery {
                                 line: func.range().start().to_u32() as usize,
                                 is_method: true,
                                 class_name: Some(class_name.to_string()),
+                                is_parametrized: true,
+                                has_uncertain_params: has_uncertain,
                             });
                         }
                     }
@@ -680,11 +936,9 @@ impl SemanticTestDiscovery {
                         }
                     }
                     None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for __init__ check in class '{}'",
-                            self.format_base_class_expr(base_expr),
-                            class_def.name
-                        )));
+                        // Skip unresolvable base classes (e.g., Generic[T], Protocol, etc.)
+                        // Assume they don't have __init__ that would prevent collection
+                        continue;
                     }
                 }
             }
@@ -761,14 +1015,11 @@ impl SemanticTestDiscovery {
         module_resolver: &mut ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
-        // Check for cycles
+        // Check if we've already visited this class (diamond inheritance)
         let key = (resolved.module_path.clone(), resolved.class_name.clone());
         if visited.contains(&key) {
-            // Cycle detected - this is an error condition
-            return Err(CollectionError::ParseError(format!(
-                "Circular inheritance detected in class hierarchy involving '{}'",
-                resolved.class_name
-            )));
+            // Already visited - skip to avoid duplicates (not an error, just diamond inheritance)
+            return Ok(None);
         }
         visited.insert(key.clone());
 
@@ -814,9 +1065,21 @@ impl SemanticTestDiscovery {
             return Ok(());
         }
 
+        // Skip built-in/stdlib modules - they can't be analyzed for test collection
+        if self.is_stdlib_module_to_skip(module_path) {
+            return Ok(());
+        }
+
         // Load the module and collect test classes
         {
-            let parsed_module = module_resolver.resolve_and_load(module_path)?;
+            let parsed_module = match module_resolver.resolve_and_load(module_path) {
+                Ok(module) => module,
+                Err(CollectionError::ImportError(msg)) if msg.contains("built-in module") => {
+                    // Skip built-in modules gracefully - they don't contain test code
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
 
             // Extract test class information without storing the module
             for stmt in &parsed_module.module.body {
@@ -1010,12 +1273,9 @@ impl SemanticTestDiscovery {
         }
 
         let module_name = &module_path[0];
-        matches!(
-            module_name.as_str(),
-            "unittest"    // unittest.TestCase and related
-            | "abc"       // abc.ABC for abstract base classes  
-            | "typing" // typing.Protocol, typing.Generic, etc.
-        )
+        // Use ruff's stdlib module check for comprehensive stdlib coverage
+        use ruff_python_stdlib::sys::is_known_standard_library;
+        is_known_standard_library(11, module_name)
     }
 
     /// Helper to get alias name with fallback to the original name

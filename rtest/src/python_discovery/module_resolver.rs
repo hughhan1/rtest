@@ -6,7 +6,7 @@
 use crate::collection::error::{CollectionError, CollectionResult};
 use ruff_python_ast::{Mod, ModModule};
 use ruff_python_parser::{parse, Mode, ParseOptions};
-use ruff_python_stdlib::sys::is_builtin_module;
+use ruff_python_stdlib::sys::is_known_standard_library;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -63,10 +63,10 @@ impl ModuleResolver {
 
         let module_name = module_path.join(".");
 
-        // Check if this is a built-in module
-        if is_builtin_module(11, &module_path[0]) {
+        // Check if this is a stdlib module
+        if is_known_standard_library(11, &module_path[0]) {
             return Err(CollectionError::ImportError(format!(
-                "Cannot resolve built-in module '{}' - inheritance from built-in modules is not supported",
+                "Cannot resolve built-in module '{}' - stdlib modules cannot be analyzed for test collection",
                 module_name
             )));
         }

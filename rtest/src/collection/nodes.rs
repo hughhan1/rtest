@@ -305,6 +305,11 @@ pub struct Function {
     pub name: String,
     pub nodeid: String,
     pub location: Location,
+    /// Whether this test originated from a parametrized decorator
+    pub is_parametrized_flag: bool,
+    /// Whether this test has parametrize values with uncertain formatting
+    /// (e.g., attribute accesses like Enum.VALUE where pytest's ID formatting varies)
+    pub has_uncertain_params: bool,
 }
 
 impl Collector for Function {
@@ -327,6 +332,14 @@ impl Collector for Function {
 
     fn is_item(&self) -> bool {
         true
+    }
+
+    fn is_parametrized(&self) -> bool {
+        self.is_parametrized_flag
+    }
+
+    fn has_uncertain_params(&self) -> bool {
+        self.has_uncertain_params
     }
 }
 
