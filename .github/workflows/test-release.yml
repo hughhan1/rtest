@@ -1,4 +1,4 @@
-name: Test Release
+name: Test Release (TestPyPI)
 
 on:
   push:
@@ -6,57 +6,43 @@ on:
       - beta
   workflow_dispatch:
 
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  id-token: write
-
 jobs:
-  test-release:
+  build-and-publish:
+    name: Build and publish to TestPyPI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
           submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install python-semantic-release
-        run: pip install python-semantic-release
-
-      - name: Check what would be released
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: semantic-release version --no-push
-
-      - name: Build wheels for testing
+      - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: x86_64
           args: --release --out dist --find-interpreter
-          sccache: 'true'
           manylinux: auto
+          sccache: "true"
 
-      - name: Upload to TestPyPI
-        if: github.ref == 'refs/heads/beta'
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           skip-existing: true
-
-      - name: Test install from TestPyPI
-        if: github.ref == 'refs/heads/beta'
-        run: |
-          sleep 60  # Wait for TestPyPI to process
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ rtest
-          python -c "import rtest; print('Test install successful')"
