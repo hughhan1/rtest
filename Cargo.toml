@@ -1,20 +1,32 @@
-
 [package]
-name = "rtest-py"
+name = "rtest"
 version = "0.0.36"
 edition = "2021"
 
 [lib]
-name = "_rtest"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-rtest = { path = "rtest" }
-pyo3 = { version = "0.25", features = ["extension-module"] }
 clap = { version = "4.5.4", features = ["derive"] }
+glob = "0.3"
+log = "0.4"
+num_cpus = "1.0"
+pyo3 = { version = "0.25", optional = true }
+regex = "1.10"
+ruff_python_ast = { path = "ruff/crates/ruff_python_ast" }
+ruff_python_parser = { path = "ruff/crates/ruff_python_parser" }
+ruff_python_semantic = { path = "ruff/crates/ruff_python_semantic" }
+ruff_python_stdlib = { path = "ruff/crates/ruff_python_stdlib" }
+ruff_text_size = { path = "ruff/crates/ruff_text_size" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.0"
+toml = "0.8"
+walkdir = "2.5"
 
 [dev-dependencies]
-tempfile = "3.0"
 indoc = "2.0"

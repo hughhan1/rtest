@@ -1,4 +1,14 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+/// Test runner backend to use.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum Runner {
+    /// No pytest required
+    Native,
+    /// Full pytest compatibility
+    #[default]
+    Pytest,
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -22,6 +32,10 @@ pub struct Args {
     /// Collect tests only, don't run them
     #[arg(long)]
     pub collect_only: bool,
+
+    /// Test runner backend
+    #[arg(long, value_enum, default_value = "pytest")]
+    pub runner: Runner,
 
     /// Test files or directories to run
     #[arg(help = "Test files or directories to run")]
@@ -74,6 +88,7 @@ mod tests {
         assert_eq!(args.dist, "load");
         assert!(!args.collect_only);
         assert!(args.files.is_empty());
+        assert!(matches!(args.runner, Runner::Pytest));
     }
 
     #[test]
@@ -177,5 +192,14 @@ mod tests {
 
         let args = Args::parse_from(["rtest"]);
         assert!(!args.collect_only);
+    }
+
+    #[test]
+    fn test_cli_parsing_with_runner() {
+        let args = Args::parse_from(["rtest", "--runner", "native"]);
+        assert!(matches!(args.runner, Runner::Native));
+
+        let args = Args::parse_from(["rtest", "--runner", "pytest"]);
+        assert!(matches!(args.runner, Runner::Pytest));
     }
 }
