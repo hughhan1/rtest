@@ -45,6 +45,13 @@ rustup component add rustfmt clippy
 
 ## Development Workflow
 
+**Important**: Always use `uv run` to run Python commands in this project:
+
+- Run Python: `uv run python`
+- Run tests: `uv run pytest tests/`
+- Build with maturin: `uv run maturin develop`
+- Format code after changes: `uv run ruff format python/ tests/ scripts/`
+
 ### Building the Project
 
 ```bash
@@ -58,18 +65,17 @@ uv run maturin develop --release
 ### Running rtest
 
 ```bash
-# Using cargo (must run from rtest subdirectory)
-cd rtest
-cargo run -- --collect-only
-
-# With specific test files
-cargo run -- ../tests/test_example.py --collect-only
-
-# After maturin develop, can use as Python module
+# After maturin develop, run as Python module
 uv run python -m rtest --collect-only
 
 # Or directly if installed in environment
 uv run rtest --collect-only
+
+# With specific test files
+uv run rtest tests/test_example.py --collect-only
+
+# Run tests with parallel workers
+uv run rtest tests/ -n auto
 ```
 
 ## Testing
@@ -78,10 +84,6 @@ uv run rtest --collect-only
 
 ```bash
 # Run all Rust tests
-cargo test
-
-# Run tests in the rtest core crate
-cd rtest
 cargo test
 
 # Run specific test
@@ -114,10 +116,9 @@ uv run pytest tests/ --cache-clear
 uv run maturin develop
 uv run python -c "import rtest; print('Import successful')"
 
-# Test CLI (using cargo from rtest subdirectory)
-cd rtest
-cargo run -- --help
-cargo run -- --version
+# Test CLI
+uv run rtest --help
+uv run rtest --version
 ```
 
 ## Code Quality
@@ -213,36 +214,59 @@ cargo clippy -p rtest --bin rtest -- -D warnings
 ### Debugging Collection Issues
 
 ```bash
-# Test collection on a specific file (from rtest subdirectory)
-cd rtest
-cargo run -- ../path/to/test_file.py --collect-only
+# Test collection on a specific file
+uv run rtest path/to/test_file.py --collect-only
 
 # Compare with pytest
 uv run pytest path/to/test_file.py --collect-only
 
-# Run with verbose output (add logging in Rust code)
-RUST_LOG=debug cargo run -- ../path/to/test_file.py --collect-only
+# Run with verbose output
+RUST_LOG=debug uv run rtest path/to/test_file.py --collect-only
 ```
 
 ## Project Structure
 
 ```plaintext
 rtest/
-├── python/rtest/          # Python package exports
-├── rtest/                 # Core Rust implementation
-│   ├── src/
-│   │   ├── collection/        # Test collection logic (SAFE: uses Rc<Session>)
-│   │   ├── python_discovery/  # Python AST parsing for test discovery
-│   │   ├── scheduler.rs       # Test distribution across workers
-│   │   ├── worker.rs          # Parallel test execution
-│   │   ├── cli.rs            # Command-line argument parsing
-│   │   ├── bin/rtest.rs   # CLI entry point
-│   │   └── lib.rs         # Library entry point
-│   └── Cargo.toml
-├── src/lib.rs             # PyO3 Python bindings
-├── tests/                 # Python integration tests
-├── scripts/               # Utility scripts
-└── Cargo.toml             # Workspace configuration
+├── src/                       # Rust source code
+│   ├── lib.rs                 # Library entry point + module declarations
+│   ├── pyo3.rs                # PyO3 Python bindings
+│   ├── cli.rs                 # Command-line argument parsing
+│   ├── config.rs              # Pytest config parsing from pyproject.toml
+│   ├── collection/            # Test collection logic (uses Rc<Session>)
+│   │   ├── mod.rs             # Module entry point
+│   │   ├── nodes.rs           # Session, Module, Class, Function collectors
+│   │   ├── config.rs          # Collection configuration
+│   │   ├── error.rs           # Collection error types
+│   │   ├── types.rs           # Collector traits and types
+│   │   └── utils.rs           # Collection utilities
+│   ├── python_discovery/      # Python AST parsing for test discovery
+│   │   ├── mod.rs             # Module entry point
+│   │   ├── discovery.rs       # Test discovery logic
+│   │   ├── visitor.rs         # AST visitor for test functions
+│   │   ├── pattern.rs         # Test name pattern matching
+│   │   ├── module_resolver.rs # Python module resolution
+│   │   └── semantic_analyzer.rs # Semantic analysis for decorators
+│   ├── collection_integration.rs # Bridge between collection and execution
+│   ├── runner.rs              # PytestRunner for parallel pytest execution
+│   ├── pytest_executor.rs     # Direct pytest subprocess execution
+│   ├── native_runner.rs       # Native test runner (no pytest dependency)
+│   ├── scheduler.rs           # Test distribution across workers
+│   ├── worker.rs              # Worker pool management
+│   ├── subproject.rs          # Monorepo subproject detection
+│   └── utils.rs               # Utility functions (worker count, etc.)
+├── python/rtest/              # Python package (internal + user API)
+│   ├── __init__.py            # Main API and CLI entry point
+│   ├── __main__.py            # Entry point for `python -m rtest`
+│   ├── mark.py                # Test decorators (@rtest.mark.cases, @rtest.mark.skip)
+│   └── worker/                # Native test runner worker (spawned by Rust)
+│       ├── __init__.py        # Worker package entry point
+│       ├── __main__.py        # Entry point for worker subprocess
+│       └── runner.py          # Test execution without pytest
+├── tests/                     # Python integration tests
+├── scripts/                   # Utility scripts
+├── Cargo.toml                 # Rust crate configuration
+└── pyproject.toml             # Python package configuration
 ```
 
 ## Key Technical Decisions
@@ -384,7 +408,7 @@ uv run python -c "import rtest; print(rtest.__file__)"
 
 1. **Test collection**: Python AST parsing and file traversal
 2. **Worker coordination**: Distributing tests across processes
-3. **Process spawning**: pytest subprocess execution
+3. **Test execution**: Either via pytest subprocess or native Python worker
 4. **Result aggregation**: Combining outputs from workers
 
 ### Optimization Guidelines

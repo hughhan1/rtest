@@ -62,8 +62,7 @@ jobs:
       shell: bash
     
     - name: Run Rust unit tests
-      run: |
-        cd rtest && cargo test --lib
+      run: cargo test --lib
     
     - name: Run Rust integration tests
       run: cargo test

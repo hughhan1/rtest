@@ -38,7 +38,7 @@ Repository = "https://github.com/hughhan1/rtest.git"
 Issues = "https://github.com/hughhan1/rtest/issues"
 
 [project.scripts]
-rtest = "rtest:main"
+rtest = "rtest.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -86,8 +86,18 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 
+# Relax strict Any rules for modules that use dynamic Python features
+# (decorators, runtime introspection, pytest markers)
+[[tool.mypy.overrides]]
+module = [
+    "rtest.mark",
+    "rtest.worker.runner",
+]
+disallow_any_expr = false
+disallow_any_explicit = false
+
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["extension-module"]
 python-source = "python"
 module-name = "rtest._rtest"
 
@@ -102,7 +112,7 @@ dev = [
 ]
 
 [tool.semantic_release]
-version_toml = ["pyproject.toml:project.version", "Cargo.toml:package.version", "rtest/Cargo.toml:package.version"]
+version_toml = ["pyproject.toml:project.version", "Cargo.toml:package.version"]
 changelog_file = "CHANGELOG.md"
 upload_to_repository = false
 upload_to_release = true

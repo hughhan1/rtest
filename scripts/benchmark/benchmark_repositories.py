@@ -108,6 +108,10 @@ class ErrorResult:
     repository: str
     benchmark: str
     error: str
+    command: Optional[str] = None
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
 
 
 class ConfigLoader:
@@ -247,8 +251,16 @@ class RepositoryManager:
         # Determine pip executable path based on OS
         if platform.system() == "Windows":
             pip_executable = venv_path / "Scripts" / "pip3"
+            python_executable = venv_path / "Scripts" / "python"
         else:
             pip_executable = venv_path / "bin" / "pip3"
+            python_executable = venv_path / "bin" / "python"
+
+        # Upgrade pip to support PEP 517 editable installs
+        logger.info("Upgrading pip...")
+        result = run_command([str(python_executable), "-m", "pip", "install", "--upgrade", "pip"], str(repo_path))
+        if result.returncode != 0:
+            logger.warning(f"Failed to upgrade pip: {result.stderr}")
 
         # Install requirements
         logger.info("Installing requirements...")
@@ -273,7 +285,12 @@ class HyperfineRunner:
     """Runs benchmarks using hyperfine."""
 
     def run_benchmark(
-        self, repo_config: RepositoryConfig, repo_path: Path, benchmark_config: BenchmarkConfig
+        self,
+        repo_config: RepositoryConfig,
+        repo_path: Path,
+        benchmark_config: BenchmarkConfig,
+        show_output: bool = False,
+        ignore_failures: bool = False,
     ) -> Union[BenchmarkResult, ErrorResult]:
         """Run a benchmark using hyperfine."""
         test_dir_path = repo_path / repo_config.test_dir
@@ -299,17 +316,56 @@ class HyperfineRunner:
         pytest_cmd = self._build_command(str(pytest_executable), benchmark_config.pytest_args, repo_config.test_dir)
         rtest_cmd = self._build_command(str(rtest_executable), benchmark_config.rtest_args, repo_config.test_dir)
 
+        # Pre-flight validation: run each command once to catch failures early
+        if not ignore_failures:
+            pytest_ok, pytest_stdout, pytest_stderr, pytest_code = self._validate_command(
+                pytest_cmd, repo_path, timeout=benchmark_config.timeout
+            )
+            if not pytest_ok:
+                logger.error(f"pytest command failed validation for {repo_config.name}")
+                return ErrorResult(
+                    repository=repo_config.name,
+                    benchmark=benchmark_config.description,
+                    error=f"pytest command failed during validation (exit {pytest_code})",
+                    command=pytest_cmd,
+                    exit_code=pytest_code,
+                    stdout=pytest_stdout,
+                    stderr=pytest_stderr,
+                )
+
+            rtest_ok, rtest_stdout, rtest_stderr, rtest_code = self._validate_command(
+                rtest_cmd, repo_path, timeout=benchmark_config.timeout
+            )
+            if not rtest_ok:
+                logger.error(f"rtest command failed validation for {repo_config.name}")
+                return ErrorResult(
+                    repository=repo_config.name,
+                    benchmark=benchmark_config.description,
+                    error=f"rtest command failed during validation (exit {rtest_code})",
+                    command=rtest_cmd,
+                    exit_code=rtest_code,
+                    stdout=rtest_stdout,
+                    stderr=rtest_stderr,
+                )
+
         # Run hyperfine
         json_output = f"{repo_config.name}_benchmark.json"
-        hyperfine_cmd = self._build_hyperfine_command(pytest_cmd, rtest_cmd, json_output)
+        hyperfine_cmd = self._build_hyperfine_command(pytest_cmd, rtest_cmd, json_output, show_output, ignore_failures)
 
         result = run_command(hyperfine_cmd, str(repo_path), timeout=benchmark_config.timeout)
 
         if result.returncode != 0:
+            logger.error(f"Hyperfine failed for {repo_config.name}:")
+            if result.stderr:
+                logger.error(f"  stderr: {result.stderr}")
             return ErrorResult(
                 repository=repo_config.name,
                 benchmark=benchmark_config.description,
                 error=f"Hyperfine failed: {result.stderr}",
+                command=" ".join(hyperfine_cmd),
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
             )
 
         # Parse results
@@ -320,7 +376,27 @@ class HyperfineRunner:
         cmd_parts = [executable] + args.split() + [test_dir]
         return " ".join(cmd_parts)
 
-    def _build_hyperfine_command(self, pytest_cmd: str, rtest_cmd: str, json_output: str) -> List[str]:
+    def _validate_command(
+        self, cmd: str, cwd: Path, timeout: int = 60
+    ) -> Tuple[bool, Optional[str], Optional[str], int]:
+        """Run command once to validate it works before benchmarking.
+
+        Returns: (success, stdout, stderr, exit_code)
+        """
+        try:
+            result = subprocess.run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+            return (result.returncode == 0, result.stdout, result.stderr, result.returncode)
+        except subprocess.TimeoutExpired:
+            return (False, None, f"Command timed out after {timeout}s", -1)
+
+    def _build_hyperfine_command(
+        self,
+        pytest_cmd: str,
+        rtest_cmd: str,
+        json_output: str,
+        show_output: bool = False,
+        ignore_failures: bool = False,
+    ) -> List[str]:
         """Build hyperfine command."""
         cmd = [
             "hyperfine",
@@ -337,6 +413,11 @@ class HyperfineRunner:
             "--command-name",
             "rtest",
         ]
+
+        if show_output:
+            cmd.append("--show-output")
+        if ignore_failures:
+            cmd.append("-i")
 
         cmd.extend([pytest_cmd, rtest_cmd])
         return cmd
@@ -412,6 +493,12 @@ class ResultFormatter:
         for result in results:
             if isinstance(result, ErrorResult):
                 print(f"\n{result.repository.upper()}: ERROR - {result.error}")
+                if result.command:
+                    print(f"  Command: {result.command}")
+                if result.exit_code is not None:
+                    print(f"  Exit code: {result.exit_code}")
+                if result.stderr:
+                    print(f"  stderr: {result.stderr}")
                 continue
 
             print(f"\n{result.repository.upper()}")
@@ -450,7 +537,20 @@ class ResultFormatter:
                     }
                 )
             else:
-                serializable_results.append({"repository": result.repository, "error": result.error})
+                error_data = {
+                    "repository": result.repository,
+                    "benchmark": result.benchmark,
+                    "error": result.error,
+                }
+                if result.command:
+                    error_data["command"] = result.command
+                if result.exit_code is not None:
+                    error_data["exit_code"] = result.exit_code
+                if result.stdout:
+                    error_data["stdout"] = result.stdout
+                if result.stderr:
+                    error_data["stderr"] = result.stderr
+                serializable_results.append(error_data)
 
         with open(output_path, "w") as f:
             json.dump(serializable_results, f, indent=2)
@@ -461,10 +561,12 @@ class ResultFormatter:
 class BenchmarkOrchestrator:
     """Orchestrates the entire benchmarking process."""
 
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, show_output: bool = False, ignore_failures: bool = False):
         self.repositories, self.benchmark_configs = ConfigLoader.load_config(config_path)
         self.output_dir = Path(tempfile.mkdtemp(prefix="rtest_benchmark_results_"))
         self.temp_dir = Path(tempfile.mkdtemp(prefix="rtest_benchmark_repos_"))
+        self.show_output = show_output
+        self.ignore_failures = ignore_failures
 
         # Get project root (2 levels up from scripts/benchmark/)
         self.project_root = config_path.parent.parent.parent.absolute()
@@ -512,7 +614,11 @@ class BenchmarkOrchestrator:
 
             # Run benchmarks
             for _, benchmark_config in benchmarks.items():
-                results.append(self.hyperfine_runner.run_benchmark(repo, repo_path, benchmark_config))
+                results.append(
+                    self.hyperfine_runner.run_benchmark(
+                        repo, repo_path, benchmark_config, self.show_output, self.ignore_failures
+                    )
+                )
 
         return results
 
@@ -544,6 +650,14 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", help="Set logging level"
     )
+    parser.add_argument(
+        "--debug", action="store_true", help="Show command output during benchmarks (passes --show-output to hyperfine)"
+    )
+    parser.add_argument(
+        "--ignore-failures",
+        action="store_true",
+        help="Continue benchmarking even if commands fail (passes -i to hyperfine)",
+    )
 
     return parser.parse_args()
 
@@ -572,7 +686,7 @@ def main() -> None:
         return
 
     try:
-        orchestrator = BenchmarkOrchestrator(config_path)
+        orchestrator = BenchmarkOrchestrator(config_path, args.debug, args.ignore_failures)
 
         # Run benchmarks
         benchmark_types = ["collect_only"] if args.collect_only else ["collect_only", "execution"]
