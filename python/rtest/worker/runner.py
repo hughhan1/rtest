@@ -13,7 +13,7 @@ import traceback
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from types import MappingProxyType, ModuleType
+from types import FunctionType, MappingProxyType, ModuleType
 from typing import Callable, Literal
 
 
@@ -35,7 +35,7 @@ class TestCase:
     """A single test case to execute."""
 
     nodeid: str
-    func: Callable[..., object]
+    func: FunctionType
     kwargs: dict[str, object] = field(default_factory=dict)
     skip: bool = False
     skip_reason: str = ""
@@ -124,8 +124,7 @@ def _discover_tests_in_module(module: ModuleType, file_path: Path, root: Path) -
 
     for name, obj in inspect.getmembers(module):
         if _is_test_function(name, obj):
-            # obj is a function at this point
-            func_obj: Callable[..., object] = obj
+            func_obj: FunctionType = obj  # type: ignore[assignment]
             func_skip, func_skip_reason = _is_skipped(func_obj)
 
             for case_id, kwargs in expand_parametrize(func_obj):
@@ -157,8 +156,7 @@ def _discover_tests_in_module(module: ModuleType, file_path: Path, root: Path) -
                     method_obj: object = getattr(class_obj, method_name)
                     if not inspect.isfunction(method_obj):
                         continue
-                    # method_obj is a function at this point
-                    method_func: Callable[..., object] = method_obj
+                    method_func: FunctionType = method_obj  # type: ignore[assignment]
                     seen_methods.add(method_name)
 
                     method_skip, method_skip_reason = _is_skipped(method_func)
