@@ -23,7 +23,7 @@ pub use native_runner::{
 #[cfg(feature = "extension-module")]
 pub use pyo3::_rtest;
 pub use pytest_executor::execute_tests;
-pub use runner::{execute_tests_parallel, PytestRunner};
+pub use runner::{execute_tests_parallel, ParallelExecutionConfig, PytestRunner};
 pub use scheduler::{create_scheduler, DistributionMode};
 pub use utils::determine_worker_count;
-pub use worker::WorkerPool;
+pub use worker::{WorkerPool, WorkerTask};

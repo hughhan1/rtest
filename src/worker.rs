@@ -10,6 +10,17 @@ pub struct WorkerResult {
     pub stderr: String,
 }
 
+/// Configuration for a worker task
+pub struct WorkerTask {
+    pub worker_id: usize,
+    pub program: String,
+    pub initial_args: Vec<String>,
+    pub tests: Vec<String>,
+    pub pytest_args: Vec<String>,
+    pub working_dir: Option<PathBuf>,
+    pub env_vars: Vec<(String, String)>,
+}
+
 pub struct WorkerPool {
     workers: Vec<WorkerHandle>,
 }
@@ -32,25 +43,17 @@ impl WorkerPool {
         }
     }
 
-    pub fn spawn_worker(
-        &mut self,
-        worker_id: usize,
-        program: String,
-        initial_args: Vec<String>,
-        tests: Vec<String>,
-        pytest_args: Vec<String>,
-        working_dir: Option<PathBuf>,
-        env_vars: Vec<(String, String)>,
-    ) {
+    pub fn spawn_worker(&mut self, task: WorkerTask) {
+        let worker_id = task.worker_id;
         let handle = thread::spawn(move || {
-            let mut cmd = Command::new(&program);
+            let mut cmd = Command::new(&task.program);
 
             // Set environment variables
-            for (key, value) in env_vars {
+            for (key, value) in task.env_vars {
                 cmd.env(key, value);
             }
 
-            for arg in initial_args {
+            for arg in task.initial_args {
                 cmd.arg(arg);
             }
 
@@ -58,34 +61,34 @@ impl WorkerPool {
             // its collection phase. Without this, pytest searches upward for config files
             // and can hit protected Windows system directories like "C:\Documents and Settings",
             // causing PermissionError even when we provide explicit test node IDs.
-            if let Some(ref dir) = working_dir {
+            if let Some(ref dir) = task.working_dir {
                 cmd.arg("--rootdir");
                 cmd.arg(dir);
             }
 
-            for test in tests {
+            for test in task.tests {
                 cmd.arg(test);
             }
 
-            for arg in pytest_args {
+            for arg in task.pytest_args {
                 cmd.arg(arg);
             }
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-            if let Some(dir) = working_dir {
+            if let Some(dir) = task.working_dir {
                 cmd.current_dir(dir);
             }
 
             match cmd.output() {
                 Ok(output) => WorkerResult {
-                    worker_id,
+                    worker_id: task.worker_id,
                     exit_code: output.status.code().unwrap_or(-1),
                     stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                     stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 },
                 Err(e) => WorkerResult {
-                    worker_id,
+                    worker_id: task.worker_id,
                     exit_code: -1,
                     stdout: String::new(),
                     stderr: format!("Failed to execute command: {e}"),
@@ -154,15 +157,15 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Use echo command for testing
-        pool.spawn_worker(
-            0,
-            "echo".into(),
-            vec![],
-            vec!["hello".into()],
-            vec!["world".into()],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["hello".into()],
+            pytest_args: vec!["world".into()],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         assert_eq!(pool.worker_count(), 1);
 
@@ -179,25 +182,25 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Spawn multiple echo workers
-        pool.spawn_worker(
-            0,
-            "echo".into(),
-            vec![],
-            vec!["worker0".into()],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["worker0".into()],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
-        pool.spawn_worker(
-            1,
-            "echo".into(),
-            vec![],
-            vec!["worker1".into()],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 1,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["worker1".into()],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         assert_eq!(pool.worker_count(), 2);
 
@@ -216,15 +219,15 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Use a command that should fail
-        pool.spawn_worker(
-            0,
-            "false".into(), // Command that always exits with code 1
-            vec![],
-            vec![],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "false".into(), // Command that always exits with code 1
+            initial_args: vec![],
+            tests: vec![],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         let results = pool.wait_for_all();
         assert_eq!(results.len(), 1);
@@ -237,15 +240,15 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Test with initial args (like "python -m pytest")
-        pool.spawn_worker(
-            0,
-            "echo".into(),
-            vec!["initial".into(), "args".into()],
-            vec!["test1".into()],
-            vec!["final".into()],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "echo".into(),
+            initial_args: vec!["initial".into(), "args".into()],
+            tests: vec!["test1".into()],
+            pytest_args: vec!["final".into()],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         let results = pool.wait_for_all();
         assert_eq!(results.len(), 1);
@@ -263,15 +266,15 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Use a command that doesn't exist
-        pool.spawn_worker(
-            0,
-            "nonexistent_command_12345".into(),
-            vec![],
-            vec![],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "nonexistent_command_12345".into(),
+            initial_args: vec![],
+            tests: vec![],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         let results = pool.wait_for_all();
         assert_eq!(results.len(), 1);
@@ -285,35 +288,35 @@ mod tests {
         let mut pool = WorkerPool::new();
 
         // Spawn workers in reverse order
-        pool.spawn_worker(
-            2,
-            "echo".into(),
-            vec![],
-            vec!["worker2".into()],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 2,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["worker2".into()],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
-        pool.spawn_worker(
-            0,
-            "echo".into(),
-            vec![],
-            vec!["worker0".into()],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 0,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["worker0".into()],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
-        pool.spawn_worker(
-            1,
-            "echo".into(),
-            vec![],
-            vec!["worker1".into()],
-            vec![],
-            None,
-            vec![],
-        );
+        pool.spawn_worker(WorkerTask {
+            worker_id: 1,
+            program: "echo".into(),
+            initial_args: vec![],
+            tests: vec!["worker1".into()],
+            pytest_args: vec![],
+            working_dir: None,
+            env_vars: vec![],
+        });
 
         let results = pool.wait_for_all();
         assert_eq!(results.len(), 3);

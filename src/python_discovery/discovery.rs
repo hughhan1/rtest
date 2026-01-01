@@ -72,6 +72,7 @@ pub fn discover_tests_with_inheritance(
 /// Convert a file path to a module path
 fn path_to_module_path(file_path: &Path, root_path: &Path) -> Vec<String> {
     let relative = file_path.strip_prefix(root_path).unwrap_or(file_path);
+    let last_component = relative.components().next_back();
 
     let mut parts = Vec::new();
 
@@ -80,7 +81,7 @@ fn path_to_module_path(file_path: &Path, root_path: &Path) -> Vec<String> {
             let name_str = name.to_string_lossy();
 
             // Strip .py extension from the last component
-            if name_str.ends_with(".py") && component == relative.components().last().unwrap() {
+            if name_str.ends_with(".py") && Some(component) == last_component {
                 let without_ext = name_str.strip_suffix(".py").unwrap();
                 if without_ext != "__init__" {
                     parts.push(without_ext.to_string());

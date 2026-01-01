@@ -1,10 +1,21 @@
-use crate::{create_scheduler, subproject, DistributionMode, WorkerPool};
+use crate::{create_scheduler, subproject, DistributionMode, WorkerPool, WorkerTask};
 use std::path::Path;
 
 pub struct PytestRunner {
     pub program: String,
     pub initial_args: Vec<String>,
     pub env_vars: Vec<(String, String)>,
+}
+
+/// Configuration for parallel test execution
+pub struct ParallelExecutionConfig<'a> {
+    pub program: &'a str,
+    pub initial_args: &'a [String],
+    pub worker_count: usize,
+    pub dist_mode: &'a str,
+    pub rootpath: &'a Path,
+    pub use_subprojects: bool,
+    pub env_vars: &'a [(String, String)],
 }
 
 impl PytestRunner {
@@ -36,53 +47,47 @@ impl PytestRunner {
 }
 
 /// Execute tests in parallel across multiple workers
-pub fn execute_tests_parallel(
-    program: &str,
-    initial_args: &[String],
-    test_nodes: Vec<String>,
-    worker_count: usize,
-    dist_mode: &str,
-    rootpath: &Path,
-    use_subprojects: bool,
-    env_vars: &[(String, String)],
-) -> i32 {
-    println!("Running tests with {worker_count} workers using {dist_mode} distribution");
+pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<String>) -> i32 {
+    println!(
+        "Running tests with {} workers using {} distribution",
+        config.worker_count, config.dist_mode
+    );
 
-    let distribution_mode = match dist_mode.parse::<DistributionMode>() {
+    let distribution_mode = match config.dist_mode.parse::<DistributionMode>() {
         Ok(mode) => mode,
         Err(e) => {
-            eprintln!("Invalid distribution mode '{dist_mode}': {e}");
+            eprintln!("Invalid distribution mode '{}': {e}", config.dist_mode);
             return 1;
         }
     };
 
-    if use_subprojects {
-        let test_groups = subproject::group_tests_by_subproject(rootpath, &test_nodes);
+    if config.use_subprojects {
+        let test_groups = subproject::group_tests_by_subproject(config.rootpath, &test_nodes);
 
         let mut worker_pool = WorkerPool::new();
         let mut worker_id = 0;
 
         for (subproject_root, tests) in test_groups {
-            let adjusted_tests = if subproject_root != rootpath {
-                subproject::make_test_paths_relative(&tests, rootpath, &subproject_root)
+            let adjusted_tests = if subproject_root != config.rootpath {
+                subproject::make_test_paths_relative(&tests, config.rootpath, &subproject_root)
             } else {
                 tests
             };
 
             let scheduler = create_scheduler(distribution_mode.clone());
-            let test_batches = scheduler.distribute_tests(adjusted_tests, worker_count);
+            let test_batches = scheduler.distribute_tests(adjusted_tests, config.worker_count);
 
             for batch in test_batches {
                 if !batch.is_empty() {
-                    worker_pool.spawn_worker(
+                    worker_pool.spawn_worker(WorkerTask {
                         worker_id,
-                        program.to_string(),
-                        initial_args.to_vec(),
-                        batch,
-                        vec![],
-                        Some(subproject_root.clone()),
-                        env_vars.to_vec(),
-                    );
+                        program: config.program.to_string(),
+                        initial_args: config.initial_args.to_vec(),
+                        tests: batch,
+                        pytest_args: vec![],
+                        working_dir: Some(subproject_root.clone()),
+                        env_vars: config.env_vars.to_vec(),
+                    });
                     worker_id += 1;
                 }
             }
@@ -113,7 +118,7 @@ pub fn execute_tests_parallel(
         overall_exit_code
     } else {
         let scheduler = create_scheduler(distribution_mode);
-        let test_batches = scheduler.distribute_tests(test_nodes, worker_count);
+        let test_batches = scheduler.distribute_tests(test_nodes, config.worker_count);
 
         if test_batches.is_empty() {
             println!("No test batches to execute.");
@@ -124,15 +129,15 @@ pub fn execute_tests_parallel(
 
         for (worker_id, tests) in test_batches.into_iter().enumerate() {
             if !tests.is_empty() {
-                worker_pool.spawn_worker(
+                worker_pool.spawn_worker(WorkerTask {
                     worker_id,
-                    program.to_string(),
-                    initial_args.to_vec(),
+                    program: config.program.to_string(),
+                    initial_args: config.initial_args.to_vec(),
                     tests,
-                    vec![],
-                    Some(rootpath.to_path_buf()),
-                    env_vars.to_vec(),
-                );
+                    pytest_args: vec![],
+                    working_dir: Some(config.rootpath.to_path_buf()),
+                    env_vars: config.env_vars.to_vec(),
+                });
             }
         }
 

@@ -9,8 +9,8 @@ use crate::cli::{Args, Runner};
 use crate::config::read_pytest_config;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_files, determine_worker_count,
-    display_collection_results, execute_native, execute_tests, execute_tests_parallel, subproject,
-    NativeRunnerConfig,
+    display_collection_results, execute_native, execute_tests, execute_tests_parallel,
+    subproject, NativeRunnerConfig, ParallelExecutionConfig,
 };
 
 /// Get the current working directory, returning an error message on failure.
@@ -284,16 +284,16 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
                 overall_exit_code
             } else {
-                execute_tests_parallel(
-                    &runner.program,
-                    &runner.initial_args,
-                    test_nodes,
+                let config = ParallelExecutionConfig {
+                    program: &runner.program,
+                    initial_args: &runner.initial_args,
                     worker_count,
-                    &args.dist,
-                    &rootpath,
-                    true,
-                    &runner.env_vars,
-                )
+                    dist_mode: &args.dist,
+                    rootpath: &rootpath,
+                    use_subprojects: true,
+                    env_vars: &runner.env_vars,
+                };
+                execute_tests_parallel(&config, test_nodes)
             };
             std::process::exit(exit_code);
         }
