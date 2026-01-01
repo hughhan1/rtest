@@ -101,23 +101,21 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
-    
-    - name: Install Python dev dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -e ".[dev]"
-    
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
     - name: Run ruff format check
-      run: ruff format --check python/ tests/ scripts/
-    
+      run: uv run ruff format --check python/ tests/ scripts/
+
     - name: Run ruff lint
-      run: ruff check python/ tests/ scripts/
-    
+      run: uv run ruff check python/ tests/ scripts/
+
     - name: Run ty
-      run: ty check python/ tests/ scripts/
-    
+      run: uv run ty check python/ tests/ scripts/
+
     - name: Run vulture (dead code detection)
-      run: vulture python/ tests/ scripts/ --min-confidence 80
+      run: uv run vulture python/ tests/ scripts/ --min-confidence 80
     
     - name: Check Rust formatting
       run: cargo fmt -- --check
