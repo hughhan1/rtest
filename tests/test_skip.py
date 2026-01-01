@@ -54,7 +54,7 @@ class TestSkipAndParametrizeCombination:
 
         @mark.skip(reason="WIP")  # type: ignore[misc]
         @mark.cases("x", [1, 2, 3])  # type: ignore[misc]
-        def test_func(x: int) -> None:
+        def test_func(_x: int) -> None:
             pass
 
         # Both attributes should be present
