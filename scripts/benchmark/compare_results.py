@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Compare benchmark results between baseline and current run."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, TypedDict
+from typing import TypedDict
 
 
 class BenchmarkStatus(Enum):
@@ -21,7 +23,7 @@ class BenchmarkStatus(Enum):
 class RtestMetrics(TypedDict):
     mean: float
     stddev: float
-    times: List[float]
+    times: list[float]
 
 
 class BenchmarkResult(TypedDict, total=False):
@@ -41,9 +43,9 @@ class ComparisonConfig:
 class BenchmarkComparison:
     repository: str
     benchmark: str
-    baseline_time: Optional[float]
-    current_time: Optional[float]
-    change_percentage: Optional[float]
+    baseline_time: float | None
+    current_time: float | None
+    change_percentage: float | None
     status: BenchmarkStatus
 
     def is_regression(self) -> bool:
@@ -60,10 +62,10 @@ STATUS_SYMBOLS = {
 }
 
 
-def load_results(file_path: Path) -> List[BenchmarkResult]:
+def load_results(file_path: Path) -> list[BenchmarkResult]:
     """Load benchmark results from JSON file."""
     with open(file_path) as f:
-        data: List[BenchmarkResult] = json.load(f)
+        data: list[BenchmarkResult] = json.load(f)
         return data
 
 
@@ -98,7 +100,7 @@ def classify_change(percentage: float, config: ComparisonConfig) -> BenchmarkSta
         return BenchmarkStatus.NO_CHANGE
 
 
-def create_result_index(results: List[BenchmarkResult]) -> Dict[str, BenchmarkResult]:
+def create_result_index(results: list[BenchmarkResult]) -> dict[str, BenchmarkResult]:
     """Create a lookup dictionary from benchmark results."""
     index = {}
     for result in results:
@@ -109,8 +111,8 @@ def create_result_index(results: List[BenchmarkResult]) -> Dict[str, BenchmarkRe
 
 
 def analyze_results(
-    baseline: List[BenchmarkResult], current: List[BenchmarkResult], config: ComparisonConfig
-) -> List[BenchmarkComparison]:
+    baseline: list[BenchmarkResult], current: list[BenchmarkResult], config: ComparisonConfig
+) -> list[BenchmarkComparison]:
     """Analyze benchmark results and return comparison data."""
     comparisons = []
 
@@ -156,7 +158,7 @@ def format_comparison_row(comparison: BenchmarkComparison) -> str:
     return f"| {repo} | {benchmark} | {baseline_str} | {current_str} | {change_str} | {symbol} |"
 
 
-def calculate_summary_stats(comparisons: List[BenchmarkComparison]) -> Dict[str, int]:
+def calculate_summary_stats(comparisons: list[BenchmarkComparison]) -> dict[str, int]:
     """Calculate summary statistics from comparisons."""
     stats = {"total": len(comparisons), "regressions": 0, "improvements": 0, "no_change": 0}
 
@@ -171,7 +173,7 @@ def calculate_summary_stats(comparisons: List[BenchmarkComparison]) -> Dict[str,
     return stats
 
 
-def format_report(comparisons: List[BenchmarkComparison], config: ComparisonConfig) -> str:
+def format_report(comparisons: list[BenchmarkComparison], config: ComparisonConfig) -> str:
     """Format comparison results as a markdown report."""
     lines = []
 

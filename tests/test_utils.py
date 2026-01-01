@@ -1,12 +1,20 @@
 """Common test utilities for rtest tests."""
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
-from typing import Dict, List, Optional
+from typing import NamedTuple
 
 
-def run_rtest(args: List[str], cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
+class RtestResult(NamedTuple):
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def run_rtest(args: list[str], cwd: str | None = None, env: dict[str, str] | None = None) -> RtestResult:
     """Helper to run rtest binary and capture output.
 
     Args:
@@ -15,7 +23,7 @@ def run_rtest(args: List[str], cwd: Optional[str] = None, env: Optional[Dict[str
         env: Environment variables to use (if None, uses current environment)
 
     Returns:
-        tuple: (returncode, stdout, stderr)
+        RtestResult: Named tuple with (returncode, stdout, stderr)
     """
 
     # On Windows, console scripts are installed in the Scripts subdirectory
@@ -39,4 +47,4 @@ def run_rtest(args: List[str], cwd: Optional[str] = None, env: Optional[Dict[str
         cwd=cwd,
         env=env,
     )
-    return result.returncode, result.stdout, result.stderr
+    return RtestResult(result.returncode, result.stdout, result.stderr)

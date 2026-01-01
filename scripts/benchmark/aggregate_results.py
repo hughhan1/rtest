@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """Aggregate benchmark results from multiple repositories into a single JSON file."""
 
+from __future__ import annotations
+
 import argparse
 import json
 from glob import glob
 from pathlib import Path
-from typing import Dict, List, Union, cast
+from typing import cast
 
 
-def find_result_files(results_dir: Path) -> List[Path]:
+def find_result_files(results_dir: Path) -> list[Path]:
     """Find all benchmark result JSON files in the given directory."""
     pattern = str(results_dir / "*" / "*" / "*.json")
     return [Path(f) for f in glob(pattern)]
 
 
-def aggregate_results(results_dir: Path, output_file: Path) -> List[Dict[str, Union[str, float]]]:
+def aggregate_results(results_dir: Path, output_file: Path) -> list[dict[str, str | float]]:
     """Aggregate all benchmark results into a single list."""
-    all_results: List[Dict[str, Union[str, float]]] = []
+    all_results: list[dict[str, str | float]] = []
 
     # Find all result directories
     result_dirs = sorted([d for d in results_dir.iterdir() if d.is_dir()])
@@ -33,7 +35,7 @@ def aggregate_results(results_dir: Path, output_file: Path) -> List[Dict[str, Un
         if json_files:
             # Use the first JSON file found
             with open(json_files[0]) as f:
-                results = cast(List[Dict[str, Union[str, float]]], json.load(f))
+                results = cast(list[dict[str, str | float]], json.load(f))
                 all_results.extend(results)
 
             # Pretty print for summary

@@ -29,6 +29,7 @@ from typing import Callable, Sequence, TypeVar, Union
 
 # TypeVar for decorators that preserve function signatures
 # The bound includes "type" to support decorating classes as well as functions
+# Note: Union is required here (not |) because TypeVar bounds are evaluated at runtime
 F = TypeVar("F", bound=Union[Callable[..., object], type])
 
 # Deprecation warning messages for pytest marker compatibility
