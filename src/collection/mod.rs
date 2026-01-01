@@ -7,3 +7,5 @@ pub mod error;
 pub mod nodes;
 pub mod types;
 mod utils;
+
+pub use utils::glob_match;

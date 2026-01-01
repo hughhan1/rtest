@@ -1,5 +1,6 @@
 //! Native test runner that executes tests via Python workers.
 
+use crate::collection::glob_match;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -47,6 +48,12 @@ pub struct NativeRunnerConfig {
     pub python_executable: String,
     pub root_path: PathBuf,
     pub num_workers: usize,
+    pub python_files: Vec<String>,
+}
+
+/// Default pytest python_files patterns
+pub fn default_python_files() -> Vec<String> {
+    vec!["test_*.py".into(), "*_test.py".into()]
 }
 
 fn shard_files(files: Vec<PathBuf>, num_workers: usize) -> Vec<Vec<PathBuf>> {
@@ -299,14 +306,24 @@ fn is_hidden_or_ignored(name: &str) -> bool {
     name.starts_with('.') || name == "__pycache__"
 }
 
-/// Patterns mirror CollectionConfig::default().python_files
-fn is_test_file(path: &Path) -> bool {
+/// Check if a file matches any of the python_files patterns
+fn is_test_file(path: &Path, patterns: &[String]) -> bool {
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    path.extension().is_some_and(|ext| ext == "py")
-        && (file_name.starts_with("test_") || file_name.ends_with("_test.py"))
+
+    if path.extension().is_none_or(|ext| ext != "py") {
+        return false;
+    }
+
+    for pattern in patterns {
+        if glob_match(pattern, file_name) {
+            return true;
+        }
+    }
+
+    false
 }
 
-fn collect_test_files_in_dir(dir: &Path) -> Vec<PathBuf> {
+fn collect_test_files_in_dir(dir: &Path, patterns: &[String]) -> Vec<PathBuf> {
     WalkDir::new(dir)
         .into_iter()
         .filter_entry(|e| {
@@ -316,14 +333,14 @@ fn collect_test_files_in_dir(dir: &Path) -> Vec<PathBuf> {
                 .unwrap_or(false)
         })
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file() && is_test_file(e.path()))
+        .filter(|e| e.file_type().is_file() && is_test_file(e.path(), patterns))
         .map(|e| e.into_path())
         .collect()
 }
 
-pub fn collect_test_files(root: &Path, paths: &[String]) -> Vec<PathBuf> {
+pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) -> Vec<PathBuf> {
     let mut test_files = if paths.is_empty() {
-        collect_test_files_in_dir(root)
+        collect_test_files_in_dir(root, patterns)
     } else {
         paths
             .iter()
@@ -335,10 +352,10 @@ pub fn collect_test_files(root: &Path, paths: &[String]) -> Vec<PathBuf> {
                     root.join(path)
                 };
 
-                if full_path.is_file() && is_test_file(&full_path) {
+                if full_path.is_file() && is_test_file(&full_path, patterns) {
                     vec![full_path]
                 } else if full_path.is_dir() {
-                    collect_test_files_in_dir(&full_path)
+                    collect_test_files_in_dir(&full_path, patterns)
                 } else {
                     vec![]
                 }
@@ -414,12 +431,25 @@ mod tests {
 
     #[test]
     fn test_is_test_file() {
-        assert!(is_test_file(Path::new("test_foo.py")));
-        assert!(is_test_file(Path::new("foo_test.py")));
-        assert!(is_test_file(Path::new("path/to/test_bar.py")));
-        assert!(!is_test_file(Path::new("foo.py")));
-        assert!(!is_test_file(Path::new("conftest.py")));
-        assert!(!is_test_file(Path::new("test_foo.txt")));
+        let default_patterns = default_python_files();
+        assert!(is_test_file(Path::new("test_foo.py"), &default_patterns));
+        assert!(is_test_file(Path::new("foo_test.py"), &default_patterns));
+        assert!(is_test_file(
+            Path::new("path/to/test_bar.py"),
+            &default_patterns
+        ));
+        assert!(!is_test_file(Path::new("foo.py"), &default_patterns));
+        assert!(!is_test_file(Path::new("conftest.py"), &default_patterns));
+        assert!(!is_test_file(Path::new("test_foo.txt"), &default_patterns));
+    }
+
+    #[test]
+    fn test_is_test_file_custom_patterns() {
+        let patterns = vec!["check_*.py".into(), "*_spec.py".into()];
+        assert!(is_test_file(Path::new("check_validation.py"), &patterns));
+        assert!(is_test_file(Path::new("user_spec.py"), &patterns));
+        assert!(!is_test_file(Path::new("test_foo.py"), &patterns));
+        assert!(!is_test_file(Path::new("foo_test.py"), &patterns));
     }
 
     #[test]

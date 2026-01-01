@@ -506,3 +506,44 @@ class TestPytestMarkerCompatibility:
         # Should emit deprecation warning with exact message
         expected_warning = SKIP_DEPRECATION_MSG.format(func_name="test_pytest_skip")
         assert expected_warning in result.stderr
+
+
+class TestPythonFilesConfiguration:
+    """Tests for python_files configuration from pyproject.toml."""
+
+    def test_native_runner_respects_custom_python_files(self, tmp_path: Path) -> None:
+        """Native runner uses python_files patterns from pyproject.toml."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.pytest.ini_options]\npython_files = ["check_*.py", "*_spec.py"]\n')
+
+        (tmp_path / "check_validation.py").write_text("def test_one(): assert True\n")
+        (tmp_path / "user_spec.py").write_text("def test_two(): assert True\n")
+        (tmp_path / "test_standard.py").write_text("def test_three(): assert True\n")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        assert "Running 2 test file(s)" in result.stdout
+        assert "2 passed" in result.stdout
+
+    def test_native_runner_uses_defaults_without_config(self, tmp_path: Path) -> None:
+        """Native runner uses default patterns when python_files not configured."""
+        (tmp_path / "test_example.py").write_text("def test_default(): assert True\n")
+        (tmp_path / "example_test.py").write_text("def test_suffix(): assert True\n")
+        (tmp_path / "check_other.py").write_text("def test_nonstandard(): assert True\n")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        assert "Running 2 test file(s)" in result.stdout
+        assert "check_other.py" not in result.stdout
