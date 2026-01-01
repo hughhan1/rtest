@@ -68,9 +68,11 @@ def _import_module_from_file(file_path: Path, root: Path) -> ModuleType:
     return module
 
 
-def _is_test_function(name: str, obj: object) -> bool:
-    """Check if an object is a test function."""
-    return name.startswith("test") and inspect.isfunction(obj)
+def _is_test_function(name: str, obj: object, patterns: list[str]) -> bool:
+    """Check if an object is a test function based on patterns."""
+    if not inspect.isfunction(obj):
+        return False
+    return any(fnmatch.fnmatch(name, p) for p in patterns)
 
 
 def _is_test_class(name: str, obj: object, patterns: list[str]) -> bool:
@@ -117,6 +119,7 @@ def _discover_tests_in_module(
     file_path: Path,
     root: Path,
     python_classes: list[str],
+    python_functions: list[str],
 ) -> list[TestCase]:
     """Discover all test cases in a module."""
     from rtest.mark import expand_parametrize, get_case_nodeid_suffix
@@ -131,7 +134,7 @@ def _discover_tests_in_module(
     test_cases: list[TestCase] = []
 
     for name, obj in inspect.getmembers(module):
-        if _is_test_function(name, obj):
+        if _is_test_function(name, obj, python_functions):
             func_obj: FunctionType = obj  # type: ignore[assignment]
             func_skip, func_skip_reason = _is_skipped(func_obj)
 
@@ -159,7 +162,8 @@ def _discover_tests_in_module(
                 for method_name in base_class.__dict__:
                     if method_name in seen_methods:
                         continue
-                    if not method_name.startswith("test"):
+                    # Check if method matches any python_functions pattern
+                    if not any(fnmatch.fnmatch(method_name, p) for p in python_functions):
                         continue
                     method_obj: object = getattr(class_obj, method_name)
                     if not inspect.isfunction(method_obj):
@@ -253,6 +257,7 @@ def run_tests(
     output_file: Path,
     test_files: list[Path],
     python_classes: list[str] | None = None,
+    python_functions: list[str] | None = None,
 ) -> int:
     """Run tests from the given files and write results to JSONL.
 
@@ -261,12 +266,15 @@ def run_tests(
         output_file: Path to write JSONL results.
         test_files: List of test files to run.
         python_classes: Patterns for test class names (default: ["Test*"]).
+        python_functions: Patterns for test function/method names (default: ["test*"]).
 
     Returns:
         Exit code: 0 if all passed/skipped, 1 if any failed/error.
     """
     if python_classes is None:
         python_classes = ["Test*"]
+    if python_functions is None:
+        python_functions = ["test*"]
 
     root_str = str(root.resolve())
     if root_str not in sys.path:
@@ -281,7 +289,7 @@ def run_tests(
             module: ModuleType = _import_module_from_file(file_path.resolve(), root.resolve())
             module_name: str = module.__name__
             loaded_modules.append(module_name)
-            test_cases = _discover_tests_in_module(module, file_path, root, python_classes)
+            test_cases = _discover_tests_in_module(module, file_path, root, python_classes, python_functions)
             all_test_cases.extend(test_cases)
         except Exception as e:
             try:

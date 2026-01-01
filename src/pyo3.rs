@@ -9,8 +9,8 @@ use crate::cli::{Args, Runner};
 use crate::config::read_pytest_config;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
-    determine_worker_count, display_collection_results, execute_native, execute_tests,
-    execute_tests_parallel, subproject, NativeRunnerConfig, ParallelExecutionConfig,
+    default_python_functions, determine_worker_count, display_collection_results, execute_native,
+    execute_tests, execute_tests_parallel, subproject, NativeRunnerConfig, ParallelExecutionConfig,
 };
 
 /// Get the current working directory, returning an error message on failure.
@@ -213,6 +213,11 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             } else {
                 pytest_config.python_classes
             };
+            let python_functions = if pytest_config.python_functions.is_empty() {
+                default_python_functions()
+            } else {
+                pytest_config.python_functions
+            };
 
             // For execution, still use file-based collection (worker handles discovery)
             let test_files = collect_test_files(&rootpath, &args.files, &python_files);
@@ -223,6 +228,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                 num_workers: worker_count,
                 python_files,
                 python_classes,
+                python_functions,
             };
 
             let exit_code = execute_native(&config, test_files);

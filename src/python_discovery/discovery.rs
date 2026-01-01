@@ -246,14 +246,14 @@ class TestMultiLevel(TestDerived):
         // Check that TestBase has its own methods
         let base_tests: Vec<&TestInfo> = tests
             .iter()
-            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestBase"))
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestBase"))
             .collect();
         assert_eq!(base_tests.len(), 2);
 
         // Check that TestDerived has both inherited and its own methods
         let derived_tests: Vec<&TestInfo> = tests
             .iter()
-            .filter(|t| t.class_name.as_ref().map_or(false, |c| c == "TestDerived"))
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestDerived"))
             .collect();
         assert_eq!(derived_tests.len(), 3);
 
@@ -266,11 +266,7 @@ class TestMultiLevel(TestDerived):
         // Check that TestMultiLevel has inherited and its own methods
         let multi_tests: Vec<&TestInfo> = tests
             .iter()
-            .filter(|t| {
-                t.class_name
-                    .as_ref()
-                    .map_or(false, |c| c == "TestMultiLevel")
-            })
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestMultiLevel"))
             .collect();
         assert_eq!(multi_tests.len(), 2);
 
@@ -350,6 +346,6 @@ class TestDerived(TestBase):
         // All should be under TestDerived class
         assert!(tests
             .iter()
-            .all(|t| t.class_name.as_ref().map_or(false, |c| c == "TestDerived")));
+            .all(|t| t.class_name.as_ref().is_some_and(|c| c == "TestDerived")));
     }
 }

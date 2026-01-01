@@ -33,7 +33,13 @@ def main() -> int:
         "--python-classes",
         nargs="+",
         default=["Test*"],
-        help="Patterns for test class names (default: Test*)",
+        help="Glob patterns for test class names using fnmatch syntax (default: Test*)",
+    )
+    parser.add_argument(
+        "--python-functions",
+        nargs="+",
+        default=["test*"],
+        help="Glob patterns for test function/method names using fnmatch syntax (default: test*)",
     )
     parser.add_argument(
         "files",
@@ -49,12 +55,14 @@ def main() -> int:
     output_file: Path = args.out
     test_files: list[Path] = args.files
     python_classes: list[str] = args.python_classes
+    python_functions: list[str] = args.python_functions
 
     return run_tests(
         root=root,
         output_file=output_file,
         test_files=test_files,
         python_classes=python_classes,
+        python_functions=python_functions,
     )
 
 

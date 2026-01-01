@@ -626,3 +626,65 @@ class TestPythonClassesConfiguration:
         assert result.returncode == 0
         # Should match MyTestCase, TestStandard, SuiteTestRunner but NOT NoMatch
         assert "3 passed" in result.stdout
+
+
+class TestPythonFunctionsConfiguration:
+    """Tests for python_functions pattern matching with fnmatch."""
+
+    def test_native_runner_respects_custom_python_functions(self, tmp_path: Path) -> None:
+        """Native runner uses python_functions patterns from pyproject.toml."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.pytest.ini_options]\npython_functions = ["check_*", "*_test"]\n')
+
+        test_file = tmp_path / "test_functions.py"
+        test_file.write_text(
+            "def check_validation(): assert True\n\ndef user_test(): assert True\n\ndef test_standard(): assert True\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        assert "2 passed" in result.stdout
+
+    def test_default_python_functions_pattern(self, tmp_path: Path) -> None:
+        """Default python_functions pattern matches test* prefix."""
+        test_file = tmp_path / "test_default.py"
+        test_file.write_text("def test_valid(): assert True\n\ndef check_invalid(): assert True\n")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        assert "1 passed" in result.stdout
+
+    def test_python_functions_in_classes(self, tmp_path: Path) -> None:
+        """python_functions patterns apply to methods in test classes."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.pytest.ini_options]\npython_functions = ["check_*", "verify_*"]\n')
+
+        test_file = tmp_path / "test_class_methods.py"
+        test_file.write_text(
+            "class TestValidation:\n"
+            "    def check_one(self): assert True\n"
+            "    def verify_two(self): assert True\n"
+            "    def test_three(self): assert True\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        assert "2 passed" in result.stdout
