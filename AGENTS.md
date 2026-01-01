@@ -211,6 +211,20 @@ cargo clippy -p rtest --lib -- -D warnings
    git commit -m "feat: add new feature description"
    ```
 
+### Pre-Commit Checklist
+
+**Always run formatters before committing** to avoid CI failures:
+
+```bash
+# Rust formatting (required)
+cargo fmt
+
+# Python formatting (if Python files changed)
+uv run ruff format python/ tests/ scripts/
+```
+
+CI runs `cargo fmt -- --check` and `uv run ruff format --check` which will fail if code is not formatted.
+
 ### Debugging Collection Issues
 
 ```bash
