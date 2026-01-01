@@ -13,6 +13,8 @@ pub struct PytestConfig {
     pub python_files: Vec<String>,
     /// Patterns for test class names (e.g., "Test*")
     pub python_classes: Vec<String>,
+    /// Patterns for test function/method names (e.g., "test*")
+    pub python_functions: Vec<String>,
 }
 
 /// Read pytest configuration from pyproject.toml
@@ -89,6 +91,21 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
         );
     }
 
+    if let Some(python_functions) = ini_options
+        .and_then(|i| i.get("python_functions"))
+        .and_then(|t| t.as_array())
+    {
+        config.python_functions = python_functions
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(String::from)
+            .collect();
+        debug!(
+            "Found python_functions in pyproject.toml: {:?}",
+            config.python_functions
+        );
+    }
+
     config
 }
 
@@ -124,6 +141,7 @@ mod tests {
         assert!(config.testpaths.is_empty());
         assert!(config.python_files.is_empty());
         assert!(config.python_classes.is_empty());
+        assert!(config.python_functions.is_empty());
     }
 
     #[test]
@@ -142,6 +160,7 @@ mod tests {
         assert!(config.testpaths.is_empty());
         assert!(config.python_files.is_empty());
         assert!(config.python_classes.is_empty());
+        assert!(config.python_functions.is_empty());
     }
 
     #[test]
@@ -180,5 +199,24 @@ mod tests {
         assert_eq!(config.python_classes[0], "Test*");
         assert_eq!(config.python_classes[1], "Check*");
         assert_eq!(config.python_classes[2], "*Suite");
+    }
+
+    #[test]
+    fn test_read_pytest_config_with_python_functions() {
+        let temp_dir = TempDir::new().unwrap();
+        let pyproject_path = temp_dir.path().join("pyproject.toml");
+
+        let content = indoc! {r#"
+            [tool.pytest.ini_options]
+            python_functions = ["test*", "check_*", "*_test"]
+        "#};
+
+        fs::write(&pyproject_path, content).unwrap();
+
+        let config = read_pytest_config(temp_dir.path());
+        assert_eq!(config.python_functions.len(), 3);
+        assert_eq!(config.python_functions[0], "test*");
+        assert_eq!(config.python_functions[1], "check_*");
+        assert_eq!(config.python_functions[2], "*_test");
     }
 }

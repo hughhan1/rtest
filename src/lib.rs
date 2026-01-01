@@ -18,8 +18,8 @@ pub mod worker;
 pub use collection::error::{CollectionError, CollectionResult};
 pub use collection_integration::{collect_tests_rust, display_collection_results};
 pub use native_runner::{
-    collect_test_files, default_python_classes, default_python_files, execute_native,
-    NativeRunnerConfig,
+    collect_test_files, default_python_classes, default_python_files, default_python_functions,
+    execute_native, NativeRunnerConfig,
 };
 #[cfg(feature = "extension-module")]
 pub use pyo3::_rtest;
