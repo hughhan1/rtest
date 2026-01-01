@@ -9,6 +9,8 @@ use toml::Value;
 pub struct PytestConfig {
     /// Test paths to search for tests
     pub testpaths: Vec<PathBuf>,
+    /// Glob patterns for test file names (e.g., "test_*.py", "*_test.py")
+    pub python_files: Vec<String>,
 }
 
 /// Read pytest configuration from pyproject.toml
@@ -38,10 +40,12 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
 
     let mut config = PytestConfig::default();
 
-    if let Some(testpaths) = toml_value
+    let ini_options = toml_value
         .get("tool")
         .and_then(|t| t.get("pytest"))
-        .and_then(|p| p.get("ini_options"))
+        .and_then(|p| p.get("ini_options"));
+
+    if let Some(testpaths) = ini_options
         .and_then(|i| i.get("testpaths"))
         .and_then(|t| t.as_array())
     {
@@ -51,6 +55,21 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
             .map(PathBuf::from)
             .collect();
         debug!("Found testpaths in pyproject.toml: {:?}", config.testpaths);
+    }
+
+    if let Some(python_files) = ini_options
+        .and_then(|i| i.get("python_files"))
+        .and_then(|t| t.as_array())
+    {
+        config.python_files = python_files
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(String::from)
+            .collect();
+        debug!(
+            "Found python_files in pyproject.toml: {:?}",
+            config.python_files
+        );
     }
 
     config
@@ -86,6 +105,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = read_pytest_config(temp_dir.path());
         assert!(config.testpaths.is_empty());
+        assert!(config.python_files.is_empty());
     }
 
     #[test]
@@ -102,5 +122,25 @@ mod tests {
 
         let config = read_pytest_config(temp_dir.path());
         assert!(config.testpaths.is_empty());
+        assert!(config.python_files.is_empty());
+    }
+
+    #[test]
+    fn test_read_pytest_config_with_python_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let pyproject_path = temp_dir.path().join("pyproject.toml");
+
+        let content = indoc! {r#"
+            [tool.pytest.ini_options]
+            python_files = ["test_*.py", "*_test.py", "check_*.py"]
+        "#};
+
+        fs::write(&pyproject_path, content).unwrap();
+
+        let config = read_pytest_config(temp_dir.path());
+        assert_eq!(config.python_files.len(), 3);
+        assert_eq!(config.python_files[0], "test_*.py");
+        assert_eq!(config.python_files[1], "*_test.py");
+        assert_eq!(config.python_files[2], "check_*.py");
     }
 }
