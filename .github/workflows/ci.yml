@@ -121,7 +121,7 @@ jobs:
       run: cargo fmt -- --check
 
     - name: Run clippy
-      run: cargo clippy -p rtest --bin rtest -- -D warnings
+      run: cargo clippy -p rtest --lib -- -D warnings
 
   # Setup job that installs dependencies once
   benchmark-setup:
