@@ -51,7 +51,7 @@ run_check "Rust core tests" "cd rtest && cargo test"
 echo -e "${BLUE}=== Python Quality Checks ===${NC}"
 run_check "Python formatting" "uv run ruff format --check ."
 run_check "Python linting" "uv run ruff check ."
-run_check "Python type checking" "uv run mypy python/rtest/"
+run_check "Python type checking" "uv run ty check python/rtest/"
 run_check "Python tests" "uv run pytest tests/ --tb=short"
 
 # Build checks

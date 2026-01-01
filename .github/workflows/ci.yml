@@ -113,8 +113,8 @@ jobs:
     - name: Run ruff lint
       run: ruff check python/ tests/ scripts/
     
-    - name: Run mypy
-      run: mypy python/ tests/ scripts/
+    - name: Run ty
+      run: ty check python/ tests/ scripts/
     
     - name: Run vulture (dead code detection)
       run: vulture python/ tests/ scripts/ --min-confidence 80

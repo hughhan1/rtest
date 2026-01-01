@@ -43,9 +43,8 @@ rtest = "rtest.__main__:main"
 [project.optional-dependencies]
 dev = [
     "ruff==0.14.10",
-    "mypy==1.16.1",
+    "ty==0.0.8",
     "pyyaml>=6.0",
-    "types-PyYAML>=6.0",
     "vulture==2.14",
 ]
 
@@ -64,37 +63,21 @@ select = [
 [tool.ruff.lint.isort]
 known-first-party = ["rtest"]
 
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_any_unimported = true
-disallow_any_expr = true
-disallow_any_decorated = true
-disallow_any_explicit = true
-disallow_any_generics = true
-disallow_subclassing_any = true
-disallow_untyped_calls = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
+[tool.ty.environment]
+python-version = "3.9"
+extra-paths = ["tests/"]
 
-# Relax strict Any rules for modules that use dynamic Python features
-# (decorators, runtime introspection, pytest markers)
-[[tool.mypy.overrides]]
-module = [
-    "rtest.mark",
-    "rtest.worker.runner",
-]
-disallow_any_expr = false
-disallow_any_explicit = false
+[tool.ty.src]
+include = ["python/", "tests/", "scripts/"]
+
+# Relax strict rules for modules that use dynamic Python features
+# (similar to mypy overrides for rtest.mark and rtest.worker.runner)
+[[tool.ty.overrides]]
+include = ["python/rtest/mark.py", "python/rtest/worker/runner.py"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+index-out-of-bounds = "ignore"
 
 [tool.maturin]
 features = ["extension-module"]
@@ -104,10 +87,9 @@ module-name = "rtest._rtest"
 [dependency-groups]
 dev = [
     "maturin>=1.9.0",
-    "mypy==1.16.1",
+    "ty==0.0.8",
     "ruff==0.14.10",
     "pyyaml>=6.0",
-    "types-PyYAML>=6.0",
     "vulture==2.14",
 ]
 
