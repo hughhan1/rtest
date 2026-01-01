@@ -295,11 +295,32 @@ rtest/
 
 ### Rust Best Practices
 
-- **Error Handling**: Always use `Result<T, E>`, never `panic!` in library code
+#### Maintainability
+
+- **Error Handling**: Use `Result<T, E>`, never `panic!` in library code
+- **Error Context**: Add context with `.context()` or `.map_err()` for meaningful error chains
+- **Graceful Fallbacks**: Pattern match on errors to provide fallbacks (e.g., return empty cache on read failure)
+- **Module Visibility**: Use `pub(crate)` for internal APIs, minimize public surface
+- **Module Organization**: Group related functionality in submodules with clear `mod.rs` entry points
+- **Trait Implementations**: Implement `From`/`Into` for conversions, `Display` for user-facing messages
+- **Derive Macros**: Use `#[derive(Debug, Clone, Default)]` where appropriate
+- **Type Aliases**: Use `type` aliases to clarify domain concepts (e.g., `type RelativePath = Path`)
+
+#### Performance
+
+- **Iterator Chains**: Prefer lazy iterator chains over collecting to intermediate `Vec`s
+- **Clone Awareness**: Minimize `.clone()` on large types; prefer references or `Rc`/`Arc`
+- **String Efficiency**: Prefer `&str` parameters; use `.into()` over `.to_string()` for conversions
+- **Cow for Flexibility**: Use `Cow<str>` when ownership is conditional
+- **Collection Selection**: Use `HashMap` for lookups, `BTreeMap` for deterministic ordering
+
+#### Simplicity
+
 - **Memory Management**: Use `Rc`/`Arc` for shared ownership, avoid raw pointers
-- **String Handling**: Use `.into()` for conversions, `Cow<str>` for borrowed/owned
+- **Option Combinators**: Use `.is_some_and()`, `.map()`, `.unwrap_or_default()` over verbose match
 - **Testing**: Unit tests in same file with `#[cfg(test)]`, integration tests in `tests/`
 - **Documentation**: `///` for public APIs with examples, `//` for implementation details
+- **Clippy Compliance**: Run `cargo clippy`; use `#[expect(clippy::...)]` with justification when suppressing
 
 ### Python Best Practices
 
