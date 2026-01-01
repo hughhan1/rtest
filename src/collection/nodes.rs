@@ -5,7 +5,8 @@ use super::error::{CollectionError, CollectionOutcome, CollectionResult};
 use super::types::{Collector, Location};
 use super::utils::glob_match;
 use crate::python_discovery::{
-    discover_tests_with_inheritance, test_info_to_function, TestDiscoveryConfig,
+    discover_tests_with_inheritance, format_cannot_expand_warning, test_info_to_functions,
+    CasesExpansion, TestDiscoveryConfig,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -278,19 +279,33 @@ impl Collector for Module {
         let (tests, warnings) =
             discover_tests_with_inheritance(&self.path, &source, &discovery_config, root_path)?;
 
-        // Print warnings directly (following pytest's approach)
+        // Print warnings to stderr
         for warning in &warnings {
-            println!("{}", warning);
+            eprintln!("{}", warning);
         }
 
-        // Use iterator to transform tests without intermediate allocations
-        Ok(tests
+        let mut expansion_warnings = Vec::new();
+        let functions: Vec<Box<dyn Collector>> = tests
             .into_iter()
-            .map(|test| {
-                let function = test_info_to_function(&test, &self.path, &self.nodeid);
-                Box::new(function) as Box<dyn Collector>
+            .flat_map(|test| {
+                if let CasesExpansion::CannotExpand(reason) = &test.cases_expansion {
+                    let nodeid = if let Some(class_name) = &test.class_name {
+                        format!("{}::{}::{}", self.nodeid, class_name, test.name)
+                    } else {
+                        format!("{}::{}", self.nodeid, test.name)
+                    };
+                    expansion_warnings.push(format_cannot_expand_warning(&nodeid, reason));
+                }
+                test_info_to_functions(&test, &self.path, &self.nodeid)
             })
-            .collect())
+            .map(|function| Box::new(function) as Box<dyn Collector>)
+            .collect();
+
+        for warning in &expansion_warnings {
+            eprintln!("{}", warning);
+        }
+
+        Ok(functions)
     }
 
     fn path(&self) -> &Path {

@@ -1,6 +1,7 @@
 //! AST visitor for discovering tests in Python code.
 
 use crate::python_discovery::{
+    cases::parse_decorators_for_cases,
     discovery::{TestDiscoveryConfig, TestInfo},
     pattern,
 };
@@ -64,11 +65,14 @@ impl TestDiscoveryVisitor {
                         if let Stmt::FunctionDef(func) = stmt {
                             let method_name = func.name.as_str();
                             if self.is_test_function(method_name) {
+                                let cases_expansion =
+                                    parse_decorators_for_cases(&func.decorator_list);
                                 methods.push(TestInfo {
                                     name: method_name.into(),
                                     line: func.range.start().to_u32() as usize,
                                     is_method: true,
                                     class_name: Some(name.into()),
+                                    cases_expansion,
                                 });
                             }
                         }
@@ -92,11 +96,13 @@ impl TestDiscoveryVisitor {
     fn visit_function(&mut self, func: &StmtFunctionDef) {
         let name = func.name.as_str();
         if self.is_test_function(name) {
+            let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
                 is_method: self.current_class.is_some(),
                 class_name: self.current_class.clone(),
+                cases_expansion,
             });
         }
     }
@@ -148,6 +154,7 @@ impl TestDiscoveryVisitor {
                                         line: parent_method.line,
                                         is_method: true,
                                         class_name: Some(name.into()),
+                                        cases_expansion: parent_method.cases_expansion.clone(),
                                     });
                                 }
                             }
