@@ -9,8 +9,8 @@ use crate::cli::{Args, Runner};
 use crate::config::read_pytest_config;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_files, determine_worker_count,
-    display_collection_results, execute_native, execute_tests, execute_tests_parallel,
-    subproject, NativeRunnerConfig, ParallelExecutionConfig,
+    display_collection_results, execute_native, execute_tests, execute_tests_parallel, subproject,
+    NativeRunnerConfig, ParallelExecutionConfig,
 };
 
 /// Get the current working directory, returning an error message on failure.
