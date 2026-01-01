@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::python_discovery::{
+    cases::parse_decorators_for_cases,
     discovery::{TestDiscoveryConfig, TestInfo},
     module_resolver::ModuleResolver,
     pattern,
@@ -31,11 +32,14 @@ pub struct ResolvedBaseClass {
     is_local: bool,
 }
 
+use crate::python_discovery::cases::CasesExpansion;
+
 /// Lightweight test method information without redundant data
 #[derive(Debug, Clone)]
 pub struct TestMethodInfo {
     pub name: String,
     pub line: usize,
+    pub cases_expansion: CasesExpansion,
 }
 
 /// Test class information including methods
@@ -117,11 +121,13 @@ impl SemanticTestDiscovery {
         for stmt in &ast_module.body {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.is_test_function(func.name.as_str()) {
+                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
                         line: func.range().start().to_u32() as usize,
                         is_method: false,
                         class_name: None,
+                        cases_expansion,
                     });
                 }
             }
@@ -255,9 +261,11 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
+                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
                     methods.push(TestMethodInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
+                        cases_expansion,
                     });
                 }
             }
@@ -371,6 +379,7 @@ impl SemanticTestDiscovery {
                                     line: method.line,
                                     is_method: true,
                                     class_name: Some(class_name.to_string()),
+                                    cases_expansion: method.cases_expansion.clone(),
                                 });
                             }
                         }
@@ -393,11 +402,13 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     own_method_names.insert(method_name.to_string());
+                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
                     all_tests.push(TestInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
                         is_method: true,
                         class_name: Some(class_name.to_string()),
+                        cases_expansion,
                     });
                 }
             }
