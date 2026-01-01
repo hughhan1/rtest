@@ -43,7 +43,7 @@ rtest = "rtest:main"
 [project.optional-dependencies]
 dev = [
     "ruff==0.12.1",
-    "mypy==1.16.1",
+    "mypy==1.19.1",
     "pyyaml>=6.0",
     "types-PyYAML>=6.0",
     "vulture==2.14",
@@ -94,7 +94,7 @@ module-name = "rtest._rtest"
 [dependency-groups]
 dev = [
     "maturin>=1.9.0",
-    "mypy==1.16.1",
+    "mypy==1.19.1",
     "ruff==0.12.1",
     "pyyaml>=6.0",
     "types-PyYAML>=6.0",
