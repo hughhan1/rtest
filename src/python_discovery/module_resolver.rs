@@ -88,12 +88,12 @@ impl ModuleResolver {
     fn try_resolve_in_search_path(
         &self,
         module_path: &[String],
-        search_path: &PathBuf,
+        search_path: &Path,
     ) -> Result<PathBuf, ()> {
         let possible_paths = self.get_possible_paths_in_root(module_path, search_path);
 
         for path in &possible_paths {
-            if std::fs::metadata(&path).is_ok() {
+            if std::fs::metadata(path).is_ok() {
                 return Ok(path.clone());
             }
         }
@@ -102,13 +102,13 @@ impl ModuleResolver {
     }
 
     /// Get all possible file paths for a module in a specific root directory
-    fn get_possible_paths_in_root(&self, module_path: &[String], root: &PathBuf) -> Vec<PathBuf> {
+    fn get_possible_paths_in_root(&self, module_path: &[String], root: &Path) -> Vec<PathBuf> {
         if module_path.is_empty() {
             return Vec::new();
         }
 
         let mut paths = Vec::new();
-        let mut base_dir = root.clone();
+        let mut base_dir = root.to_path_buf();
 
         // Build the base directory path from all but the last component
         if module_path.len() > 1 {

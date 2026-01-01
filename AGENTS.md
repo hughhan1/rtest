@@ -166,7 +166,7 @@ cargo clippy
 cargo clippy --all-targets -- -D warnings
 
 # Run clippy on specific package
-cargo clippy -p rtest --bin rtest -- -D warnings
+cargo clippy -p rtest --lib -- -D warnings
 ```
 
 ### Running All Quality Checks
