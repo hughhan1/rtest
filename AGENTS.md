@@ -308,6 +308,17 @@ rtest/
 - **Testing**: pytest with descriptive test names and good coverage
 - **Documentation**: Google-style docstrings for public APIs
 
+### Type Annotation Guidelines
+
+- **Prefer structured types over generic dicts**: Use `@dataclass(frozen=True)`, `NamedTuple`, or `TypedDict` instead of
+  `dict[str, Any]` or nested dictionaries when the structure is known
+- **Use modern generic syntax**: Prefer `list[str]`, `dict[str, int]`, `tuple[int, str]` over `List[str]`,
+  `Dict[str, int]`, `Tuple[int, str]` from the `typing` module. Add `from __future__ import annotations` when needed
+  for Python 3.9 compatibility
+- **Use union syntax**: Prefer `str | None` over `Optional[str]`
+- **Named tuples for return values**: When returning multiple values with fixed meaning, use `NamedTuple` or
+  `@dataclass` instead of bare `tuple[...]`
+
 ## Troubleshooting
 
 ### Build Issues

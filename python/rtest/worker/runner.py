@@ -14,7 +14,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import Callable
+from typing import Callable, Literal
 
 
 @dataclass
@@ -22,7 +22,7 @@ class TestResult:
     """Result of a single test execution."""
 
     nodeid: str
-    outcome: str  # "passed", "failed", "error", "skipped"
+    outcome: Literal["passed", "failed", "error", "skipped"]
     duration_ms: float
     stdout: str = ""
     stderr: str = ""

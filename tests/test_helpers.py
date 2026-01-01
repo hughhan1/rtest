@@ -1,9 +1,11 @@
 """Common test helper functions for rtest tests."""
 
+from __future__ import annotations
+
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
 
 from test_utils import run_rtest
 
@@ -14,7 +16,7 @@ class CollectionResult:
     Provides flexible access to output as either string or list of lines.
     """
 
-    def __init__(self, returncode: int, stdout: str, stderr: str = ""):
+    def __init__(self, returncode: int, stdout: str, stderr: str = "") -> None:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
@@ -27,13 +29,13 @@ class CollectionResult:
         return self._output
 
     @property
-    def output_lines(self) -> List[str]:
+    def output_lines(self) -> list[str]:
         """Get output as a list of lines."""
         return self._output_lines
 
 
 @contextmanager
-def create_test_project(files: Dict[str, str]) -> Iterator[Path]:
+def create_test_project(files: dict[str, str]) -> Iterator[Path]:
     """Create a temporary project with the specified test files.
 
     Args:
@@ -58,7 +60,7 @@ def create_test_project(files: Dict[str, str]) -> Iterator[Path]:
         yield project_path
 
 
-def run_collection(project_path: Path, env: Optional[Dict[str, str]] = None) -> CollectionResult:
+def run_collection(project_path: Path, env: dict[str, str] | None = None) -> CollectionResult:
     """Run test collection and return result with flexible output access.
 
     Args:
@@ -72,7 +74,7 @@ def run_collection(project_path: Path, env: Optional[Dict[str, str]] = None) -> 
     return CollectionResult(returncode, stdout, stderr)
 
 
-def assert_tests_found(output_lines: List[str], expected_tests: List[str]) -> None:
+def assert_tests_found(output_lines: list[str], expected_tests: list[str]) -> None:
     """Assert that all expected tests are found in the output.
 
     Args:
@@ -83,7 +85,7 @@ def assert_tests_found(output_lines: List[str], expected_tests: List[str]) -> No
         assert any(test in line for line in output_lines), f"Should find test: {test}"
 
 
-def assert_patterns_not_found(output: str, patterns: List[str]) -> None:
+def assert_patterns_not_found(output: str, patterns: list[str]) -> None:
     """Assert that specified patterns are not found in the output.
 
     Args:
@@ -94,7 +96,7 @@ def assert_patterns_not_found(output: str, patterns: List[str]) -> None:
         assert pattern not in output, f"Should not find: {pattern}"
 
 
-def count_collected_tests(output_lines: List[str]) -> int:
+def count_collected_tests(output_lines: list[str]) -> int:
     """Count the number of collected tests from output lines.
 
     Args:
@@ -106,7 +108,7 @@ def count_collected_tests(output_lines: List[str]) -> int:
     return len([line for line in output_lines if "::" in line and "test_" in line])
 
 
-def extract_test_lines(output_lines: List[str]) -> List[str]:
+def extract_test_lines(output_lines: list[str]) -> list[str]:
     """Extract and clean test lines from output.
 
     Args:
