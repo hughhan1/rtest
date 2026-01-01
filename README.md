@@ -80,8 +80,34 @@ _Requires Python 3.9+_
 ### Basic Usage
 
 ```bash
+# Collect tests (fast AST-based collection)
 rtest --collect-only
+
+# Run tests using pytest as executor (default)
+rtest
+
+# Run tests using native runner (no pytest dependency)
+rtest --runner native
 ```
+
+### Native Runner
+
+The native runner (`--runner native`) executes tests without requiring pytest, using rtest's own decorators:
+
+```python
+import rtest
+
+@rtest.mark.parametrize("value", [1, 2, 3])
+def test_example(value):
+    assert value > 0
+
+@rtest.mark.skip(reason="Not implemented yet")
+def test_skipped():
+    pass
+```
+
+The native runner respects `python_files`, `python_classes`, and `python_functions` patterns from your
+`pyproject.toml` under `[tool.pytest.ini_options]`.
 
 ## Roadmap
 
@@ -92,8 +118,8 @@ Support executing tests, with parallelization built out of the box (bypassing
 
 ### Parametrized Test Discovery
 
-`rtest` currently discovers only the base function names for parametrized tests (created with
-`@pytest.mark.parametrize`), rather than expanding them into individual test items during collection. For example:
+`rtest` expands parametrized tests during collection when the decorator arguments are **literal values** (numbers,
+strings, booleans, None, lists/tuples of literals). For example:
 
 ```python
 @pytest.mark.parametrize("value", [1, 2, 3])
@@ -101,23 +127,31 @@ def test_example(value):
     assert value > 0
 ```
 
-**pytest collection shows:**
+**Both pytest and rtest collection show:**
 
 ```plaintext
+test_example[0]
 test_example[1]
 test_example[2]
-test_example[3]
 ```
 
-**rtest collection shows:**
+However, when parametrize arguments contain **dynamic expressions** (variables, function calls, comprehensions), `rtest`
+cannot statically analyze them and will emit a warning while falling back to the base test name:
+
+```python
+DATA = [1, 2, 3]
+
+@pytest.mark.parametrize("value", DATA)  # Dynamic - references a variable
+def test_example(value):
+    assert value > 0
+```
 
 ```plaintext
-test_example
+warning: Cannot statically expand test cases for 'test.py::test_example': argvalues references variable 'DATA'
 ```
 
-However, when `rtest` executes tests using pytest as the executor, passing the base function name (`test_example`) to
-pytest results in identical behavior - pytest automatically runs all parametrized variants. This means test execution is
-functionally equivalent between the tools, but collection counts may differ.
+In these cases, test execution is still functionally equivalent - pytest automatically runs all parametrized variants
+when given the base function name.
 
 ### Test Class Inheritance Collection
 
