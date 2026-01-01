@@ -547,3 +547,82 @@ class TestPythonFilesConfiguration:
         assert result.returncode == 0
         assert "Running 2 test file(s)" in result.stdout
         assert "check_other.py" not in result.stdout
+
+
+class TestPythonClassesConfiguration:
+    """Tests for python_classes pattern matching with fnmatch."""
+
+    def test_native_runner_respects_custom_python_classes(self, tmp_path: Path) -> None:
+        """Native runner uses python_classes patterns from pyproject.toml."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.pytest.ini_options]\npython_classes = ["Check*", "*Suite"]\n')
+
+        test_file = tmp_path / "test_classes.py"
+        test_file.write_text(
+            "class CheckValidation:\n"
+            "    def test_one(self): assert True\n\n"
+            "class UserSuite:\n"
+            "    def test_two(self): assert True\n\n"
+            "class TestStandard:\n"
+            "    def test_three(self): assert True\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        # Should find CheckValidation and UserSuite, but NOT TestStandard
+        assert "2 passed" in result.stdout
+
+    def test_default_python_classes_pattern(self, tmp_path: Path) -> None:
+        """Default python_classes pattern matches Test* prefix."""
+        test_file = tmp_path / "test_default.py"
+        test_file.write_text(
+            "class TestValid:\n"
+            "    def test_one(self): assert True\n\n"
+            "class CheckInvalid:\n"
+            "    def test_two(self): assert True\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        # Should only find TestValid with default Test* pattern
+        assert "1 passed" in result.stdout
+
+    def test_fnmatch_glob_patterns(self, tmp_path: Path) -> None:
+        """fnmatch supports full glob patterns including contains matching."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[tool.pytest.ini_options]\npython_classes = ["*Test*"]\n')
+
+        test_file = tmp_path / "test_glob.py"
+        test_file.write_text(
+            "class MyTestCase:\n"
+            "    def test_one(self): assert True\n\n"
+            "class TestStandard:\n"
+            "    def test_two(self): assert True\n\n"
+            "class SuiteTestRunner:\n"
+            "    def test_three(self): assert True\n\n"
+            "class NoMatch:\n"
+            "    def test_four(self): assert True\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0
+        # Should match MyTestCase, TestStandard, SuiteTestRunner but NOT NoMatch
+        assert "3 passed" in result.stdout

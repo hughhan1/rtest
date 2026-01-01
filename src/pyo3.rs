@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use crate::cli::{Args, Runner};
 use crate::config::read_pytest_config;
 use crate::{
-    collect_test_files, collect_tests_rust, default_python_files, determine_worker_count,
-    display_collection_results, execute_native, execute_tests, execute_tests_parallel, subproject,
-    NativeRunnerConfig, ParallelExecutionConfig,
+    collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
+    determine_worker_count, display_collection_results, execute_native, execute_tests,
+    execute_tests_parallel, subproject, NativeRunnerConfig, ParallelExecutionConfig,
 };
 
 /// Get the current working directory, returning an error message on failure.
@@ -201,12 +201,17 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                 std::process::exit(0);
             }
 
-            // Read pytest configuration for python_files patterns
+            // Read pytest configuration for collection patterns
             let pytest_config = read_pytest_config(&rootpath);
             let python_files = if pytest_config.python_files.is_empty() {
                 default_python_files()
             } else {
                 pytest_config.python_files
+            };
+            let python_classes = if pytest_config.python_classes.is_empty() {
+                default_python_classes()
+            } else {
+                pytest_config.python_classes
             };
 
             // For execution, still use file-based collection (worker handles discovery)
@@ -217,6 +222,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                 root_path: rootpath,
                 num_workers: worker_count,
                 python_files,
+                python_classes,
             };
 
             let exit_code = execute_native(&config, test_files);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import importlib.util
 import inspect
 import io
@@ -72,9 +73,11 @@ def _is_test_function(name: str, obj: object) -> bool:
     return name.startswith("test") and inspect.isfunction(obj)
 
 
-def _is_test_class(name: str, obj: object) -> bool:
-    """Check if an object is a test class."""
-    return name.startswith("Test") and inspect.isclass(obj)
+def _is_test_class(name: str, obj: object, patterns: list[str]) -> bool:
+    """Check if an object is a test class based on patterns."""
+    if not inspect.isclass(obj):
+        return False
+    return any(fnmatch.fnmatch(name, p) for p in patterns)
 
 
 def _is_skipped(obj: object) -> tuple[bool, str]:
@@ -109,7 +112,12 @@ def _is_skipped(obj: object) -> tuple[bool, str]:
     return False, ""
 
 
-def _discover_tests_in_module(module: ModuleType, file_path: Path, root: Path) -> list[TestCase]:
+def _discover_tests_in_module(
+    module: ModuleType,
+    file_path: Path,
+    root: Path,
+    python_classes: list[str],
+) -> list[TestCase]:
     """Discover all test cases in a module."""
     from rtest.mark import expand_parametrize, get_case_nodeid_suffix
 
@@ -140,7 +148,7 @@ def _discover_tests_in_module(module: ModuleType, file_path: Path, root: Path) -
                     )
                 )
 
-        elif _is_test_class(name, obj):
+        elif _is_test_class(name, obj, python_classes):
             # obj is a class at this point
             class_obj: type = obj
             class_skip, class_skip_reason = _is_skipped(class_obj)
@@ -240,17 +248,26 @@ def _run_single_test(test_case: TestCase) -> TestResult:
     )
 
 
-def run_tests(root: Path, output_file: Path, test_files: list[Path]) -> int:
+def run_tests(
+    root: Path,
+    output_file: Path,
+    test_files: list[Path],
+    python_classes: list[str] | None = None,
+) -> int:
     """Run tests from the given files and write results to JSONL.
 
     Args:
         root: Repository root path.
         output_file: Path to write JSONL results.
         test_files: List of test files to run.
+        python_classes: Patterns for test class names (default: ["Test*"]).
 
     Returns:
         Exit code: 0 if all passed/skipped, 1 if any failed/error.
     """
+    if python_classes is None:
+        python_classes = ["Test*"]
+
     root_str = str(root.resolve())
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
@@ -264,7 +281,7 @@ def run_tests(root: Path, output_file: Path, test_files: list[Path]) -> int:
             module: ModuleType = _import_module_from_file(file_path.resolve(), root.resolve())
             module_name: str = module.__name__
             loaded_modules.append(module_name)
-            test_cases = _discover_tests_in_module(module, file_path, root)
+            test_cases = _discover_tests_in_module(module, file_path, root, python_classes)
             all_test_cases.extend(test_cases)
         except Exception as e:
             try:
