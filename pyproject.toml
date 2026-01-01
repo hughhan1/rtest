@@ -70,15 +70,6 @@ extra-paths = ["tests/"]
 [tool.ty.src]
 include = ["python/", "tests/", "scripts/"]
 
-# Relax strict rules for modules that use dynamic Python features
-# (similar to mypy overrides for rtest.mark and rtest.worker.runner)
-[[tool.ty.overrides]]
-include = ["python/rtest/mark.py", "python/rtest/worker/runner.py"]
-
-[tool.ty.overrides.rules]
-unresolved-attribute = "ignore"
-index-out-of-bounds = "ignore"
-
 [tool.maturin]
 features = ["extension-module"]
 python-source = "python"
