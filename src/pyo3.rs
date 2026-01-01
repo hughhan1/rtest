@@ -6,6 +6,7 @@ use std::env;
 use std::path::PathBuf;
 
 use crate::cli::{Args, Runner};
+use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
@@ -16,6 +17,19 @@ use crate::{
 /// Get the current working directory, returning an error message on failure.
 fn get_current_dir() -> Result<PathBuf, String> {
     env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))
+}
+
+fn handle_collection_error(e: CollectionError) -> ! {
+    match e {
+        CollectionError::FileNotFound(path) => {
+            eprintln!("ERROR: file or directory not found: {}", path.display());
+            std::process::exit(4);
+        }
+        e => {
+            eprintln!("FATAL: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 pub struct PytestRunner {
@@ -118,10 +132,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
 
     let (test_nodes, errors) = match collection_result {
         Ok((nodes, errs)) => (nodes, errs),
-        Err(e) => {
-            eprintln!("Collection failed: {e}");
-            return 1;
-        }
+        Err(e) => handle_collection_error(e),
     };
 
     display_collection_results(&test_nodes, &errors);
@@ -178,10 +189,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             // Use Rust-based collection for consistent output with pytest runner
             let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
                 Ok((nodes, errors)) => (nodes, errors),
-                Err(e) => {
-                    eprintln!("FATAL: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => handle_collection_error(e),
             };
 
             display_collection_results(&test_nodes, &errors);
@@ -240,10 +248,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
             let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
                 Ok((nodes, errors)) => (nodes, errors),
-                Err(e) => {
-                    eprintln!("FATAL: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => handle_collection_error(e),
             };
 
             display_collection_results(&test_nodes, &errors);

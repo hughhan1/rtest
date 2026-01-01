@@ -32,6 +32,19 @@ impl Session {
         }
     }
 
+    fn resolve_args(&self, args: &[String]) -> Vec<PathBuf> {
+        args.iter()
+            .map(|arg| {
+                let path = PathBuf::from(arg);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.rootpath.join(arg)
+                }
+            })
+            .collect()
+    }
+
     pub fn perform_collect(
         self: Rc<Self>,
         args: &[String],
@@ -51,16 +64,13 @@ impl Session {
                 self.config.testpaths.clone()
             }
         } else {
-            args.iter()
-                .map(|arg| {
-                    let path = PathBuf::from(arg);
-                    if path.is_absolute() {
-                        path
-                    } else {
-                        self.rootpath.join(arg)
-                    }
-                })
-                .collect()
+            let resolved = self.resolve_args(args);
+            for path in &resolved {
+                if !path.exists() {
+                    return Err(CollectionError::FileNotFound(path.clone()));
+                }
+            }
+            resolved
         };
 
         Ok(paths

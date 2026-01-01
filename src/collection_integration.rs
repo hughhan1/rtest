@@ -97,6 +97,12 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
                 CollectionError::SkipError(msg) => {
                     println!("{RED}E   Skipped: {msg}{RESET}");
                 }
+                CollectionError::FileNotFound(path) => {
+                    println!(
+                        "{RED}E   file or directory not found: {}{RESET}",
+                        path.display()
+                    );
+                }
             }
         }
         println!(

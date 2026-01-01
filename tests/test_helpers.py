@@ -1,5 +1,6 @@
 """Common test helper functions for rtest tests."""
 
+import re
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -58,17 +59,25 @@ def create_test_project(files: dict[str, str]) -> Iterator[Path]:
         yield project_path
 
 
-def run_collection(project_path: Path, env: dict[str, str] | None = None) -> CollectionResult:
+def run_collection(
+    project_path: Path,
+    paths: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> CollectionResult:
     """Run test collection and return result with flexible output access.
 
     Args:
         project_path: Path to the project directory
+        paths: Optional list of specific file/directory paths to collect
         env: Optional environment variables to use
 
     Returns:
         CollectionResult with returncode, output as string, and output as lines
     """
-    returncode, stdout, stderr = run_rtest(["--collect-only"], cwd=str(project_path), env=env)
+    args = ["--collect-only"]
+    if paths:
+        args.extend(paths)
+    returncode, stdout, stderr = run_rtest(args, cwd=str(project_path), env=env)
     return CollectionResult(returncode, stdout, stderr)
 
 
@@ -116,3 +125,16 @@ def extract_test_lines(output_lines: list[str]) -> list[str]:
         List of cleaned test lines
     """
     return [line.strip() for line in output_lines if "::" in line and "test_" in line]
+
+
+def get_collected_count(output: str) -> int | None:
+    """Parse the 'collected N item(s)' count from output.
+
+    Args:
+        output: Full output string from test collection
+
+    Returns:
+        Number of collected items, or None if not found
+    """
+    match = re.search(r"collected (\d+) items?", output)
+    return int(match.group(1)) if match else None

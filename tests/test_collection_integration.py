@@ -12,6 +12,7 @@ from test_helpers import (
     assert_patterns_not_found,
     assert_tests_found,
     create_test_project,
+    get_collected_count,
     run_collection,
 )
 
@@ -1334,6 +1335,101 @@ class TestCollectionIntegration(unittest.TestCase):
             nested_test_path = str(Path("tests", "unit", "test_nested.py"))
             self.assertIn(f"{nested_test_path}::TestNested::test_base_method", result.output)
             self.assertIn(f"{nested_test_path}::TestNested::test_nested_method", result.output)
+
+    def test_lazy_collection_single_file_skips_others(self) -> None:
+        """Specifying a single file should only parse that file.
+
+        Other files with syntax errors should not cause collection to fail.
+        """
+        files = {
+            "test_target.py": textwrap.dedent("""
+                def test_in_target():
+                    assert True
+            """),
+            "test_broken.py": textwrap.dedent("""
+                def test_broken():
+                    if True  # Missing colon - syntax error
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path, paths=["test_target.py"])
+
+            self.assertEqual(result.returncode, 0)
+            assert_tests_found(result.output_lines, ["test_target.py::test_in_target"])
+            assert_patterns_not_found(result.output, ["test_broken.py"])
+            self.assertEqual(get_collected_count(result.output), 1)
+
+    def test_lazy_collection_directory(self) -> None:
+        """Specifying a directory should only parse files in that directory."""
+        files = {
+            "unit/test_unit.py": "def test_unit(): pass",
+            "integration/test_integration.py": "def broken(:",  # Syntax error
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path, paths=["unit/"])
+
+            self.assertEqual(result.returncode, 0)
+            assert_tests_found(result.output_lines, ["test_unit.py::test_unit"])
+            assert_patterns_not_found(result.output, ["test_integration"])
+
+    def test_lazy_collection_multiple_paths(self) -> None:
+        """Multiple files and directories should only parse specified paths."""
+        files = {
+            "test_first.py": "def test_first(): pass",
+            "test_second.py": "def test_second(): pass",
+            "subdir/test_subdir.py": "def test_in_subdir(): pass",
+            "other/test_broken.py": "def broken(:",  # Syntax error
+        }
+
+        with create_test_project(files) as project_path:
+            # Test with multiple files
+            result = run_collection(project_path, paths=["test_first.py", "test_second.py"])
+            self.assertEqual(result.returncode, 0)
+            assert_tests_found(
+                result.output_lines,
+                ["test_first.py::test_first", "test_second.py::test_second"],
+            )
+            assert_patterns_not_found(result.output, ["test_broken", "test_subdir"])
+            self.assertEqual(get_collected_count(result.output), 2)
+
+            # Test with mixed file and directory
+            result = run_collection(project_path, paths=["test_first.py", "subdir/"])
+            self.assertEqual(result.returncode, 0)
+            assert_tests_found(
+                result.output_lines,
+                ["test_first.py::test_first", "test_subdir.py::test_in_subdir"],
+            )
+            assert_patterns_not_found(result.output, ["test_broken", "test_second"])
+            self.assertEqual(get_collected_count(result.output), 2)
+
+    def test_lazy_collection_nonexistent_path_fails(self) -> None:
+        """Nonexistent path should fail with error and exit code 4 (pytest behavior)."""
+        files = {
+            "test_exists.py": "def test_exists(): pass",
+            "subdir/test_subdir.py": "def test_in_subdir(): pass",
+        }
+
+        with create_test_project(files) as project_path:
+            # Single nonexistent file
+            result = run_collection(project_path, paths=["nonexistent.py"])
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("ERROR: file or directory not found:", result.output)
+            self.assertIn("nonexistent.py", result.output)
+
+            # Valid file + nonexistent file should still fail (pytest behavior)
+            result = run_collection(project_path, paths=["test_exists.py", "nonexistent.py"])
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("nonexistent.py", result.output)
+            # Should NOT collect from valid file
+            self.assertNotIn("collected", result.output)
+
+            # Nonexistent directory
+            result = run_collection(project_path, paths=["missing_dir/"])
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("missing_dir", result.output)
 
 
 if __name__ == "__main__":

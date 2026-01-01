@@ -1,6 +1,7 @@
 //! Collection error types.
 
 use std::fmt;
+use std::path::PathBuf;
 
 /// Result type for collection operations
 pub type CollectionResult<T> = Result<T, CollectionError>;
@@ -13,6 +14,7 @@ pub enum CollectionError {
     ParseError(String),
     ImportError(String),
     SkipError(String),
+    FileNotFound(PathBuf),
 }
 
 impl fmt::Display for CollectionError {
@@ -22,6 +24,9 @@ impl fmt::Display for CollectionError {
             Self::ParseError(e) => write!(f, "Parse error: {e}"),
             Self::ImportError(e) => write!(f, "Import error: {e}"),
             Self::SkipError(e) => write!(f, "Skip: {e}"),
+            Self::FileNotFound(path) => {
+                write!(f, "file or directory not found: {}", path.display())
+            }
         }
     }
 }
