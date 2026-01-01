@@ -49,11 +49,17 @@ pub struct NativeRunnerConfig {
     pub root_path: PathBuf,
     pub num_workers: usize,
     pub python_files: Vec<String>,
+    pub python_classes: Vec<String>,
 }
 
 /// Default pytest python_files patterns
 pub fn default_python_files() -> Vec<String> {
     vec!["test_*.py".into(), "*_test.py".into()]
+}
+
+/// Default pytest python_classes patterns
+pub fn default_python_classes() -> Vec<String> {
+    vec!["Test*".into()]
 }
 
 fn shard_files(files: Vec<PathBuf>, num_workers: usize) -> Vec<Vec<PathBuf>> {
@@ -189,6 +195,7 @@ fn run_worker(
     root: &Path,
     output_file: &Path,
     files: &[PathBuf],
+    python_classes: &[String],
 ) -> Result<(), String> {
     let mut cmd = Command::new(python);
     cmd.arg("-m")
@@ -198,6 +205,15 @@ fn run_worker(
         .arg("--out")
         .arg(output_file);
 
+    if !python_classes.is_empty() {
+        cmd.arg("--python-classes");
+        for pattern in python_classes {
+            cmd.arg(pattern);
+        }
+    }
+
+    // Use -- to separate options from positional file arguments
+    cmd.arg("--");
     for file in files {
         cmd.arg(file);
     }
@@ -263,7 +279,10 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         let python = config.python_executable.clone();
         let root = config.root_path.clone();
         let output_file = output_file.clone();
-        let handle = thread::spawn(move || run_worker(i, &python, &root, &output_file, &shard));
+        let python_classes = config.python_classes.clone();
+        let handle = thread::spawn(move || {
+            run_worker(i, &python, &root, &output_file, &shard, &python_classes)
+        });
         handles.push(handle);
     }
 

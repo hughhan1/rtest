@@ -30,6 +30,12 @@ def main() -> int:
         help="Output JSONL file path for results",
     )
     parser.add_argument(
+        "--python-classes",
+        nargs="+",
+        default=["Test*"],
+        help="Patterns for test class names (default: Test*)",
+    )
+    parser.add_argument(
         "files",
         nargs="+",
         type=Path,
@@ -42,11 +48,13 @@ def main() -> int:
     root: Path = args.root
     output_file: Path = args.out
     test_files: list[Path] = args.files
+    python_classes: list[str] = args.python_classes
 
     return run_tests(
         root=root,
         output_file=output_file,
         test_files=test_files,
+        python_classes=python_classes,
     )
 
 
