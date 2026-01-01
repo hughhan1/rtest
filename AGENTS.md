@@ -141,7 +141,7 @@ uv run ruff check python/ tests/ scripts/
 uv run ruff check --fix python/ tests/ scripts/
 
 # Type checking
-uv run mypy python/ tests/ scripts/
+uv run ty check python/ tests/ scripts/
 
 # Dead code detection
 uv run vulture python/ tests/ scripts/ --min-confidence 80
@@ -303,7 +303,7 @@ rtest/
 
 ### Python Best Practices
 
-- **Typing**: Strict mypy configuration, type all public interfaces
+- **Typing**: Type checking with ty, type all public interfaces
 - **Style**: ruff formatting with 120 char line length
 - **Testing**: pytest with descriptive test names and good coverage
 - **Documentation**: Google-style docstrings for public APIs
