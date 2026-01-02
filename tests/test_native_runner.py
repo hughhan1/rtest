@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import rtest
+from rtest.exit_code import ExitCodeValues
 from rtest.mark import PARAMETRIZE_DEPRECATION_MSG, SKIP_DEPRECATION_MSG
 
 FIXTURES_DIR = Path(__file__).parent.parent / "test_utils" / "fixtures"
@@ -324,7 +325,7 @@ class TestWorkerExitCode:
                 capture_output=True,
                 text=True,
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
 
 
 class TestNativeRunnerCLI:
@@ -343,7 +344,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "test_one" in result.stdout
             assert "test_two" in result.stdout
 
@@ -360,7 +361,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "PASSED" in result.stdout
 
     def test_native_runner_fails_with_failing_tests(self) -> None:
@@ -376,7 +377,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 1
+            assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "FAILED" in result.stdout
 
     def test_native_runner_with_multiple_workers(self) -> None:
@@ -394,7 +395,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "4 passed" in result.stdout
 
     def test_native_runner_with_parametrize(self) -> None:
@@ -410,7 +411,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "3 passed" in result.stdout
 
     def test_native_runner_with_skip(self) -> None:
@@ -429,7 +430,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "1 passed" in result.stdout
             assert "1 skipped" in result.stdout
 
@@ -443,7 +444,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "No tests found" in result.stdout
 
     def test_native_runner_class_tests(self) -> None:
@@ -459,7 +460,7 @@ class TestNativeRunnerCLI:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "1 passed" in result.stdout
 
 
@@ -570,7 +571,7 @@ class TestPythonFilesConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "Running 2 test file(s)" in result.stdout
             assert "2 passed" in result.stdout
 
@@ -589,7 +590,7 @@ class TestPythonFilesConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "Running 2 test file(s)" in result.stdout
             assert "check_other.py" not in result.stdout
 
@@ -621,7 +622,7 @@ class TestPythonClassesConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             # Should find CheckValidation and UserSuite, but NOT TestStandard
             assert "2 passed" in result.stdout
 
@@ -644,7 +645,7 @@ class TestPythonClassesConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             # Should only find TestValid with default Test* pattern
             assert "1 passed" in result.stdout
 
@@ -674,7 +675,7 @@ class TestPythonClassesConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             # Should match MyTestCase, TestStandard, SuiteTestRunner but NOT NoMatch
             assert "3 passed" in result.stdout
 
@@ -703,7 +704,7 @@ class TestPythonFunctionsConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "2 passed" in result.stdout
 
     def test_default_python_functions_pattern(self) -> None:
@@ -720,7 +721,7 @@ class TestPythonFunctionsConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "1 passed" in result.stdout
 
     def test_python_functions_in_classes(self) -> None:
@@ -745,7 +746,7 @@ class TestPythonFunctionsConfiguration:
                 cwd=str(tmp_path),
             )
 
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "2 passed" in result.stdout
 
 
@@ -773,5 +774,5 @@ class TestSysPathBehavior:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "1 passed" in result.stdout
