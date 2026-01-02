@@ -23,12 +23,11 @@ import itertools
 import warnings
 from dataclasses import dataclass
 from types import FunctionType, MappingProxyType
-from typing import Callable, NamedTuple, Sequence, TypeVar, Union
+from typing import Callable, NamedTuple, Sequence, TypeVar
 
 # TypeVar for decorators that preserve function signatures
 # The bound includes "type" to support decorating classes as well as functions
-# Note: Union is required here (not |) because TypeVar bounds are evaluated at runtime
-F = TypeVar("F", bound=Union[Callable[..., object], type])
+F = TypeVar("F", bound=Callable[..., object] | type)
 
 # Deprecation warning messages for pytest marker compatibility
 PARAMETRIZE_DEPRECATION_MSG = (
