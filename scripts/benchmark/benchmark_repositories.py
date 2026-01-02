@@ -212,7 +212,7 @@ class ConfigLoader:
                     url=repo_data["url"],
                     category=repo_data["category"],
                     test_dir=repo_data["test_dir"],
-                    setup=SetupOptions.from_dict(setup_data),
+                    setup=SetupOptions.from_dict(cast(SetupConfigData, setup_data)),
                     python_version=repo_data.get("python_version", "3.9"),
                 )
             )
