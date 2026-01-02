@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use std::env;
 use std::path::PathBuf;
 
-use crate::cli::{Args, Runner};
+use crate::cli::{exit_codes, Args, Runner};
 use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
 use crate::{
@@ -23,11 +23,11 @@ fn handle_collection_error(e: CollectionError) -> ! {
     match e {
         CollectionError::FileNotFound(path) => {
             eprintln!("ERROR: file or directory not found: {}", path.display());
-            std::process::exit(4);
+            std::process::exit(exit_codes::USAGE_ERROR);
         }
         e => {
             eprintln!("FATAL: {e}");
-            std::process::exit(1);
+            std::process::exit(exit_codes::TESTS_FAILED);
         }
     }
 }
@@ -161,14 +161,14 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
     if let Err(e) = args.validate_dist() {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        std::process::exit(exit_codes::TESTS_FAILED);
     }
 
     let num_processes = match args.get_num_processes() {
         Ok(n) => n,
         Err(e) => {
             eprintln!("Error: {e}");
-            std::process::exit(1);
+            std::process::exit(exit_codes::TESTS_FAILED);
         }
     };
     let worker_count = determine_worker_count(num_processes, args.maxprocesses);
@@ -177,7 +177,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("{e}");
-            std::process::exit(1);
+            std::process::exit(exit_codes::TESTS_FAILED);
         }
     };
 
@@ -196,17 +196,17 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
             // Exit early if there are collection errors
             if !errors.errors.is_empty() {
-                std::process::exit(1);
+                std::process::exit(exit_codes::TESTS_FAILED);
             }
 
             if test_nodes.is_empty() {
                 println!("No tests found.");
-                std::process::exit(0);
+                std::process::exit(exit_codes::OK);
             }
 
             // Exit after collection if --collect-only flag is set
             if args.collect_only {
-                std::process::exit(0);
+                std::process::exit(exit_codes::OK);
             }
 
             // Read pytest configuration for collection patterns
@@ -255,17 +255,17 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
             // Exit early if there are collection errors to prevent test execution
             if !errors.errors.is_empty() {
-                std::process::exit(1);
+                std::process::exit(exit_codes::TESTS_FAILED);
             }
 
             if test_nodes.is_empty() {
                 println!("No tests found.");
-                std::process::exit(0);
+                std::process::exit(exit_codes::OK);
             }
 
             // Exit after collection if --collect-only flag is set
             if args.collect_only {
-                std::process::exit(0);
+                std::process::exit(exit_codes::OK);
             }
 
             let exit_code = if worker_count == 1 || args.dist == "no" {

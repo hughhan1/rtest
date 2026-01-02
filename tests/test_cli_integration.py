@@ -5,6 +5,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from rtest.exit_code import ExitCodeValues
+
 
 class TestCLIBasics:
     """Basic CLI tests."""
@@ -15,7 +17,7 @@ class TestCLIBasics:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0
+        assert result.returncode == ExitCodeValues.OK
         assert "Usage:" in result.stdout
         assert "--runner" in result.stdout
         assert "--env" in result.stdout
@@ -27,7 +29,7 @@ class TestCLIBasics:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0
+        assert result.returncode == ExitCodeValues.OK
         assert "rtest" in result.stdout.lower()
 
     def test_invalid_flag_rejected(self) -> None:
@@ -43,6 +45,7 @@ class TestCLIErrorHandling:
     """Tests for error handling."""
 
     def test_nonexistent_file(self) -> None:
+        """Nonexistent file should return exit code 4 (matching pytest behavior)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             result = subprocess.run(
@@ -51,8 +54,8 @@ class TestCLIErrorHandling:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
-            assert "No tests found." in result.stdout
+            assert result.returncode == ExitCodeValues.USAGE_ERROR
+            assert "file or directory not found" in result.stderr
 
     def test_invalid_dist_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -81,7 +84,7 @@ class TestNativeRunnerEndToEnd:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 1
+            assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "1 passed" in result.stdout
             assert "1 failed" in result.stdout
 
@@ -94,7 +97,7 @@ class TestNativeRunnerEndToEnd:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 0
+            assert result.returncode == ExitCodeValues.OK
             assert "No tests" in result.stdout
 
     def test_native_runner_import_error(self) -> None:
@@ -109,5 +112,5 @@ class TestNativeRunnerEndToEnd:
                 text=True,
                 cwd=str(tmp_path),
             )
-            assert result.returncode == 1
+            assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "ModuleNotFoundError" in result.stdout

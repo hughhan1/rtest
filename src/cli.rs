@@ -1,5 +1,16 @@
 use clap::{Parser, ValueEnum};
 
+/// Exit codes for the CLI.
+/// These follow standard conventions and match pytest's exit codes where applicable.
+pub mod exit_codes {
+    /// Successful execution.
+    pub const OK: i32 = 0;
+    /// Tests were collected and run but some failed.
+    pub const TESTS_FAILED: i32 = 1;
+    /// File or directory not found.
+    pub const USAGE_ERROR: i32 = 4;
+}
+
 /// Test runner backend to use.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum Runner {

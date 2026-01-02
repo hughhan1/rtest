@@ -17,6 +17,7 @@ from test_helpers import (
 )
 
 from rtest._rtest import run_tests
+from rtest.exit_code import ExitCodeValues
 
 
 class TestCollectionIntegration(unittest.TestCase):
@@ -1406,7 +1407,7 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertEqual(get_collected_count(result.output), 2)
 
     def test_lazy_collection_nonexistent_path_fails(self) -> None:
-        """Nonexistent path should fail with error and exit code 4 (pytest behavior)."""
+        """Nonexistent path should fail with error and USAGE_ERROR exit code."""
         files = {
             "test_exists.py": "def test_exists(): pass",
             "subdir/test_subdir.py": "def test_in_subdir(): pass",
@@ -1415,20 +1416,20 @@ class TestCollectionIntegration(unittest.TestCase):
         with create_test_project(files) as project_path:
             # Single nonexistent file
             result = run_collection(project_path, paths=["nonexistent.py"])
-            self.assertEqual(result.returncode, 4)
+            self.assertEqual(result.returncode, ExitCodeValues.USAGE_ERROR)
             self.assertIn("ERROR: file or directory not found:", result.output)
             self.assertIn("nonexistent.py", result.output)
 
-            # Valid file + nonexistent file should still fail (pytest behavior)
+            # Valid file + nonexistent file should still fail
             result = run_collection(project_path, paths=["test_exists.py", "nonexistent.py"])
-            self.assertEqual(result.returncode, 4)
+            self.assertEqual(result.returncode, ExitCodeValues.USAGE_ERROR)
             self.assertIn("nonexistent.py", result.output)
             # Should NOT collect from valid file
             self.assertNotIn("collected", result.output)
 
             # Nonexistent directory
             result = run_collection(project_path, paths=["missing_dir/"])
-            self.assertEqual(result.returncode, 4)
+            self.assertEqual(result.returncode, ExitCodeValues.USAGE_ERROR)
             self.assertIn("missing_dir", result.output)
 
 
