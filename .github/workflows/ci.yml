@@ -46,9 +46,9 @@ jobs:
     - name: Install dependencies in virtual environment
       run: |
         if [ "${{ runner.os }}" = "Windows" ]; then
-          .venv\\Scripts\\pip install maturin pytest
+          .venv\\Scripts\\pip install maturin
         else
-          .venv/bin/pip install maturin[patchelf] pytest
+          .venv/bin/pip install maturin[patchelf]
         fi
       shell: bash
     
@@ -79,9 +79,9 @@ jobs:
     - name: Run Python integration tests
       run: |
         if [ "${{ runner.os }}" = "Windows" ]; then
-          .venv\\Scripts\\pytest tests/ -vvv --log-level=debug -s --cache-clear
+          .venv\\Scripts\\rtest tests/ --runner native -n 1
         else
-          .venv/bin/pytest tests/ -vvv --log-level=debug -s --cache-clear
+          .venv/bin/rtest tests/ --runner native -n 1
         fi
       shell: bash
 

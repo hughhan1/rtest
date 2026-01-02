@@ -12,9 +12,7 @@ description = "Python test runner built in Rust"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-dependencies = [
-    "pytest>=6.0",
-]
+dependencies = []
 authors = [
     {name = "Hugh Han", email = "hughhan1@gmail.com"},
 ]
@@ -42,7 +40,11 @@ Issues = "https://github.com/hughhan1/rtest/issues"
 rtest = "rtest.__main__:main"
 
 [project.optional-dependencies]
+pytest = [
+    "pytest==8.3.5",
+]
 dev = [
+    "pytest==8.3.5",
     "ruff==0.14.10",
     "ty==0.0.8",
     "pyyaml>=6.0",
@@ -79,6 +81,7 @@ module-name = "rtest._rtest"
 [dependency-groups]
 dev = [
     "maturin>=1.9.0",
+    "pytest==8.3.5",
     "ty==0.0.8",
     "ruff==0.14.10",
     "pyyaml>=6.0",
