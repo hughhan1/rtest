@@ -4,8 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/rtest.svg)](https://pypi.org/project/rtest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python test runner built with Rust, currently supporting high-performance test-collection, with the goal of being a
-drop-in replacement for [`pytest`](https://pytest.org).
+A Python test runner built with Rust, featuring high-performance test collection and parallel test execution.
 
 > **⚠️ Development Status**: This project is in early development (v0.0.x). Expect bugs, breaking changes, and evolving
 > features as we work toward stability.
@@ -47,16 +46,16 @@ _Requires Python 3.10+_
 # Collect tests (fast AST-based collection)
 rtest --collect-only
 
-# Run tests using pytest as executor (default)
-rtest
-
-# Run tests using native runner (no pytest dependency)
+# Run tests with native runner
 rtest --runner native
+
+# Run tests in parallel (4 workers)
+rtest --runner native -n 4
 ```
 
 ### Native Runner
 
-The native runner (`--runner native`) executes tests without requiring pytest, using rtest's own decorators:
+The native runner (`--runner native`) executes tests using rtest's own decorators:
 
 ```python
 import rtest
@@ -73,13 +72,20 @@ def test_skipped():
 The native runner respects `python_files`, `python_classes`, and `python_functions` patterns from your
 `pyproject.toml` under `[tool.pytest.ini_options]`.
 
-For compatibility, the native runner also supports `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators,
-though `@rtest.mark.*` decorators are preferred.
+For compatibility, `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators are also supported.
 
 ## Roadmap
 
-Support executing tests, with parallelization built out of the box (bypassing
-[`pytest-xdist`](https://pypi.org/project/pytest-xdist/)). Currently, this works for some cases, but is not yet stable.
+- **Fixtures** - `@rtest.fixture` with function/class/module scopes and dependency resolution
+- **conftest.py support** - Fixture discovery across directory hierarchy
+- **Distribution modes** - Group tests by module/class, optimized scheduling algorithms
+- **Dynamic `@rtest.mark.cases` evaluation** - Support variables, function calls, and comprehensions in decorator arguments
+- **Built-in assertions** - `rtest.raises()` and other assertion helpers
+- **Additional markers** - `@rtest.mark.xfail`, `@rtest.mark.skipif`
+- **Test selection** - `-k` expression filtering, `--last-failed`, `--failed-first`
+- **Better error formatting** - Rich diffs, colorized output, traceback filtering
+- **Async test support** - Native `async def test_*()` handling
+- **Watch mode** - Re-run tests automatically on file changes
 
 ## Known Limitations
 
