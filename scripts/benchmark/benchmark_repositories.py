@@ -19,7 +19,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypedDict, Union, cast
+from typing import TypedDict, cast
 
 import yaml
 
@@ -87,7 +87,7 @@ class HyperfineResult:
 
     mean: float
     stddev: float
-    times: List[float]
+    times: list[float]
 
 
 @dataclass
@@ -98,7 +98,7 @@ class BenchmarkResult:
     benchmark: str
     pytest: HyperfineResult
     rtest: HyperfineResult
-    speedup: Optional[float]
+    speedup: float | None
 
 
 @dataclass
@@ -108,17 +108,17 @@ class ErrorResult:
     repository: str
     benchmark: str
     error: str
-    command: Optional[str] = None
-    exit_code: Optional[int] = None
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+    command: str | None = None
+    exit_code: int | None = None
+    stdout: str | None = None
+    stderr: str | None = None
 
 
 class ConfigLoader:
     """Handles loading and validation of configuration files."""
 
     @staticmethod
-    def load_config(config_path: Path) -> Tuple[List[RepositoryConfig], Dict[str, BenchmarkConfig]]:
+    def load_config(config_path: Path) -> tuple[list[RepositoryConfig], dict[str, BenchmarkConfig]]:
         """Load and validate configuration from YAML file."""
         if not config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -134,8 +134,8 @@ class ConfigLoader:
             raise ValueError("Configuration must be a dictionary")
 
         # Validate and convert repositories
-        repositories: List[RepositoryConfig] = []
-        raw_repos: List[RepositoryData] = raw_data.get("repositories", [])
+        repositories: list[RepositoryConfig] = []
+        raw_repos: list[RepositoryData] = raw_data.get("repositories", [])
         if not isinstance(raw_repos, list):
             raise ValueError("Repositories must be a list")
 
@@ -155,8 +155,8 @@ class ConfigLoader:
             )
 
         # Validate and convert benchmark configs
-        benchmark_configs: Dict[str, BenchmarkConfig] = {}
-        raw_benchmarks: Dict[str, BenchmarkConfigData] = raw_data.get("benchmark_configs", {})
+        benchmark_configs: dict[str, BenchmarkConfig] = {}
+        raw_benchmarks: dict[str, BenchmarkConfigData] = raw_data.get("benchmark_configs", {})
         if not isinstance(raw_benchmarks, dict):
             raise ValueError("Benchmark configs must be a dictionary")
 
@@ -176,7 +176,7 @@ class ConfigLoader:
         return (repositories, benchmark_configs)
 
 
-def run_command(cmd: List[str], cwd: str, timeout: int = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess[str]:
+def run_command(cmd: list[str], cwd: str, timeout: int = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess[str]:
     """Execute a command and return the result."""
     logger.debug(f"Running command: {' '.join(cmd)} in {cwd}")
     try:
@@ -196,7 +196,7 @@ class RepositoryManager:
         self.temp_dir = temp_dir
         self.project_root = project_root
 
-    def clone_repository(self, repo_config: RepositoryConfig) -> Optional[Path]:
+    def clone_repository(self, repo_config: RepositoryConfig) -> Path | None:
         """Clone a repository to temporary directory."""
         repo_path = self.temp_dir / repo_config.name
 
@@ -291,7 +291,7 @@ class HyperfineRunner:
         benchmark_config: BenchmarkConfig,
         show_output: bool = False,
         ignore_failures: bool = False,
-    ) -> Union[BenchmarkResult, ErrorResult]:
+    ) -> BenchmarkResult | ErrorResult:
         """Run a benchmark using hyperfine."""
         test_dir_path = repo_path / repo_config.test_dir
         if not test_dir_path.exists():
@@ -376,9 +376,7 @@ class HyperfineRunner:
         cmd_parts = [executable] + args.split() + [test_dir]
         return " ".join(cmd_parts)
 
-    def _validate_command(
-        self, cmd: str, cwd: Path, timeout: int = 60
-    ) -> Tuple[bool, Optional[str], Optional[str], int]:
+    def _validate_command(self, cmd: str, cwd: Path, timeout: int = 60) -> tuple[bool, str | None, str | None, int]:
         """Run command once to validate it works before benchmarking.
 
         Returns: (success, stdout, stderr, exit_code)
@@ -396,7 +394,7 @@ class HyperfineRunner:
         json_output: str,
         show_output: bool = False,
         ignore_failures: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """Build hyperfine command."""
         cmd = [
             "hyperfine",
@@ -424,7 +422,7 @@ class HyperfineRunner:
 
     def _parse_results(
         self, repo_path: Path, json_output: str, repo_name: str, benchmark_desc: str
-    ) -> Union[BenchmarkResult, ErrorResult]:
+    ) -> BenchmarkResult | ErrorResult:
         """Parse hyperfine JSON output."""
         json_path = repo_path / json_output
 
@@ -455,13 +453,13 @@ class HyperfineRunner:
             pytest_result = HyperfineResult(
                 mean=float(pytest_mean),
                 stddev=float(pytest_stddev),
-                times=cast(List[float], pytest_times),
+                times=cast(list[float], pytest_times),
             )
 
             rtest_result = HyperfineResult(
                 mean=float(rtest_mean),
                 stddev=float(rtest_stddev),
-                times=cast(List[float], rtest_times),
+                times=cast(list[float], rtest_times),
             )
 
             speedup = pytest_result.mean / rtest_result.mean if rtest_result.mean > 0 else None
@@ -484,7 +482,7 @@ class ResultFormatter:
     """Formats and displays benchmark results."""
 
     @staticmethod
-    def print_summary(results: List[Union[BenchmarkResult, ErrorResult]]) -> None:
+    def print_summary(results: list[BenchmarkResult | ErrorResult]) -> None:
         """Print a formatted summary of results."""
         print("\n" + "=" * 60)
         print("BENCHMARK SUMMARY")
@@ -514,7 +512,7 @@ class ResultFormatter:
                 print(f"  {result.benchmark}: Unable to calculate speedup")
 
     @staticmethod
-    def save_results(results: List[Union[BenchmarkResult, ErrorResult]], output_path: Path) -> None:
+    def save_results(results: list[BenchmarkResult | ErrorResult], output_path: Path) -> None:
         """Save results to JSON file."""
         serializable_results = []
         for result in results:
@@ -578,8 +576,8 @@ class BenchmarkOrchestrator:
         logger.info(f"Results output directory: {self.output_dir}")
 
     def run_benchmarks(
-        self, repositories: Optional[List[str]] = None, benchmark_types: Optional[List[str]] = None
-    ) -> List[Union[BenchmarkResult, ErrorResult]]:
+        self, repositories: list[str] | None = None, benchmark_types: list[str] | None = None
+    ) -> list[BenchmarkResult | ErrorResult]:
         """Run benchmarks on specified repositories."""
         # Filter repositories
         repos = self.repositories
@@ -591,7 +589,7 @@ class BenchmarkOrchestrator:
         if benchmark_types:
             benchmarks = {k: v for k, v in benchmarks.items() if k in benchmark_types}
 
-        results: List[Union[BenchmarkResult, ErrorResult]] = []
+        results: list[BenchmarkResult | ErrorResult] = []
         for repo in repos:
             logger.info(f"\n{'=' * 50}\nBenchmarking {repo.name}\n{'=' * 50}")
 
