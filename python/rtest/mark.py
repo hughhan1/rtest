@@ -19,8 +19,6 @@ Example usage:
         pass
 """
 
-from __future__ import annotations
-
 import itertools
 import warnings
 from dataclasses import dataclass

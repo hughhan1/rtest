@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Aggregate benchmark results from multiple repositories into a single JSON file."""
 
-from __future__ import annotations
-
 import argparse
 import json
 from glob import glob

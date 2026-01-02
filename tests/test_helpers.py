@@ -1,7 +1,5 @@
 """Common test helper functions for rtest tests."""
 
-from __future__ import annotations
-
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager

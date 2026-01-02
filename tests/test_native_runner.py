@@ -1,7 +1,5 @@
 """Integration tests for the native rtest runner."""
 
-from __future__ import annotations
-
 import json
 import subprocess
 import sys
