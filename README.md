@@ -97,7 +97,7 @@ The native runner (`--runner native`) executes tests without requiring pytest, u
 ```python
 import rtest
 
-@rtest.mark.parametrize("value", [1, 2, 3])
+@rtest.mark.cases("value", [1, 2, 3])
 def test_example(value):
     assert value > 0
 
@@ -108,6 +108,9 @@ def test_skipped():
 
 The native runner respects `python_files`, `python_classes`, and `python_functions` patterns from your
 `pyproject.toml` under `[tool.pytest.ini_options]`.
+
+For compatibility, the native runner also supports `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators,
+though `@rtest.mark.*` decorators are preferred.
 
 ## Roadmap
 

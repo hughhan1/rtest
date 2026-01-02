@@ -1,33 +1,91 @@
+# Repository configuration for benchmarking rtest vs pytest
+# Each repository specifies its specific setup requirements
+
 repositories:
-  # Web Frameworks
-  - name: "fastapi"
-    url: "https://github.com/tiangolo/fastapi"
+  # Flask - pallets web framework (mentioned in README benchmarks)
+  # Uses flit backend with dependency-groups (PEP 735)
+  # uv sync --all-groups installs test deps automatically
+  - name: "flask"
+    url: "https://github.com/pallets/flask"
     category: "web_framework"
     test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
-      - "*_test.py"
-    
-  # HTTP Libraries
+    setup:
+      method: "uv_sync"
+      dependency_groups: []
+      extra_packages: []
+    python_version: "3.10"
+
+  # Click - pallets CLI library
+  # Uses flit backend with dependency-groups (PEP 735)
+  # uv sync --all-groups installs test deps automatically
+  - name: "click"
+    url: "https://github.com/pallets/click"
+    category: "cli_library"
+    test_dir: "tests"
+    setup:
+      method: "uv_sync"
+      dependency_groups: []
+      extra_packages: []
+    python_version: "3.10"
+
+  # httpx - async HTTP client (mentioned in README benchmarks)
+  # Uses hatchling backend with optional-dependencies (NO dependency-groups)
+  # Has requirements.txt with all test deps: pytest, trio, trustme, uvicorn, etc.
+  # Must use requirements_file method since no dependency-groups exist
   - name: "httpx"
     url: "https://github.com/encode/httpx"
     category: "http_library"
     test_dir: "tests"
-    test_patterns:
-      - "test_*.py"
-    
-    
+    setup:
+      method: "requirements_file"
+      dependency_groups: []
+      extra_packages: []
+    python_version: "3.9"
+
+  # Pydantic - data validation (mentioned in README benchmarks)
+  # Uses hatchling backend with dependency-groups (PEP 735)
+  # "dev" group contains pytest, pytest-mock, jsonschema, faker, etc.
+  # tests/pydantic_core/ requires: hypothesis, pytest-timeout, inline-snapshot
+  - name: "pydantic"
+    url: "https://github.com/pydantic/pydantic"
+    category: "data_validation"
+    test_dir: "tests"
+    setup:
+      method: "uv_sync"
+      dependency_groups: ["dev"]
+      extra_packages: ["hypothesis", "pytest-timeout", "inline-snapshot"]
+    python_version: "3.9"
+
+  # FastAPI - web framework
+  # Uses PDM backend with optional-dependencies (NO dependency-groups)
+  # Has requirements-tests.txt with all test deps including .[all] extras
+  # Must use requirements_file method since no dependency-groups exist
+  # Python 3.10+ needed due to urllib3 OpenSSL requirement
+  - name: "fastapi"
+    url: "https://github.com/tiangolo/fastapi"
+    category: "web_framework"
+    test_dir: "tests"
+    setup:
+      method: "requirements_file"
+      dependency_groups: []
+      extra_packages: []
+      requirements_file: "requirements-tests.txt"
+    python_version: "3.10"
 
 # Benchmark configurations
 benchmark_configs:
   collect_only:
     description: "Test discovery performance"
-    pytest_args: "--collect-only"
+    pytest_args: "--collect-only -q"
     rtest_args: "--collect-only"
     timeout: 300
-    
+
   execution:
     description: "Test execution performance"
     pytest_args: "--maxfail=3 -x"
     rtest_args: "--maxfail=3 -x"
-    timeout: 300
+    timeout: 600
+
+# Global settings
+settings:
+  validation_timeout: 120
