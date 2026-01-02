@@ -75,7 +75,7 @@ Summary
 pip install rtest
 ```
 
-_Requires Python 3.9+_
+_Requires Python 3.10+_
 
 ### Basic Usage
 
