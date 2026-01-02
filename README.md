@@ -29,6 +29,46 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 | [httpx](https://github.com/encode/httpx) | 1.71 s ± 0.76 s | 51 ms ± 5 ms | **33.53x** |
 | [pydantic](https://github.com/pydantic/pydantic) | 2.84 s ± 0.24 s | 121 ms ± 9 ms | **23.42x** |
 | [fastapi](https://github.com/tiangolo/fastapi) | 2.98 s ± 0.29 s | 107 ms ± 14 ms | **27.80x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 209 ms ± 20 ms | 28 ms ± 1 ms | **7.39x** |
+
+### Test Execution (`--runner native`)
+
+For repositories that don't rely on pytest fixtures or conftest.py, the native runner can execute tests directly:
+
+```bash
+hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
+  --command-name pytest --command-name rtest \
+  ".venv/bin/pytest tests" \
+  ".venv/bin/rtest --runner native tests"
+```
+
+| Repository | pytest | rtest | Speedup |
+|------------|--------|-------|---------|
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 17.96 s ± 2.17 s | 2.49 s ± 0.41 s | **7.20x** |
+
+> **Note**: Native runner execution benchmarks are limited to repositories that use simple test patterns (unittest.TestCase,
+> plain assertions) without pytest fixtures. Most real-world projects use fixtures and conftest.py, which require the
+> native runner's [fixtures support](https://github.com/hughhan1/rtest/issues/105) (in development).
+
+### Test Execution (`--runner pytest -n 4`)
+
+For repositories that use pytest fixtures and conftest.py, rtest can use pytest as the execution backend while still
+benefiting from fast Rust-based collection:
+
+```bash
+hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
+  --command-name pytest --command-name rtest \
+  ".venv/bin/pytest -n 4 tests" \
+  ".venv/bin/rtest --runner pytest -n 4 tests"
+```
+
+| Repository | pytest | rtest | Speedup |
+|------------|--------|-------|---------|
+| [flask](https://github.com/pallets/flask) | 2.04 s ± 0.20 s | 0.91 s ± 0.11 s | **2.24x** |
+| [click](https://github.com/pallets/click) | 2.78 s ± 0.64 s | 1.12 s ± 1.30 s | **2.48x** |
+
+> **Note**: The `--runner pytest` mode uses pytest for test execution, so all pytest features (fixtures, plugins, markers)
+> work normally. The speedup comes from rtest's faster test collection phase.
 
 ## Quick Start
 
