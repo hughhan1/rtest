@@ -82,6 +82,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def get_venv_executable(venv_path: Path, name: str) -> Path:
+    """Get path to an executable in a virtualenv, handling platform differences."""
+    bin_dir = "Scripts" if platform.system() == "Windows" else "bin"
+    return venv_path / bin_dir / name
+
+
 @dataclass
 class SetupOptions:
     """Configuration for repository setup."""
@@ -519,10 +525,8 @@ class RepositoryManager:
     def _validate_installation(self, repo_config: RepositoryConfig, repo_path: Path) -> bool:
         """Validate that pytest and rtest are installed and working."""
         venv_path = repo_path / ".venv"
-        bin_dir = "Scripts" if platform.system() == "Windows" else "bin"
-
-        pytest_exe = venv_path / bin_dir / "pytest"
-        rtest_exe = venv_path / bin_dir / "rtest"
+        pytest_exe = get_venv_executable(venv_path, "pytest")
+        rtest_exe = get_venv_executable(venv_path, "rtest")
 
         # Check executables exist
         if not pytest_exe.exists():
@@ -577,9 +581,8 @@ class HyperfineRunner:
 
         # Get executable paths
         venv_path = repo_path / ".venv"
-        bin_dir = "Scripts" if platform.system() == "Windows" else "bin"
-        pytest_executable = venv_path / bin_dir / "pytest"
-        rtest_executable = venv_path / bin_dir / "rtest"
+        pytest_executable = get_venv_executable(venv_path, "pytest")
+        rtest_executable = get_venv_executable(venv_path, "rtest")
 
         # Verify executables exist before benchmarking
         if not pytest_executable.exists():
