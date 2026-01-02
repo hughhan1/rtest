@@ -3,10 +3,9 @@
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TypedDict
-
-import tempfile
 
 import rtest
 from rtest.mark import PARAMETRIZE_DEPRECATION_MSG, SKIP_DEPRECATION_MSG
@@ -75,11 +74,10 @@ class TestParametrizeIntegration:
             single_param_results = [r for r in results if "::test_single_param[" in r["nodeid"]]
             assert len(single_param_results) == 3
 
-            # Check nodeids have correct format
+            # Check nodeids have correct format - extract param suffixes
             nodeids = [r["nodeid"] for r in single_param_results]
-            assert any(n.endswith("[0]") for n in nodeids)
-            assert any(n.endswith("[1]") for n in nodeids)
-            assert any(n.endswith("[2]") for n in nodeids)
+            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
+            assert suffixes == {"0", "1", "2"}
 
             # All should pass
             assert all(r["outcome"] == "passed" for r in single_param_results)
@@ -115,12 +113,10 @@ class TestParametrizeIntegration:
             assert len(stacked_results) == 4
             assert all(r["outcome"] == "passed" for r in stacked_results)
 
-            # Check case IDs are like "0-0", "0-1", "1-0", "1-1"
+            # Check case IDs are cartesian product - extract param suffixes
             nodeids = [r["nodeid"] for r in stacked_results]
-            assert any(n.endswith("[0-0]") for n in nodeids)
-            assert any(n.endswith("[0-1]") for n in nodeids)
-            assert any(n.endswith("[1-0]") for n in nodeids)
-            assert any(n.endswith("[1-1]") for n in nodeids)
+            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
+            assert suffixes == {"0-0", "0-1", "1-0", "1-1"}
 
     def test_explicit_ids(self) -> None:
         """Explicit ids are used in nodeids."""
@@ -135,8 +131,8 @@ class TestParametrizeIntegration:
 
             id_results = [r for r in results if "::test_with_ids[" in r["nodeid"]]
             nodeids = [r["nodeid"] for r in id_results]
-            assert any(n.endswith("[one]") for n in nodeids)
-            assert any(n.endswith("[two]") for n in nodeids)
+            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
+            assert suffixes == {"one", "two"}
 
     def test_runtime_evaluated_params(self) -> None:
         """Runtime-evaluated Python values work as parameters."""
@@ -399,7 +395,7 @@ class TestNativeRunnerCLI:
                 cwd=str(tmp_path),
             )
             assert result.returncode == 0
-            assert "4 passed" in result.stdout or "PASSED" in result.stdout
+            assert "4 passed" in result.stdout
 
     def test_native_runner_with_parametrize(self) -> None:
         """--runner native supports @rtest.mark.cases decorator."""
@@ -415,7 +411,7 @@ class TestNativeRunnerCLI:
                 cwd=str(tmp_path),
             )
             assert result.returncode == 0
-            assert "3 passed" in result.stdout or "PASSED" in result.stdout
+            assert "3 passed" in result.stdout
 
     def test_native_runner_with_skip(self) -> None:
         """--runner native supports @rtest.mark.skip decorator."""
@@ -695,7 +691,9 @@ class TestPythonFunctionsConfiguration:
 
             test_file = tmp_path / "test_functions.py"
             test_file.write_text(
-                "def check_validation(): assert True\n\ndef user_test(): assert True\n\ndef test_standard(): assert True\n"
+                "def check_validation(): assert True\n\n"
+                "def user_test(): assert True\n\n"
+                "def test_standard(): assert True\n"
             )
 
             result = subprocess.run(
@@ -749,3 +747,31 @@ class TestPythonFunctionsConfiguration:
 
             assert result.returncode == 0
             assert "2 passed" in result.stdout
+
+
+class TestSysPathBehavior:
+    """Tests for sys.path setup during test execution."""
+
+    def test_sibling_module_imports(self) -> None:
+        """Test files can import from sibling modules in the same directory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            # Create a helper module (not a test file)
+            helper = tmp_path / "helper_module.py"
+            helper.write_text("def helper_func(): return 42\n")
+
+            # Create a test file that imports from the sibling module
+            test_file = tmp_path / "test_uses_helper.py"
+            test_file.write_text(
+                "from helper_module import helper_func\n\ndef test_import_works():\n    assert helper_func() == 42\n"
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
+                capture_output=True,
+                text=True,
+                cwd=str(tmp_path),
+            )
+            assert result.returncode == 0
+            assert "1 passed" in result.stdout

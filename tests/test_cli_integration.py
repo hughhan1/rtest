@@ -16,10 +16,10 @@ class TestCLIBasics:
             text=True,
         )
         assert result.returncode == 0
-        assert "Usage" in result.stdout or "usage" in result.stdout
+        assert "Usage:" in result.stdout
         assert "--runner" in result.stdout
         assert "--env" in result.stdout
-        assert "-n" in result.stdout or "--numprocesses" in result.stdout
+        assert "-n" in result.stdout
 
     def test_version_shows_version(self) -> None:
         result = subprocess.run(
@@ -51,8 +51,8 @@ class TestCLIErrorHandling:
                 text=True,
                 cwd=str(tmp_path),
             )
-            combined = result.stdout + result.stderr
-            assert "No tests" in combined or "not found" in combined or result.returncode == 0
+            assert result.returncode == 0
+            assert "No tests found." in result.stdout
 
     def test_invalid_dist_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -110,5 +110,4 @@ class TestNativeRunnerEndToEnd:
                 cwd=str(tmp_path),
             )
             assert result.returncode == 1
-            combined = result.stdout + result.stderr
-            assert "error" in combined.lower()
+            assert "ModuleNotFoundError" in result.stdout
