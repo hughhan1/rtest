@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.0.38] - 2026-01-02
+
+### Added
+- **Lazy Collection**: Only parses files users explicitly specify instead of all test files, improving performance when running specific files/directories
+- **Nonexistent Path Handling**: Paths that don't exist now fail with exit code 4 (pytest compatibility) with message "ERROR: file or directory not found: <path>"
+
+### Changed
+- rtest's own test suite now uses the native runner instead of pytest
+- Updated Python code to use modern type syntax (`|` instead of `Union`, `| None` instead of `Optional`)
+- Overhauled benchmark script with per-repository configuration and execution benchmarks
+
+### Fixed
+- Native runner now adds test directories to `sys.path` before importing modules, fixing sibling imports like `from test_helpers import ...`
+
 ## [0.0.37] - 2026-01-01
 
 ### Added
@@ -25,5 +41,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Various clippy warnings resolved with improved design patterns
-
-## [Unreleased]
