@@ -312,7 +312,9 @@ class TestWorkerExitCode:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             skip_only = tmp_path / "test_skip_only.py"
-            skip_only.write_text('import rtest\n\n@rtest.mark.skip(reason="skip")\ndef test_skipped():\n    assert False\n')
+            skip_only.write_text(
+                'import rtest\n\n@rtest.mark.skip(reason="skip")\ndef test_skipped():\n    assert False\n'
+            )
             output_file = tmp_path / "results.jsonl"
             result = subprocess.run(
                 [
