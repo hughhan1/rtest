@@ -12,60 +12,24 @@ drop-in replacement for [`pytest`](https://pytest.org).
 
 ## Performance
 
-_Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with 20 runs, 3 warmup runs per
-measurement, on an M4 Macbook Pro with 14 cores and 48GB RAM._ **More sophisticated benchmarks will be implemented in
-the future.**
+### Test Collection (`--collect-only`)
 
-### Against the [`flask`](https://github.com/pallets/flask) Repository
+Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with the following command:
 
 ```bash
-hyperfine --command-name pytest --command-name rtest "pytest --collect-only" "rtest --collect-only" --warmup 3 --runs 20
-Benchmark 1: pytest
-  Time (mean ± σ):     229.9 ms ±   2.6 ms    [User: 184.5 ms, System: 37.4 ms]
-  Range (min … max):   226.0 ms … 235.4 ms    20 runs
-
-Benchmark 2: rtest
-  Time (mean ± σ):      35.8 ms ±   1.2 ms    [User: 18.1 ms, System: 10.7 ms]
-  Range (min … max):    34.2 ms …  40.3 ms    20 runs
-
-Summary
-  rtest ran
-    6.41 ± 0.23 times faster than pytest
+hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
+  --command-name pytest --command-name rtest \
+  ".venv/bin/pytest --collect-only -q tests" \
+  ".venv/bin/rtest --collect-only tests"
 ```
 
-### Against the [`httpx`](https://github.com/encode/httpx) Repository
-
-```bash
-hyperfine --command-name pytest --command-name rtest "pytest --collect-only" "rtest --collect-only" --warmup 3 --runs 20
-Benchmark 1: pytest
-  Time (mean ± σ):     310.1 ms ±  18.6 ms    [User: 259.3 ms, System: 42.6 ms]
-  Range (min … max):   291.0 ms … 344.4 ms    20 runs
-
-Benchmark 2: rtest
-  Time (mean ± σ):      20.6 ms ±   1.0 ms    [User: 12.5 ms, System: 5.5 ms]
-  Range (min … max):    18.6 ms …  21.9 ms    20 runs
-
-Summary
-  rtest ran
-   15.06 ± 1.15 times faster than pytest
-```
-
-### Against the [`pydantic`](https://github.com/pydantic/pydantic) Repository
-
-```bash
-hyperfine --command-name pytest --command-name rtest "pytest --collect-only" "rtest --collect-only" --warmup 3 --runs 20
-Benchmark 1: pytest
-  Time (mean ± σ):      2.777 s ±  0.031 s    [User: 2.598 s, System: 0.147 s]
-  Range (min … max):    2.731 s …  2.864 s    20 runs
-
-Benchmark 2: rtest
-  Time (mean ± σ):      61.2 ms ±   1.1 ms    [User: 40.1 ms, System: 14.4 ms]
-  Range (min … max):    60.1 ms …  64.2 ms    20 runs
-
-Summary
-  rtest ran
-   45.39 ± 0.95 times faster than pytest
-```
+| Repository | pytest | rtest | Speedup |
+|------------|--------|-------|---------|
+| [flask](https://github.com/pallets/flask) | 421 ms ± 12 ms | 43 ms ± 3 ms | **9.81x** |
+| [click](https://github.com/pallets/click) | 570 ms ± 341 ms | 86 ms ± 8 ms | **6.61x** |
+| [httpx](https://github.com/encode/httpx) | 1.71 s ± 0.76 s | 51 ms ± 5 ms | **33.53x** |
+| [pydantic](https://github.com/pydantic/pydantic) | 2.84 s ± 0.24 s | 121 ms ± 9 ms | **23.42x** |
+| [fastapi](https://github.com/tiangolo/fastapi) | 2.98 s ± 0.29 s | 107 ms ± 14 ms | **27.80x** |
 
 ## Quick Start
 

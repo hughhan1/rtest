@@ -32,6 +32,7 @@ repositories:
   # Uses hatchling backend with optional-dependencies (NO dependency-groups)
   # Has requirements.txt with all test deps: pytest, trio, trustme, uvicorn, etc.
   # Must use requirements_file method since no dependency-groups exist
+  # Python 3.10+ required because rtest requires Python>=3.10
   - name: "httpx"
     url: "https://github.com/encode/httpx"
     category: "http_library"
@@ -40,7 +41,7 @@ repositories:
       method: "requirements_file"
       dependency_groups: []
       extra_packages: []
-    python_version: "3.9"
+    python_version: "3.10"
 
   # Pydantic - data validation (mentioned in README benchmarks)
   # Uses hatchling backend with dependency-groups (PEP 735)
@@ -79,12 +80,6 @@ benchmark_configs:
     pytest_args: "--collect-only -q"
     rtest_args: "--collect-only"
     timeout: 300
-
-  execution:
-    description: "Test execution performance"
-    pytest_args: "--maxfail=3 -x"
-    rtest_args: "--maxfail=3 -x"
-    timeout: 600
 
 # Global settings
 settings:
