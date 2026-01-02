@@ -280,6 +280,12 @@ def run_tests(
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
+    # Add all test directories to sys.path for sibling imports
+    test_dirs = {str(f.parent.resolve()) for f in test_files}
+    for test_dir in sorted(test_dirs):
+        if test_dir not in sys.path:
+            sys.path.insert(0, test_dir)
+
     all_test_cases: list[TestCase] = []
     import_errors: list[TestResult] = []
     loaded_modules: list[str] = []
