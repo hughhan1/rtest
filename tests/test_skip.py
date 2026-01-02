@@ -1,7 +1,5 @@
 """Unit tests for rtest skip functionality."""
 
-from __future__ import annotations
-
 from rtest.mark import ParametrizeSpec, mark
 
 

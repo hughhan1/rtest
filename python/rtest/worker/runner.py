@@ -1,7 +1,5 @@
 """Test runner implementation for rtest worker."""
 
-from __future__ import annotations
-
 import contextlib
 import fnmatch
 import importlib.util

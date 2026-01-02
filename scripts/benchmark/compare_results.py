@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Compare benchmark results between baseline and current run."""
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys
