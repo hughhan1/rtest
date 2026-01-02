@@ -230,7 +230,7 @@ jobs:
     
     - name: Run benchmark for ${{ matrix.repository }}
       run: |
-        uv run python scripts/benchmark/benchmark_repositories.py --repositories ${{ matrix.repository }} --collect-only
+        uv run python scripts/benchmark/benchmark_repositories.py --source local --repositories ${{ matrix.repository }} --collect-only
     
     - name: Upload results
       uses: actions/upload-artifact@v4

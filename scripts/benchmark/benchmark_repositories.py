@@ -394,7 +394,7 @@ class RepositoryManager:
 
         if result.returncode != 0:
             # Fallback: try without --frozen if lockfile doesn't exist
-            logger.warning(f"[DEPS] uv sync --frozen failed, trying without --frozen")
+            logger.warning("[DEPS] uv sync --frozen failed, trying without --frozen")
             cmd = ["uv", "sync"]
             if repo_config.setup.dependency_groups:
                 for group in repo_config.setup.dependency_groups:
@@ -717,7 +717,6 @@ class HyperfineRunner:
                 # hyperfine uses "command" field for the actual command
                 # and we can match by our --command-name labels
                 command_name = result.get("command", "")
-                parameter_name = result.get("parameter", "")
 
                 # Check if this result matches pytest or rtest
                 # hyperfine stores our --command-name in the result
@@ -771,7 +770,7 @@ class HyperfineRunner:
             if json_path.exists():
                 json_path.unlink()
 
-    def _extract_hyperfine_result(self, data: dict) -> Union[HyperfineResult, str]:
+    def _extract_hyperfine_result(self, data: dict) -> HyperfineResult | str:
         """Extract HyperfineResult from hyperfine data dict. Returns error string on failure."""
         mean = data.get("mean")
         stddev = data.get("stddev")
@@ -787,7 +786,7 @@ class HyperfineRunner:
         return HyperfineResult(
             mean=float(mean),
             stddev=float(stddev),
-            times=cast(List[float], times),
+            times=cast(list[float], times),
         )
 
 
