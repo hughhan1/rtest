@@ -73,6 +73,38 @@ repositories:
       requirements_file: "requirements-tests.txt"
     python_version: "3.10"
 
+  # ===========================================================================
+  # Execution Benchmark Repositories
+  # These repos don't use pytest fixtures, making them suitable for rtest
+  # native runner execution benchmarks
+  # ===========================================================================
+
+  # more-itertools - iterator building blocks
+  # Uses hatchling backend, pure unittest.TestCase style tests
+  # No conftest.py or pytest fixtures - ideal for execution benchmarks
+  - name: "more-itertools"
+    url: "https://github.com/more-itertools/more-itertools"
+    category: "utility_library"
+    test_dir: "tests"
+    setup:
+      method: "uv_sync"
+      dependency_groups: []
+      extra_packages: []
+    python_version: "3.10"
+
+  # boltons - bags of Python utilities
+  # Uses setuptools, mostly simple class-based tests
+  # Note: Some tests use tmp_path fixture, so native runner execution fails
+  - name: "boltons"
+    url: "https://github.com/mahmoud/boltons"
+    category: "utility_library"
+    test_dir: "tests"
+    setup:
+      method: "uv_pip_install"
+      dependency_groups: []
+      extra_packages: []
+    python_version: "3.10"
+
 # Benchmark configurations
 benchmark_configs:
   collect_only:
@@ -81,6 +113,18 @@ benchmark_configs:
     rtest_args: "--collect-only"
     timeout: 300
 
+  # execution:
+  #   description: "Test execution performance"
+  #   pytest_args: ""
+  #   rtest_args: "--runner native"
+  #   timeout: 600
+
+  execution_pytest:
+    description: "Test execution with pytest runner"
+    pytest_args: "-n 4"
+    rtest_args: "--runner pytest -n 4"
+    timeout: 600
+
 # Global settings
 settings:
-  validation_timeout: 120
+  validation_timeout: 300

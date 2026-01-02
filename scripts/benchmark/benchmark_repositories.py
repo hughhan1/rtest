@@ -955,9 +955,8 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n"
         "  %(prog)s --source local --list-repos\n"
-        "  %(prog)s --source 0.0.37 --repositories fastapi flask\n"
-        "  %(prog)s --source local --collect-only\n"
-        "  %(prog)s --source 0.0.37 --repositories click --collect-only",
+        "  %(prog)s --source local --repositories flask click\n"
+        "  %(prog)s --source 0.0.37 --repositories fastapi",
     )
 
     parser.add_argument(
@@ -966,9 +965,6 @@ def parse_arguments() -> argparse.Namespace:
         help="rtest source: 'local' for project root, or a version number for PyPI (e.g., '0.0.37')",
     )
     parser.add_argument("--repositories", nargs="+", help="Specific repositories to benchmark")
-    parser.add_argument(
-        "--collect-only", action="store_true", help="Run only test collection benchmarks (skip execution)"
-    )
     parser.add_argument("--list-repos", action="store_true", help="List available repositories")
     parser.add_argument(
         "--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", help="Set logging level"
@@ -1011,9 +1007,8 @@ def main() -> None:
     try:
         orchestrator = BenchmarkOrchestrator(config_path, args.source, args.debug, args.ignore_failures)
 
-        # Run benchmarks
-        benchmark_types = ["collect_only"] if args.collect_only else ["collect_only", "execution"]
-        results = orchestrator.run_benchmarks(args.repositories, benchmark_types)
+        # Run all benchmark types defined in config
+        results = orchestrator.run_benchmarks(args.repositories)
         ResultFormatter.print_summary(results)
         filename = f"benchmark_results_{int(time.time())}.json"
         output_path = orchestrator.output_dir / filename
