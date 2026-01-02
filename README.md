@@ -153,53 +153,6 @@ warning: Cannot statically expand test cases for 'test.py::test_example': argval
 In these cases, test execution is still functionally equivalent - pytest automatically runs all parametrized variants
 when given the base function name.
 
-### Test Class Inheritance Collection
-
-When a test class inherits from another test class, `rtest` collects inherited test methods differently than `pytest`.
-While `pytest` shows inherited methods under each subclass that inherits them, `rtest` currently shows inherited methods
-only under the base class where they are defined. For example:
-
-```python
-# test_example.py
-class TestAddNumbers:
-    def test_add_positive_numbers(self):
-        pass
-
-    def test_add_negative_numbers(self):
-        pass
-
-# test_floating_numbers.py
-from tests.test_example import TestAddNumbers
-
-class TestAddFloatingNumbers(TestAddNumbers):
-    def test_add_simple_floats(self):
-        pass
-```
-
-**pytest collection shows:**
-
-```plaintext
-test_example.py::TestAddNumbers::test_add_positive_numbers
-test_example.py::TestAddNumbers::test_add_negative_numbers
-test_floating_numbers.py::TestAddNumbers::test_add_positive_numbers
-test_floating_numbers.py::TestAddNumbers::test_add_negative_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_positive_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_negative_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_simple_floats
-```
-
-**rtest collection shows:**
-
-```plaintext
-test_example.py::TestAddNumbers::test_add_positive_numbers
-test_example.py::TestAddNumbers::test_add_negative_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_positive_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_negative_numbers
-test_floating_numbers.py::TestAddFloatingNumbers::test_add_simple_floats
-```
-
-We believe this difference is desirable, in that `TestAddNumbers` isn't collected twice from different modules.
-
 ### Path Separator Handling
 
 `rtest` uses platform-specific path separators in test nodeids, while `pytest` normalizes all paths to use forward
