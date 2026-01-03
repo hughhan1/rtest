@@ -78,7 +78,7 @@ class TestParametrizeIntegration:
             # Check nodeids have correct format - extract param suffixes
             nodeids = [r["nodeid"] for r in single_param_results]
             suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
-            assert suffixes == {"0", "1", "2"}
+            assert suffixes == {"1", "2", "3"}
 
             # All should pass
             assert all(r["outcome"] == "passed" for r in single_param_results)
@@ -117,7 +117,7 @@ class TestParametrizeIntegration:
             # Check case IDs are cartesian product - extract param suffixes
             nodeids = [r["nodeid"] for r in stacked_results]
             suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
-            assert suffixes == {"0-0", "0-1", "1-0", "1-1"}
+            assert suffixes == {"1-10", "1-20", "2-10", "2-20"}
 
     def test_explicit_ids(self) -> None:
         """Explicit ids are used in nodeids."""

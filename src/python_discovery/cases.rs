@@ -414,7 +414,8 @@ fn expand_single_spec(spec: &CasesSpec) -> Vec<String> {
             .chain((ids.len()..count).map(|i| i.to_string()))
             .collect()
     } else {
-        (0..count).map(|i| i.to_string()).collect()
+        // Generate value-based IDs
+        spec.argvalues.iter().map(literal_to_id_string).collect()
     }
 }
 
@@ -468,7 +469,7 @@ mod tests {
             ],
             ids: None,
         };
-        assert_eq!(expand_single_spec(&spec), vec!["0", "1", "2"]);
+        assert_eq!(expand_single_spec(&spec), vec!["1", "2", "3"]);
     }
 
     #[test]
@@ -508,7 +509,7 @@ mod tests {
         ];
         let cases = expand_cases(&specs);
         let ids: Vec<&str> = cases.iter().map(|c| c.case_id.as_str()).collect();
-        assert_eq!(ids, vec!["0-0", "0-1", "1-0", "1-1"]);
+        assert_eq!(ids, vec!["1-a", "1-b", "2-a", "2-b"]);
     }
 
     #[test]
