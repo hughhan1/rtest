@@ -37,7 +37,15 @@ class SetupConfigData(TypedDict, total=False):
     requirements_file: str  # custom requirements file path, e.g., "requirements-tests.txt"
 
 
-class RepositoryData(TypedDict):
+class BenchmarkOverrideData(TypedDict, total=False):
+    """Type for per-repository benchmark argument overrides."""
+
+    pytest_args: str
+    rtest_args: str
+    skip: bool  # Skip this benchmark entirely (e.g., incompatible test suite)
+
+
+class RepositoryData(TypedDict, total=False):
     """Type for repository data from YAML."""
 
     name: str
@@ -46,6 +54,7 @@ class RepositoryData(TypedDict):
     test_dir: str
     setup: SetupConfigData
     python_version: str
+    benchmark_overrides: dict[str, BenchmarkOverrideData]
 
 
 class BenchmarkConfigData(TypedDict, total=False):
@@ -113,6 +122,15 @@ class SetupOptions:
 
 
 @dataclass
+class BenchmarkOverride:
+    """Per-repository override for benchmark arguments."""
+
+    pytest_args: str | None = None
+    rtest_args: str | None = None
+    skip: bool = False  # Skip this benchmark entirely
+
+
+@dataclass
 class RepositoryConfig:
     """Configuration for a repository to benchmark."""
 
@@ -122,6 +140,7 @@ class RepositoryConfig:
     test_dir: str
     setup: SetupOptions
     python_version: str
+    benchmark_overrides: dict[str, BenchmarkOverride] = field(default_factory=dict)
 
 
 @dataclass
@@ -231,6 +250,18 @@ class ConfigLoader:
             if not isinstance(setup_data, dict):
                 setup_data = {}
 
+            # Parse benchmark overrides
+            raw_overrides = repo_data.get("benchmark_overrides", {})
+            benchmark_overrides: dict[str, BenchmarkOverride] = {}
+            if isinstance(raw_overrides, dict):
+                for bench_name, override_data in raw_overrides.items():
+                    if isinstance(override_data, dict):
+                        benchmark_overrides[bench_name] = BenchmarkOverride(
+                            pytest_args=override_data.get("pytest_args"),
+                            rtest_args=override_data.get("rtest_args"),
+                            skip=override_data.get("skip", False),
+                        )
+
             repositories.append(
                 RepositoryConfig(
                     name=repo_data["name"],
@@ -239,6 +270,7 @@ class ConfigLoader:
                     test_dir=repo_data["test_dir"],
                     setup=SetupOptions.from_dict(cast(SetupConfigData, setup_data)),
                     python_version=repo_data.get("python_version", "3.9"),
+                    benchmark_overrides=benchmark_overrides,
                 )
             )
 
@@ -701,6 +733,7 @@ class HyperfineRunner:
         benchmark_config: BenchmarkConfig,
         show_output: bool = False,
         ignore_failures: bool = False,
+        override: BenchmarkOverride | None = None,
     ) -> BenchmarkResult | ErrorResult:
         """Run a benchmark using hyperfine."""
         test_dir_path = repo_path / repo_config.test_dir
@@ -733,9 +766,17 @@ class HyperfineRunner:
                 error=f"rtest executable not found: {rtest_executable}",
             )
 
-        # Build commands with proper quoting
-        pytest_cmd = self._build_command(str(pytest_executable), benchmark_config.pytest_args, repo_config.test_dir)
-        rtest_cmd = self._build_command(str(rtest_executable), benchmark_config.rtest_args, repo_config.test_dir)
+        # Build commands with proper quoting, applying any per-repository overrides
+        pytest_args = benchmark_config.pytest_args
+        rtest_args = benchmark_config.rtest_args
+        if override:
+            if override.pytest_args is not None:
+                pytest_args = override.pytest_args
+            if override.rtest_args is not None:
+                rtest_args = override.rtest_args
+
+        pytest_cmd = self._build_command(str(pytest_executable), pytest_args, repo_config.test_dir)
+        rtest_cmd = self._build_command(str(rtest_executable), rtest_args, repo_config.test_dir)
 
         # Pre-flight validation with configurable timeout
         if not ignore_failures:
@@ -1099,10 +1140,20 @@ class BenchmarkOrchestrator:
                 continue
 
             # Run benchmarks
-            for _, benchmark_config in benchmarks.items():
+            for benchmark_name, benchmark_config in benchmarks.items():
+                # Get per-repository override if defined
+                override = repo.benchmark_overrides.get(benchmark_name)
+
+                # Skip benchmark if configured to do so
+                if override and override.skip:
+                    logger.info(
+                        f"[BENCHMARK] Skipping {benchmark_config.description} for {repo.name} (configured to skip)"
+                    )
+                    continue
+
                 results.append(
                     self.hyperfine_runner.run_benchmark(
-                        repo, repo_path, benchmark_config, self.show_output, self.ignore_failures
+                        repo, repo_path, benchmark_config, self.show_output, self.ignore_failures, override
                     )
                 )
 
