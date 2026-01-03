@@ -87,25 +87,3 @@ dev = [
     "pyyaml>=6.0",
     "vulture==2.14",
 ]
-
-[tool.semantic_release]
-version_toml = ["pyproject.toml:project.version", "Cargo.toml:package.version"]
-changelog_file = "CHANGELOG.md"
-upload_to_repository = false
-upload_to_release = true
-hvcs = "github"
-branches = { main = {}, prerelease = { name = "beta", prerelease = true } }
-allow_zero_version = true
-major_on_zero = false
-commit_parser = "conventional"
-
-[tool.semantic_release.commit_parser_options]
-major_tags = []
-minor_tags = []
-patch_tags = ["fix", "perf", "feat", "build", "chore", "ci", "docs", "style", "refactor", "test"]
-
-[tool.semantic_release.remote]
-type = "github"
-
-[tool.semantic_release.publish]
-dist_glob_patterns = ["dist/*"]
