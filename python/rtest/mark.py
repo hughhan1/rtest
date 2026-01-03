@@ -163,6 +163,20 @@ def _deduplicate_ids(ids: list[str]) -> list[str]:
     return result
 
 
+def _value_to_id_string(value: object) -> str:
+    """Convert a parameter value to its pytest-compatible string ID."""
+    if isinstance(value, str):
+        return value
+    elif value is None or isinstance(value, (int, float, bool)):
+        return str(value)
+    elif isinstance(value, (list, tuple)):
+        return "-".join(_value_to_id_string(v) for v in value)
+    elif hasattr(value, "__name__"):
+        return str(getattr(value, "__name__"))
+    else:
+        return repr(value)
+
+
 def _expand_single_spec(spec: ParametrizeSpec) -> list[ExpandedCase]:
     """Expand a single parametrize spec into ExpandedCase entries."""
     argnames = spec.argnames
@@ -174,7 +188,8 @@ def _expand_single_spec(spec: ParametrizeSpec) -> list[ExpandedCase]:
         if spec.ids is not None and i < len(spec.ids):
             raw_ids.append(spec.ids[i])
         else:
-            raw_ids.append(str(i))
+            # Generate value-based ID
+            raw_ids.append(_value_to_id_string(value))
 
     unique_ids = _deduplicate_ids(raw_ids)
 

@@ -143,9 +143,9 @@ def test_example(value):
 **Both pytest and rtest collection show:**
 
 ```plaintext
-test_example[0]
 test_example[1]
 test_example[2]
+test_example[3]
 ```
 
 However, when parametrize arguments contain **dynamic expressions** (variables, function calls, comprehensions), `rtest`
