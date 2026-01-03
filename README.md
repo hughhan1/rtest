@@ -24,12 +24,13 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 227 ms ± 7 ms | 32 ms ± 4 ms | **7.11x** |
-| [click](https://github.com/pallets/click) | 218 ms ± 10 ms | 34 ms ± 9 ms | **6.32x** |
-| [httpx](https://github.com/encode/httpx) | 342 ms ± 11 ms | 34 ms ± 8 ms | **10.02x** |
-| [fastapi](https://github.com/tiangolo/fastapi) | 1.65 s ± 48 ms | 65 ms ± 7 ms | **25.24x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 166 ms ± 10 ms | 28 ms ± 3 ms | **5.83x** |
-| [boltons](https://github.com/mahmoud/boltons) | 228 ms ± 12 ms | 30 ms ± 10 ms | **7.64x** |
+| [flask](https://github.com/pallets/flask) | 226 ms ± 5 ms | 34 ms ± 11 ms | **6.57x** |
+| [click](https://github.com/pallets/click) | 221 ms ± 10 ms | 38 ms ± 7 ms | **5.77x** |
+| [httpx](https://github.com/encode/httpx) | 344 ms ± 12 ms | 33 ms ± 4 ms | **10.56x** |
+| [pydantic](https://github.com/pydantic/pydantic) | 1.60 s ± 21 ms | 82 ms ± 13 ms | **19.52x** |
+| [fastapi](https://github.com/tiangolo/fastapi) | 1.59 s ± 20 ms | 62 ms ± 5 ms | **25.57x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 156 ms ± 5 ms | 29 ms ± 5 ms | **5.32x** |
+| [boltons](https://github.com/mahmoud/boltons) | 234 ms ± 7 ms | 35 ms ± 3 ms | **6.77x** |
 
 ### Test Execution (`--runner native`)
 
@@ -44,9 +45,8 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 758 ms ± 11 ms | 213 ms ± 15 ms | **3.56x** |
-| [fastapi](https://github.com/tiangolo/fastapi) | 10.66 s ± 145 ms | 390 ms ± 16 ms | **27.37x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.88 s ± 88 ms | 1.34 s ± 234 ms | **6.63x** |
+| [flask](https://github.com/pallets/flask) | 764 ms ± 15 ms | 205 ms ± 5 ms | **3.72x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.90 s ± 194 ms | 1.34 s ± 185 ms | **6.65x** |
 
 > **Note**: Native runner execution benchmarks are limited to repositories that use simple test patterns (unittest.TestCase,
 > plain assertions) without pytest fixtures. Most real-world projects use fixtures and conftest.py, which require the
@@ -64,8 +64,13 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
   ".venv/bin/rtest --runner pytest -n 4 tests"
 ```
 
-> **Note**: Benchmarks for `--runner pytest` mode are temporarily unavailable due to
-> [test ID escaping issues](https://github.com/hughhan1/rtest/issues/124) with certain parametrized string values.
+| Repository | pytest | rtest | Speedup |
+|------------|--------|-------|---------|
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.96 s ± 218 ms | 1.48 s ± 240 ms | **6.04x** |
+
+> **Note**: Most repositories have limited `--runner pytest` benchmarks due to
+> [test ID generation differences](https://github.com/hughhan1/rtest/issues/124) between rtest and pytest for certain
+> parametrized values. When rtest generates a different test ID than pytest expects, pytest cannot locate the test.
 
 ## Quick Start
 
