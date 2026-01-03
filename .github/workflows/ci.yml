@@ -327,13 +327,15 @@ jobs:
       if: github.event_name == 'pull_request'
       run: |
         if [ -f baseline/aggregated-results.json ]; then
-          # Run comparison and capture output
+          # Run comparison and capture output (disable errexit to capture exit code)
+          set +e
           python3 scripts/benchmark/compare_results.py \
             baseline/aggregated-results.json \
             aggregated-results.json \
             --output-file comparison-report.md \
             --exit-code-on-regression > comparison-output.txt 2>&1
           exit_code=$?
+          set -e
 
           # Save report
           cat comparison-output.txt | tee -a $GITHUB_STEP_SUMMARY
