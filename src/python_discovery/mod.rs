@@ -5,6 +5,7 @@
 //! configurable naming patterns.
 
 mod cases;
+mod constant_resolver;
 mod discovery;
 pub mod module_resolver;
 mod pattern;

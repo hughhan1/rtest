@@ -5,6 +5,8 @@
 
 use ruff_python_ast::{Decorator, Expr, ExprAttribute, ExprList, ExprName, ExprTuple, Keyword};
 
+use super::constant_resolver::ConstantResolver;
+
 /// A literal value that can be statically extracted from AST.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
@@ -26,7 +28,10 @@ pub struct CasesSpec {
     pub argnames: Vec<String>,
     /// Argument values as literals.
     pub argvalues: Vec<LiteralValue>,
-    /// Optional custom IDs for each case.
+    /// Auto-generated IDs for each value (from literal or resolved source path).
+    /// Same length as `argvalues`.
+    pub value_ids: Vec<String>,
+    /// Optional custom IDs for each case (overrides `value_ids`).
     pub ids: Option<Vec<String>>,
 }
 
@@ -89,11 +94,17 @@ pub fn format_cannot_expand_warning(nodeid: &str, reason: &CannotExpandReason) -
 }
 
 /// Parse decorators and return the cases expansion result.
-pub fn parse_decorators_for_cases(decorators: &[Decorator]) -> CasesExpansion {
+///
+/// If a `resolver` is provided, it will be used to resolve constant references
+/// (like `Color.RED` or `CONFIG_VALUE`) to their literal values.
+pub fn parse_decorators_for_cases(
+    decorators: &[Decorator],
+    resolver: Option<&ConstantResolver>,
+) -> CasesExpansion {
     let mut specs = Vec::new();
 
     for decorator in decorators {
-        match parse_single_decorator(decorator) {
+        match parse_single_decorator(decorator, resolver) {
             DecoratorParseResult::CasesSpec(spec) => specs.push(spec),
             DecoratorParseResult::CannotExpand(reason) => {
                 return CasesExpansion::CannotExpand(reason);
@@ -120,7 +131,10 @@ enum DecoratorParseResult {
 }
 
 /// Parse a single decorator to extract cases information.
-fn parse_single_decorator(decorator: &Decorator) -> DecoratorParseResult {
+fn parse_single_decorator(
+    decorator: &Decorator,
+    resolver: Option<&ConstantResolver>,
+) -> DecoratorParseResult {
     let Expr::Call(call) = &decorator.expression else {
         return DecoratorParseResult::NotCasesDecorator;
     };
@@ -140,16 +154,17 @@ fn parse_single_decorator(decorator: &Decorator) -> DecoratorParseResult {
         Err(reason) => return DecoratorParseResult::CannotExpand(reason),
     };
 
-    let argvalues = match extract_argvalues(&call.arguments.args[1]) {
-        Ok(values) => values,
+    let (argvalues, value_ids) = match extract_argvalues(&call.arguments.args[1], resolver) {
+        Ok(result) => result,
         Err(reason) => return DecoratorParseResult::CannotExpand(reason),
     };
 
-    let ids = extract_ids_kwarg(&call.arguments.keywords);
+    let ids = extract_ids_kwarg(&call.arguments.keywords, resolver);
 
     DecoratorParseResult::CasesSpec(CasesSpec {
         argnames,
         argvalues,
+        value_ids,
         ids,
     })
 }
@@ -217,16 +232,37 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
 }
 
 /// Extract argument values from the second decorator argument.
-fn extract_argvalues(expr: &Expr) -> Result<Vec<LiteralValue>, CannotExpandReason> {
+///
+/// Returns `(values, value_ids)` where `value_ids` contains the ID string for each value.
+fn extract_argvalues(
+    expr: &Expr,
+    resolver: Option<&ConstantResolver>,
+) -> Result<(Vec<LiteralValue>, Vec<String>), CannotExpandReason> {
     match expr {
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
             let mut values = Vec::with_capacity(elts.len());
+            let mut ids = Vec::with_capacity(elts.len());
             for elt in elts.iter() {
-                values.push(extract_literal(elt)?);
+                let (value, id) = extract_literal(elt, resolver)?;
+                values.push(value);
+                ids.push(id);
             }
-            Ok(values)
+            Ok((values, ids))
         }
-        Expr::Name(name) => Err(CannotExpandReason::VariableReference(name.id.to_string())),
+        // Try resolving as a constant (e.g., `DATA = [1, 2, 3]` then `@cases("x", DATA)`)
+        Expr::Name(name) => {
+            if let Some(resolver) = resolver {
+                if let Some((LiteralValue::Sequence(seq), path)) = resolver.resolve(expr) {
+                    let source_name = path.join(".");
+                    let ids: Vec<String> = seq
+                        .iter()
+                        .map(|v| format!("{}[{}]", source_name, literal_to_id_string(v)))
+                        .collect();
+                    return Ok((seq, ids));
+                }
+            }
+            Err(CannotExpandReason::VariableReference(name.id.to_string()))
+        }
         Expr::Call(call) => {
             let func_name = get_call_name(&call.func);
             Err(CannotExpandReason::FunctionCall(func_name))
@@ -241,7 +277,13 @@ fn extract_argvalues(expr: &Expr) -> Result<Vec<LiteralValue>, CannotExpandReaso
 }
 
 /// Extract a literal value from an expression.
-fn extract_literal(expr: &Expr) -> Result<LiteralValue, CannotExpandReason> {
+///
+/// Returns `(value, id)` where `id` is the string representation for test case IDs.
+/// For resolved constants (e.g., `Color.RED`), `id` is the source path (`"Color.RED"`).
+fn extract_literal(
+    expr: &Expr,
+    resolver: Option<&ConstantResolver>,
+) -> Result<(LiteralValue, String), CannotExpandReason> {
     match expr {
         Expr::NumberLiteral(num) => {
             use ruff_python_ast::Number;
@@ -249,27 +291,70 @@ fn extract_literal(expr: &Expr) -> Result<LiteralValue, CannotExpandReason> {
                 Number::Int(i) => {
                     // Try to convert to i64, fall back to string representation for large ints
                     match i.as_i64() {
-                        Some(v) => Ok(LiteralValue::Int(v)),
-                        None => Ok(LiteralValue::String(i.to_string())),
+                        Some(v) => {
+                            let lit = LiteralValue::Int(v);
+                            let id = literal_to_id_string(&lit);
+                            Ok((lit, id))
+                        }
+                        None => {
+                            let lit = LiteralValue::String(i.to_string());
+                            let id = literal_to_id_string(&lit);
+                            Ok((lit, id))
+                        }
                     }
                 }
-                Number::Float(f) => Ok(LiteralValue::Float(*f)),
+                Number::Float(f) => {
+                    let lit = LiteralValue::Float(*f);
+                    let id = literal_to_id_string(&lit);
+                    Ok((lit, id))
+                }
                 Number::Complex { .. } => Err(CannotExpandReason::UnsupportedExpression(
                     "complex numbers".to_string(),
                 )),
             }
         }
-        Expr::StringLiteral(s) => Ok(LiteralValue::String(s.value.to_str().to_string())),
-        Expr::BooleanLiteral(b) => Ok(LiteralValue::Bool(b.value)),
-        Expr::NoneLiteral(_) => Ok(LiteralValue::None),
+        Expr::StringLiteral(s) => {
+            let lit = LiteralValue::String(s.value.to_str().to_string());
+            let id = literal_to_id_string(&lit);
+            Ok((lit, id))
+        }
+        Expr::BooleanLiteral(b) => {
+            let lit = LiteralValue::Bool(b.value);
+            let id = literal_to_id_string(&lit);
+            Ok((lit, id))
+        }
+        Expr::NoneLiteral(_) => {
+            let lit = LiteralValue::None;
+            let id = literal_to_id_string(&lit);
+            Ok((lit, id))
+        }
         Expr::Tuple(ExprTuple { elts, .. }) | Expr::List(ExprList { elts, .. }) => {
             let mut values = Vec::with_capacity(elts.len());
+            let mut sub_ids = Vec::with_capacity(elts.len());
             for elt in elts.iter() {
-                values.push(extract_literal(elt)?);
+                let (v, id) = extract_literal(elt, resolver)?;
+                values.push(v);
+                sub_ids.push(id);
             }
-            Ok(LiteralValue::Sequence(values))
+            let lit = LiteralValue::Sequence(values);
+            let id = sub_ids.join("-");
+            Ok((lit, id))
         }
-        Expr::Name(name) => Err(CannotExpandReason::VariableReference(name.id.to_string())),
+        Expr::Name(_) | Expr::Attribute(_) => {
+            if let Some(resolver) = resolver {
+                if let Some((value, path)) = resolver.resolve(expr) {
+                    let id = path.join(".");
+                    return Ok((value, id));
+                }
+            }
+            if let Expr::Name(name) = expr {
+                Err(CannotExpandReason::VariableReference(name.id.to_string()))
+            } else {
+                Err(CannotExpandReason::UnsupportedExpression(
+                    "attribute access".to_string(),
+                ))
+            }
+        }
         Expr::Call(call) => {
             let func_name = get_call_name(&call.func);
             Err(CannotExpandReason::FunctionCall(func_name))
@@ -332,11 +417,14 @@ fn get_call_name(func: &Expr) -> String {
 }
 
 /// Extract the `ids` keyword argument if present.
-fn extract_ids_kwarg(keywords: &[Keyword]) -> Option<Vec<String>> {
+fn extract_ids_kwarg(
+    keywords: &[Keyword],
+    resolver: Option<&ConstantResolver>,
+) -> Option<Vec<String>> {
     for kw in keywords {
         if let Some(arg) = &kw.arg {
             if arg.as_str() == "ids" {
-                if let Ok(LiteralValue::Sequence(seq)) = extract_literal(&kw.value) {
+                if let Ok((LiteralValue::Sequence(seq), _)) = extract_literal(&kw.value, resolver) {
                     let ids: Vec<String> =
                         seq.into_iter().map(|v| literal_to_id_string(&v)).collect();
                     return Some(ids);
@@ -345,7 +433,7 @@ fn extract_ids_kwarg(keywords: &[Keyword]) -> Option<Vec<String>> {
                     for elt in list.elts.iter() {
                         if let Expr::StringLiteral(s) = elt {
                             ids.push(s.value.to_str().to_string());
-                        } else if let Ok(lit) = extract_literal(elt) {
+                        } else if let Ok((lit, _)) = extract_literal(elt, resolver) {
                             ids.push(literal_to_id_string(&lit));
                         } else {
                             return None;
@@ -360,7 +448,7 @@ fn extract_ids_kwarg(keywords: &[Keyword]) -> Option<Vec<String>> {
 }
 
 /// Convert a literal value to its string representation for use as a case ID.
-fn literal_to_id_string(value: &LiteralValue) -> String {
+pub fn literal_to_id_string(value: &LiteralValue) -> String {
     match value {
         LiteralValue::Int(i) => i.to_string(),
         LiteralValue::Float(f) => f.to_string(),
@@ -408,14 +496,15 @@ fn expand_single_spec(spec: &CasesSpec) -> Vec<String> {
     let count = spec.argvalues.len();
 
     if let Some(ids) = &spec.ids {
+        // Custom IDs override everything
         ids.iter()
             .take(count)
             .cloned()
             .chain((ids.len()..count).map(|i| i.to_string()))
             .collect()
     } else {
-        // Generate value-based IDs
-        spec.argvalues.iter().map(literal_to_id_string).collect()
+        // Use pre-computed value_ids (from literals or resolved source paths)
+        spec.value_ids.clone()
     }
 }
 
@@ -467,6 +556,7 @@ mod tests {
                 LiteralValue::Int(2),
                 LiteralValue::Int(3),
             ],
+            value_ids: vec!["1".to_string(), "2".to_string(), "3".to_string()],
             ids: None,
         };
         assert_eq!(expand_single_spec(&spec), vec!["1", "2", "3"]);
@@ -481,6 +571,7 @@ mod tests {
                 LiteralValue::Int(2),
                 LiteralValue::Int(3),
             ],
+            value_ids: vec!["1".to_string(), "2".to_string(), "3".to_string()],
             ids: Some(vec![
                 "one".to_string(),
                 "two".to_string(),
@@ -496,6 +587,7 @@ mod tests {
             CasesSpec {
                 argnames: vec!["x".to_string()],
                 argvalues: vec![LiteralValue::Int(1), LiteralValue::Int(2)],
+                value_ids: vec!["1".to_string(), "2".to_string()],
                 ids: None,
             },
             CasesSpec {
@@ -504,6 +596,7 @@ mod tests {
                     LiteralValue::String("a".to_string()),
                     LiteralValue::String("b".to_string()),
                 ],
+                value_ids: vec!["a".to_string(), "b".to_string()],
                 ids: None,
             },
         ];
@@ -549,6 +642,7 @@ mod tests {
         let spec = CasesSpec {
             argnames: vec!["x".to_string()],
             argvalues: vec![],
+            value_ids: vec![],
             ids: None,
         };
         assert_eq!(expand_single_spec(&spec), Vec::<String>::new());

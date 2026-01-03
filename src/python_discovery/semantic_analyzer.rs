@@ -10,6 +10,7 @@ use std::path::Path;
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::python_discovery::{
     cases::parse_decorators_for_cases,
+    constant_resolver::ConstantResolver,
     discovery::{TestDiscoveryConfig, TestInfo},
     module_resolver::ModuleResolver,
     pattern,
@@ -93,6 +94,9 @@ impl SemanticTestDiscovery {
             _ => return Ok((vec![], vec![])),
         };
 
+        // Build constant resolver for this module
+        let resolver = ConstantResolver::from_module(&ast_module);
+
         // Build semantic model
         let semantic_module = SemanticModule {
             kind: if path.file_name() == Some(std::ffi::OsStr::new("__init__.py")) {
@@ -112,7 +116,7 @@ impl SemanticTestDiscovery {
         let imports = self.collect_imports(&ast_module, &semantic);
 
         // Second pass: collect test classes
-        self.collect_test_classes(&ast_module, &module_path)?;
+        self.collect_test_classes(&ast_module, &module_path, &resolver)?;
 
         // Third pass: resolve inheritance and collect all tests
         let mut all_tests = Vec::new();
@@ -121,7 +125,8 @@ impl SemanticTestDiscovery {
         for stmt in &ast_module.body {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.is_test_function(func.name.as_str()) {
-                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
+                    let cases_expansion =
+                        parse_decorators_for_cases(&func.decorator_list, Some(&resolver));
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -142,6 +147,7 @@ impl SemanticTestDiscovery {
                     &imports,
                     &semantic,
                     module_resolver,
+                    &resolver,
                 )? {
                     all_tests.extend(tests);
                 }
@@ -225,6 +231,7 @@ impl SemanticTestDiscovery {
         &mut self,
         module: &ModModule,
         module_path: &[String],
+        resolver: &ConstantResolver,
     ) -> CollectionResult<()> {
         for stmt in &module.body {
             if let Stmt::ClassDef(class_def) = stmt {
@@ -232,7 +239,7 @@ impl SemanticTestDiscovery {
 
                 if self.is_test_class(class_name) {
                     let has_init = self.class_has_init(class_def);
-                    let test_methods = self.collect_test_methods(class_def);
+                    let test_methods = self.collect_test_methods(class_def, resolver);
                     let imports = self.collect_imports_from_module(module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
@@ -254,14 +261,19 @@ impl SemanticTestDiscovery {
     }
 
     /// Collect test methods from a class
-    fn collect_test_methods(&self, class_def: &StmtClassDef) -> Vec<TestMethodInfo> {
+    fn collect_test_methods(
+        &self,
+        class_def: &StmtClassDef,
+        resolver: &ConstantResolver,
+    ) -> Vec<TestMethodInfo> {
         let mut methods = Vec::new();
 
         for stmt in &class_def.body {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
+                    let cases_expansion =
+                        parse_decorators_for_cases(&func.decorator_list, Some(resolver));
                     methods.push(TestMethodInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -325,6 +337,7 @@ impl SemanticTestDiscovery {
         imports: &HashMap<String, ImportInfo>,
         semantic: &SemanticModel,
         module_resolver: &mut ModuleResolver,
+        resolver: &ConstantResolver,
     ) -> CollectionResult<Option<Vec<TestInfo>>> {
         let class_name = class_def.name.as_str();
 
@@ -402,7 +415,8 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     own_method_names.insert(method_name.to_string());
-                    let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
+                    let cases_expansion =
+                        parse_decorators_for_cases(&func.decorator_list, Some(resolver));
                     all_tests.push(TestInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -616,6 +630,9 @@ impl SemanticTestDiscovery {
         {
             let parsed_module = module_resolver.resolve_and_load(module_path)?;
 
+            // Build resolver for constants in this external module
+            let external_resolver = ConstantResolver::from_module(&parsed_module.module);
+
             // Extract test class information without storing the module
             for stmt in &parsed_module.module.body {
                 if let Stmt::ClassDef(class_def) = stmt {
@@ -624,7 +641,7 @@ impl SemanticTestDiscovery {
                     // Always collect class info for external modules, even if they don't match test patterns
                     // They might be used as base classes
                     let has_init = self.class_has_init(class_def);
-                    let test_methods = self.collect_test_methods(class_def);
+                    let test_methods = self.collect_test_methods(class_def, &external_resolver);
                     let imports = self.collect_imports_from_module(&parsed_module.module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
