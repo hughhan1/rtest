@@ -1592,6 +1592,35 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 2 items", result.output)
 
+    def test_parametrize_unicode_escape_ids(self) -> None:
+        """Test that unicode escape sequences in parametrize generate correct IDs (issue #124)."""
+        files = {
+            "test_unicode.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("test_value,expected", [
+                    (True, '"\\\\u2603"'),
+                    (False, '"\\u2603"'),
+                ])
+                def test_json_as_unicode(test_value, expected):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should escape backslashes and unicode chars to match pytest's behavior
+            expected_patterns = [
+                'test_unicode.py::test_json_as_unicode[True-"\\\\u2603"]',
+                'test_unicode.py::test_json_as_unicode[False-"\\u2603"]',
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()
