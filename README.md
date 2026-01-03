@@ -119,7 +119,7 @@ For compatibility, `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators
 - **Fixtures** - `@rtest.fixture` with function/class/module scopes and dependency resolution
 - **conftest.py support** - Fixture discovery across directory hierarchy
 - **Distribution modes** - Group tests by module/class, optimized scheduling algorithms
-- **Dynamic `@rtest.mark.cases` evaluation** - Support variables, function calls, and comprehensions in decorator arguments
+- **Cross-module constant resolution** - Resolve constants imported from other modules in `@rtest.mark.cases`
 - **Built-in assertions** - `rtest.raises()` and other assertion helpers
 - **Additional markers** - `@rtest.mark.xfail`, `@rtest.mark.skipif`
 - **Test selection** - `-k` expression filtering, `--last-failed`, `--failed-first`
@@ -131,36 +131,57 @@ For compatibility, `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators
 
 ### Parametrized Test Discovery
 
-`rtest` expands parametrized tests during collection when the decorator arguments are **literal values** (numbers,
-strings, booleans, None, lists/tuples of literals). For example:
+`rtest` expands parametrized tests during collection when the decorator arguments can be **statically resolved**. This
+includes:
+
+- **Literal values**: numbers, strings, booleans, None, lists/tuples of literals
+- **Module-level constants**: `DATA = [1, 2, 3]` then `@cases("x", DATA)`
+- **Class constants**: `Config.MAX_SIZE`
+- **Enum members**: `Color.RED`
+- **Nested class constants**: `Outer.Inner.VALUE`
 
 ```python
-@pytest.mark.parametrize("value", [1, 2, 3])
-def test_example(value):
-    assert value > 0
-```
+from enum import Enum
+import rtest
 
-**Both pytest and rtest collection show:**
+class Color(Enum):
+    RED = 1
+    GREEN = 2
 
-```plaintext
-test_example[1]
-test_example[2]
-test_example[3]
-```
-
-However, when parametrize arguments contain **dynamic expressions** (variables, function calls, comprehensions), `rtest`
-cannot statically analyze them and will emit a warning while falling back to the base test name:
-
-```python
 DATA = [1, 2, 3]
 
-@pytest.mark.parametrize("value", DATA)  # Dynamic - references a variable
+@rtest.mark.cases("value", DATA)  # Resolves to [1, 2, 3]
+def test_module_constant(value):
+    assert value > 0
+
+@rtest.mark.cases("color", [Color.RED, Color.GREEN])  # Resolves enum members
+def test_enum_values(color):
+    assert color.value in [1, 2]
+```
+
+However, `rtest` cannot statically analyze **truly dynamic expressions** and will emit a warning while falling back to
+the base test name:
+
+```python
+from other_module import DATA  # Imported from another module
+
+@pytest.mark.parametrize("value", DATA)
 def test_example(value):
+    assert value > 0
+
+@pytest.mark.parametrize("value", get_data())  # Function call
+def test_dynamic(value):
+    assert value > 0
+
+@pytest.mark.parametrize("value", [x for x in range(3)])  # Comprehension
+def test_comprehension(value):
     assert value > 0
 ```
 
 ```plaintext
 warning: Cannot statically expand test cases for 'test.py::test_example': argvalues references variable 'DATA'
+warning: Cannot statically expand test cases for 'test.py::test_dynamic': argvalues contains function call 'get_data'
+warning: Cannot statically expand test cases for 'test.py::test_comprehension': argvalues contains a comprehension
 ```
 
 In these cases, test execution is still functionally equivalent - pytest automatically runs all parametrized variants

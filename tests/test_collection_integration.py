@@ -1467,6 +1467,131 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 3 items", result.output)
 
+    def test_cases_with_enum_values(self) -> None:
+        """Test that @cases with enum values generates correct test IDs."""
+        files = {
+            "test_enum_cases.py": textwrap.dedent("""
+                from enum import Enum
+                import rtest
+
+                class Color(Enum):
+                    RED = 1
+                    GREEN = 2
+                    BLUE = 3
+
+                @rtest.mark.cases("color", [Color.RED, Color.GREEN, Color.BLUE])
+                def test_with_enum(color):
+                    assert color.value in [1, 2, 3]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate test IDs using the enum path
+            expected_patterns = [
+                "test_enum_cases.py::test_with_enum[Color.RED]",
+                "test_enum_cases.py::test_with_enum[Color.GREEN]",
+                "test_enum_cases.py::test_with_enum[Color.BLUE]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
+    def test_cases_with_class_constants(self) -> None:
+        """Test that @cases with class constants generates correct test IDs."""
+        files = {
+            "test_class_constants.py": textwrap.dedent("""
+                import rtest
+
+                class Config:
+                    MAX_SIZE = 100
+                    MIN_SIZE = 10
+                    DEFAULT = 50
+
+                @rtest.mark.cases("size", [Config.MAX_SIZE, Config.MIN_SIZE, Config.DEFAULT])
+                def test_with_class_constant(size):
+                    assert 10 <= size <= 100
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate test IDs using the class attribute path
+            expected_patterns = [
+                "test_class_constants.py::test_with_class_constant[Config.MAX_SIZE]",
+                "test_class_constants.py::test_with_class_constant[Config.MIN_SIZE]",
+                "test_class_constants.py::test_with_class_constant[Config.DEFAULT]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
+    def test_cases_with_module_constants(self) -> None:
+        """Test that @cases with module-level constants generates correct test IDs."""
+        files = {
+            "test_module_constants.py": textwrap.dedent("""
+                import rtest
+
+                TEST_DATA = [1, 2, 3]
+
+                @rtest.mark.cases("value", TEST_DATA)
+                def test_with_module_constant(value):
+                    assert value in [1, 2, 3]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should expand the module constant and generate IDs
+            expected_patterns = [
+                "test_module_constants.py::test_with_module_constant[TEST_DATA[1]]",
+                "test_module_constants.py::test_with_module_constant[TEST_DATA[2]]",
+                "test_module_constants.py::test_with_module_constant[TEST_DATA[3]]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
+    def test_cases_with_nested_class_constants(self) -> None:
+        """Test that @cases with nested class constants generates correct test IDs."""
+        files = {
+            "test_nested_constants.py": textwrap.dedent("""
+                import rtest
+
+                class Outer:
+                    class Inner:
+                        VALUE_A = 1
+                        VALUE_B = 2
+
+                @rtest.mark.cases("value", [Outer.Inner.VALUE_A, Outer.Inner.VALUE_B])
+                def test_with_nested_constant(value):
+                    assert value in [1, 2]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate test IDs using the full nested path
+            expected_patterns = [
+                "test_nested_constants.py::test_with_nested_constant[Outer.Inner.VALUE_A]",
+                "test_nested_constants.py::test_with_nested_constant[Outer.Inner.VALUE_B]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 
 use crate::python_discovery::{
     cases::parse_decorators_for_cases,
+    constant_resolver::ConstantResolver,
     discovery::{TestDiscoveryConfig, TestInfo},
     pattern,
 };
@@ -28,12 +29,15 @@ impl TestDiscoveryVisitor {
     }
 
     pub fn visit_module(&mut self, module: &ModModule) {
+        // Build constant resolver for this module
+        let resolver = ConstantResolver::from_module(module);
+
         // First pass: collect all test classes and their methods
-        self.collect_class_methods(module);
+        self.collect_class_methods(module, &resolver);
 
         // Second pass: visit statements and handle inheritance
         for stmt in &module.body {
-            self.visit_stmt(stmt);
+            self.visit_stmt(stmt, &resolver);
         }
     }
 
@@ -41,7 +45,7 @@ impl TestDiscoveryVisitor {
         self.tests
     }
 
-    fn collect_class_methods(&mut self, module: &ModModule) {
+    fn collect_class_methods(&mut self, module: &ModModule, resolver: &ConstantResolver) {
         // First, collect which classes have __init__
         let mut classes_with_init = HashSet::new();
         for stmt in &module.body {
@@ -65,8 +69,10 @@ impl TestDiscoveryVisitor {
                         if let Stmt::FunctionDef(func) = stmt {
                             let method_name = func.name.as_str();
                             if self.is_test_function(method_name) {
-                                let cases_expansion =
-                                    parse_decorators_for_cases(&func.decorator_list);
+                                let cases_expansion = parse_decorators_for_cases(
+                                    &func.decorator_list,
+                                    Some(resolver),
+                                );
                                 methods.push(TestInfo {
                                     name: method_name.into(),
                                     line: func.range.start().to_u32() as usize,
@@ -85,18 +91,18 @@ impl TestDiscoveryVisitor {
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &Stmt) {
+    fn visit_stmt(&mut self, stmt: &Stmt, resolver: &ConstantResolver) {
         match stmt {
-            Stmt::FunctionDef(func) => self.visit_function(func),
-            Stmt::ClassDef(class) => self.visit_class(class),
+            Stmt::FunctionDef(func) => self.visit_function(func, resolver),
+            Stmt::ClassDef(class) => self.visit_class(class, resolver),
             _ => {}
         }
     }
 
-    fn visit_function(&mut self, func: &StmtFunctionDef) {
+    fn visit_function(&mut self, func: &StmtFunctionDef, resolver: &ConstantResolver) {
         let name = func.name.as_str();
         if self.is_test_function(name) {
-            let cases_expansion = parse_decorators_for_cases(&func.decorator_list);
+            let cases_expansion = parse_decorators_for_cases(&func.decorator_list, Some(resolver));
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
@@ -107,7 +113,7 @@ impl TestDiscoveryVisitor {
         }
     }
 
-    fn visit_class(&mut self, class: &StmtClassDef) {
+    fn visit_class(&mut self, class: &StmtClassDef, resolver: &ConstantResolver) {
         let name = class.name.as_str();
         if self.is_test_class(name) {
             // Check if this class or any of its parents have __init__
@@ -164,7 +170,7 @@ impl TestDiscoveryVisitor {
 
                 // Then visit methods defined directly in this class
                 for stmt in &class.body {
-                    self.visit_stmt(stmt);
+                    self.visit_stmt(stmt, resolver);
                 }
 
                 self.current_class = prev_class;
