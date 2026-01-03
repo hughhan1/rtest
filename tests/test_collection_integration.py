@@ -1432,6 +1432,41 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertEqual(result.returncode, ExitCodeValues.USAGE_ERROR)
             self.assertIn("missing_dir", result.output)
 
+    def test_generic_base_class_inheritance(self) -> None:
+        """Test that collection handles generic base classes with type parameters (issue #120)."""
+        files = {
+            "test_generic.py": textwrap.dedent("""
+                from typing import Generic, TypeVar
+
+                T = TypeVar("T")
+
+                class TestGenericBase(Generic[T]):
+                    def test_base_method(self):
+                        assert True
+
+                class MyClass:
+                    pass
+
+                class TestDerived(TestGenericBase[MyClass]):
+                    def test_derived_method(self):
+                        assert True
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            expected_patterns = [
+                # TestGenericBase tests
+                "test_generic.py::TestGenericBase::test_base_method",
+                # TestDerived should have inherited + own methods
+                "test_generic.py::TestDerived::test_base_method",
+                "test_generic.py::TestDerived::test_derived_method",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

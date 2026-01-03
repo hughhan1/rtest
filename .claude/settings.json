@@ -1,4 +1,17 @@
 {
   "toolChoice": "auto",
-  "automode": false
+  "automode": false,
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file_path=$(jq -r '.tool_input.file_path'); if [[ \"$file_path\" == *.rs ]]; then cargo fmt 2>/dev/null || true; elif [[ \"$file_path\" == *.py ]]; then uv run ruff format \"$file_path\" 2>/dev/null || true; uv run ruff check --fix \"$file_path\" 2>/dev/null || true; fi"
+          }
+        ]
+      }
+    ]
+  }
 }
