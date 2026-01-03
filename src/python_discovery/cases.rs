@@ -475,7 +475,7 @@ pub fn literal_to_id_string(value: &LiteralValue) -> String {
     match value {
         LiteralValue::Int(i) => i.to_string(),
         LiteralValue::Float(f) => f.to_string(),
-        LiteralValue::String(s) => s.clone(),
+        LiteralValue::String(s) => ascii_escape_string(s),
         LiteralValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         LiteralValue::None => "None".to_string(),
         LiteralValue::Sequence(seq) => {
@@ -483,6 +483,34 @@ pub fn literal_to_id_string(value: &LiteralValue) -> String {
             parts.join("-")
         }
     }
+}
+
+/// Escape a string for use in test IDs.
+///
+/// Escapes backslashes, control characters, and non-ASCII characters.
+fn ascii_escape_string(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            c if c.is_ascii_control() => {
+                result.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c if c.is_ascii() => result.push(c),
+            c => {
+                let code = c as u32;
+                if code <= 0xFFFF {
+                    result.push_str(&format!("\\u{:04x}", code));
+                } else {
+                    result.push_str(&format!("\\U{:08x}", code));
+                }
+            }
+        }
+    }
+    result
 }
 
 /// Expand cases specs into individual test cases using cartesian product.
@@ -671,5 +699,46 @@ mod tests {
             ids: None,
         };
         assert_eq!(expand_single_spec(&spec), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_ascii_escape_string_backslash() {
+        // Backslash escaping - the main issue from #124
+        assert_eq!(ascii_escape_string("\\u2603"), "\\\\u2603");
+        assert_eq!(ascii_escape_string("\"\\u2603\""), "\"\\\\u2603\"");
+    }
+
+    #[test]
+    fn test_ascii_escape_string_unicode() {
+        // Non-ASCII to Unicode escape
+        assert_eq!(ascii_escape_string("☃"), "\\u2603");
+        assert_eq!(ascii_escape_string("\"☃\""), "\"\\u2603\"");
+
+        // Supplementary plane character (code point > U+FFFF)
+        assert_eq!(ascii_escape_string("𝄞"), "\\U0001d11e");
+    }
+
+    #[test]
+    fn test_ascii_escape_string_control_chars() {
+        assert_eq!(ascii_escape_string("a\nb"), "a\\nb");
+        assert_eq!(ascii_escape_string("a\tb"), "a\\tb");
+        assert_eq!(ascii_escape_string("a\rb"), "a\\rb");
+        assert_eq!(ascii_escape_string("\x00"), "\\x00");
+    }
+
+    #[test]
+    fn test_ascii_escape_string_plain_ascii() {
+        // Plain ASCII unchanged
+        assert_eq!(ascii_escape_string("hello"), "hello");
+        assert_eq!(ascii_escape_string("Hello World 123!"), "Hello World 123!");
+    }
+
+    #[test]
+    fn test_ascii_escape_string_mixed() {
+        // Mixed content
+        assert_eq!(
+            ascii_escape_string("hello\\world☃"),
+            "hello\\\\world\\u2603"
+        );
     }
 }
