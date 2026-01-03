@@ -1,0 +1,3 @@
+{
+  "repository": ["flask", "click", "httpx", "pydantic", "fastapi", "more-itertools", "boltons"]
+}

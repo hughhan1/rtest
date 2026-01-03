@@ -113,17 +113,27 @@ benchmark_configs:
     rtest_args: "--collect-only"
     timeout: 300
 
-  # execution:
-  #   description: "Test execution performance"
-  #   pytest_args: ""
-  #   rtest_args: "--runner native"
-  #   timeout: 600
-
   execution_pytest:
     description: "Test execution with pytest runner"
     pytest_args: "-n 4"
     rtest_args: "--runner pytest -n 4"
     timeout: 600
+
+  # Native runner execution - only works for repos without pytest fixtures
+  # Currently only more-itertools is suitable
+  execution_native:
+    description: "Test execution with native runner"
+    pytest_args: "-n 4"
+    rtest_args: "--runner native -n 4"
+    timeout: 600
+    # Note: Only enable for repos that don't use pytest fixtures
+    # Currently suitable: more-itertools
+
+  startup_time:
+    description: "CLI startup time"
+    pytest_args: "--version"
+    rtest_args: "--version"
+    timeout: 60
 
 # Global settings
 settings:

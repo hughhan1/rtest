@@ -247,6 +247,18 @@ def parse_args() -> argparse.Namespace:
         help="Percentage threshold for marking a significant change (default: 10.0)",
     )
 
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Write the comparison report to a file (in addition to stdout)",
+    )
+
+    parser.add_argument(
+        "--exit-code-on-regression",
+        action="store_true",
+        help="Exit with code 1 if regressions are detected (default behavior, kept for explicitness)",
+    )
+
     return parser.parse_args()
 
 
@@ -256,6 +268,7 @@ def main() -> None:
 
     baseline_path: Path = args.baseline
     current_path: Path = args.current
+    output_file: Path | None = args.output_file
 
     if not baseline_path.exists():
         print(f"Error: Baseline file not found: {baseline_path}", file=sys.stderr)
@@ -280,7 +293,13 @@ def main() -> None:
 
         print(report)
 
-        if any(c.is_regression() for c in comparisons):
+        # Write to file if specified
+        if output_file:
+            output_file.write_text(report)
+            print(f"\nReport written to: {output_file}", file=sys.stderr)
+
+        has_regressions = any(c.is_regression() for c in comparisons)
+        if has_regressions:
             sys.exit(1)
 
     except Exception as e:
