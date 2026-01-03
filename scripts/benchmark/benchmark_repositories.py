@@ -11,6 +11,7 @@ performance between rtest and pytest using hyperfine.
 import argparse
 import json
 import logging
+import os
 import platform
 import shlex
 import shutil
@@ -73,9 +74,11 @@ class ConfigData(TypedDict):
 # Constants
 DEFAULT_TIMEOUT = 300
 DEFAULT_VALIDATION_TIMEOUT = 120
-HYPERFINE_MIN_RUNS = 20
-HYPERFINE_MAX_RUNS = 20
-HYPERFINE_WARMUP = 3
+
+# Hyperfine settings (can be overridden by environment variables)
+HYPERFINE_MIN_RUNS = int(os.environ.get("HYPERFINE_MIN_RUNS", "20"))
+HYPERFINE_MAX_RUNS = int(os.environ.get("HYPERFINE_MAX_RUNS", "20"))
+HYPERFINE_WARMUP = int(os.environ.get("HYPERFINE_WARMUP", "3"))
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -148,6 +151,25 @@ class HyperfineResult:
 
 
 @dataclass
+class MemoryResult:
+    """Memory usage result."""
+
+    peak_rss_kb: int  # Peak resident set size in KB
+    command: str
+
+
+@dataclass
+class StartupTimeResult:
+    """Startup time benchmark result."""
+
+    pytest_mean: float
+    pytest_stddev: float
+    rtest_mean: float
+    rtest_stddev: float
+    speedup: float | None
+
+
+@dataclass
 class BenchmarkResult:
     """Result from benchmarking a repository."""
 
@@ -156,6 +178,9 @@ class BenchmarkResult:
     pytest: HyperfineResult
     rtest: HyperfineResult
     speedup: float | None
+    # Optional memory metrics
+    pytest_memory_kb: int | None = None
+    rtest_memory_kb: int | None = None
 
 
 @dataclass
@@ -503,6 +528,13 @@ class RepositoryManager:
         # Determine rtest source
         if self.rtest_source == "local":
             rtest_spec = f"rtest @ file://{self.project_root}"
+        elif self.rtest_source.startswith("wheel:"):
+            # Install from pre-built wheel file
+            wheel_path = Path(self.rtest_source[6:]).absolute()
+            if not wheel_path.exists():
+                logger.error(f"[TOOLS] Wheel file not found: {wheel_path}")
+                return False
+            rtest_spec = str(wheel_path)
         else:
             # Treat as a version specifier
             rtest_spec = f"rtest=={self.rtest_source}"
@@ -559,6 +591,108 @@ class HyperfineRunner:
 
     def __init__(self, validation_timeout: int = DEFAULT_VALIDATION_TIMEOUT):
         self.validation_timeout = validation_timeout
+
+    def measure_memory(self, cmd: str, cwd: Path, timeout: int = DEFAULT_TIMEOUT) -> int | None:
+        """Measure peak memory usage of a command using /usr/bin/time.
+
+        Returns peak RSS in KB, or None if measurement failed.
+        """
+        if platform.system() != "Linux":
+            return None
+
+        try:
+            # Use GNU time with verbose output to get memory stats
+            time_cmd = f"/usr/bin/time -v {cmd}"
+            result = subprocess.run(time_cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+            # GNU time outputs to stderr
+            for line in result.stderr.split("\n"):
+                if "Maximum resident set size" in line:
+                    # Extract the number from the line
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        return int(parts[1].strip())
+        except (subprocess.TimeoutExpired, ValueError, IndexError):
+            pass
+        return None
+
+    def run_startup_benchmark(self, repo_config: RepositoryConfig, repo_path: Path) -> StartupTimeResult | ErrorResult:
+        """Benchmark CLI startup time (--version command)."""
+        venv_path = repo_path / ".venv"
+        pytest_executable = get_venv_executable(venv_path, "pytest")
+        rtest_executable = get_venv_executable(venv_path, "rtest")
+
+        if not pytest_executable.exists() or not rtest_executable.exists():
+            return ErrorResult(
+                repository=repo_config.name,
+                benchmark="Startup time",
+                error="Executables not found",
+            )
+
+        logger.info(f"[STARTUP] Benchmarking startup time for {repo_config.name}")
+
+        # Build commands
+        pytest_cmd = f"{shlex.quote(str(pytest_executable))} --version"
+        rtest_cmd = f"{shlex.quote(str(rtest_executable))} --version"
+
+        json_output = f"{repo_config.name}_startup.json"
+        hyperfine_cmd = [
+            "hyperfine",
+            "--warmup",
+            str(HYPERFINE_WARMUP),
+            "--min-runs",
+            str(HYPERFINE_MIN_RUNS),
+            "--max-runs",
+            str(HYPERFINE_MAX_RUNS),
+            "--export-json",
+            json_output,
+            "--command-name",
+            "pytest",
+            "--command-name",
+            "rtest",
+            pytest_cmd,
+            rtest_cmd,
+        ]
+
+        result = run_command(hyperfine_cmd, str(repo_path), timeout=120)
+        if result.returncode != 0:
+            return ErrorResult(
+                repository=repo_config.name,
+                benchmark="Startup time",
+                error=f"Hyperfine failed: {result.stderr}",
+            )
+
+        # Parse results
+        json_path = repo_path / json_output
+        try:
+            with open(json_path) as f:
+                data = json.load(f)
+
+            results = data["results"]
+            pytest_data = results[0]
+            rtest_data = results[1]
+
+            pytest_mean = float(pytest_data["mean"])
+            pytest_stddev = float(pytest_data["stddev"])
+            rtest_mean = float(rtest_data["mean"])
+            rtest_stddev = float(rtest_data["stddev"])
+            speedup = pytest_mean / rtest_mean if rtest_mean > 0 else None
+
+            return StartupTimeResult(
+                pytest_mean=pytest_mean,
+                pytest_stddev=pytest_stddev,
+                rtest_mean=rtest_mean,
+                rtest_stddev=rtest_stddev,
+                speedup=speedup,
+            )
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, IndexError) as e:
+            return ErrorResult(
+                repository=repo_config.name,
+                benchmark="Startup time",
+                error=f"Failed to parse results: {e}",
+            )
+        finally:
+            if json_path.exists():
+                json_path.unlink()
 
     def run_benchmark(
         self,
@@ -639,8 +773,24 @@ class HyperfineRunner:
                 stderr=result.stderr,
             )
 
+        # Measure memory usage (Linux only)
+        pytest_memory = self.measure_memory(pytest_cmd, repo_path, timeout=self.validation_timeout)
+        rtest_memory = self.measure_memory(rtest_cmd, repo_path, timeout=self.validation_timeout)
+
+        if pytest_memory:
+            logger.info(f"[MEMORY] pytest peak RSS: {pytest_memory} KB")
+        if rtest_memory:
+            logger.info(f"[MEMORY] rtest peak RSS: {rtest_memory} KB")
+
         # Parse results with proper command name matching
-        return self._parse_results(repo_path, json_output, repo_config.name, benchmark_config.description)
+        return self._parse_results(
+            repo_path,
+            json_output,
+            repo_config.name,
+            benchmark_config.description,
+            pytest_memory_kb=pytest_memory,
+            rtest_memory_kb=rtest_memory,
+        )
 
     def _build_command(self, executable: str, args: str, test_dir: str) -> str:
         """Build command string for hyperfine with proper quoting."""
@@ -698,7 +848,13 @@ class HyperfineRunner:
         return cmd
 
     def _parse_results(
-        self, repo_path: Path, json_output: str, repo_name: str, benchmark_desc: str
+        self,
+        repo_path: Path,
+        json_output: str,
+        repo_name: str,
+        benchmark_desc: str,
+        pytest_memory_kb: int | None = None,
+        rtest_memory_kb: int | None = None,
     ) -> BenchmarkResult | ErrorResult:
         """Parse hyperfine JSON output with proper command name matching."""
         json_path = repo_path / json_output
@@ -763,6 +919,8 @@ class HyperfineRunner:
                 pytest=pytest_result,
                 rtest=rtest_result,
                 speedup=speedup,
+                pytest_memory_kb=pytest_memory_kb,
+                rtest_memory_kb=rtest_memory_kb,
             )
         except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
             return ErrorResult(repository=repo_name, benchmark=benchmark_desc, error=f"Failed to parse results: {e}")
@@ -820,6 +978,12 @@ class ResultFormatter:
                 print(f"    rtest:  {result.rtest.mean:.3f}s ± {result.rtest.stddev:.3f}s")
                 time_saved = result.pytest.mean - result.rtest.mean
                 print(f"    speedup: {result.speedup:.2f}x ({time_saved:.3f}s saved)")
+                # Show memory if available
+                if result.pytest_memory_kb and result.rtest_memory_kb:
+                    memory_saved = result.pytest_memory_kb - result.rtest_memory_kb
+                    pytest_mem = result.pytest_memory_kb
+                    rtest_mem = result.rtest_memory_kb
+                    print(f"    memory: pytest {pytest_mem}KB, rtest {rtest_mem}KB ({memory_saved:+d}KB)")
             else:
                 print(f"  {result.benchmark}: Unable to calculate speedup")
 
@@ -829,23 +993,27 @@ class ResultFormatter:
         serializable_results = []
         for result in results:
             if isinstance(result, BenchmarkResult):
-                serializable_results.append(
-                    {
-                        "repository": result.repository,
-                        "benchmark": result.benchmark,
-                        "pytest": {
-                            "mean": result.pytest.mean,
-                            "stddev": result.pytest.stddev,
-                            "runs": len(result.pytest.times),
-                        },
-                        "rtest": {
-                            "mean": result.rtest.mean,
-                            "stddev": result.rtest.stddev,
-                            "runs": len(result.rtest.times),
-                        },
-                        "speedup": result.speedup,
-                    }
-                )
+                result_data: dict = {
+                    "repository": result.repository,
+                    "benchmark": result.benchmark,
+                    "pytest": {
+                        "mean": result.pytest.mean,
+                        "stddev": result.pytest.stddev,
+                        "runs": len(result.pytest.times),
+                    },
+                    "rtest": {
+                        "mean": result.rtest.mean,
+                        "stddev": result.rtest.stddev,
+                        "runs": len(result.rtest.times),
+                    },
+                    "speedup": result.speedup,
+                }
+                # Add memory data if available
+                if result.pytest_memory_kb is not None:
+                    result_data["pytest"]["memory_kb"] = result.pytest_memory_kb
+                if result.rtest_memory_kb is not None:
+                    result_data["rtest"]["memory_kb"] = result.rtest_memory_kb
+                serializable_results.append(result_data)
             else:
                 error_data: dict = {
                     "repository": result.repository,
@@ -962,7 +1130,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--source",
         required=True,
-        help="rtest source: 'local' for project root, or a version number for PyPI (e.g., '0.0.37')",
+        help="rtest source: 'local' for project root, 'wheel:/path/to/wheel.whl' for pre-built wheel, "
+        "or a version number for PyPI (e.g., '0.0.37')",
     )
     parser.add_argument("--repositories", nargs="+", help="Specific repositories to benchmark")
     parser.add_argument("--list-repos", action="store_true", help="List available repositories")
