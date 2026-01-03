@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.40] - 2026-01-03
+
+### Added
+- **Constant Resolution in @rtest.mark.cases**: Static parameter expansion now supports enum members (`Color.RED`), class constants (`Config.MAX_SIZE`), module-level constants (`DATA = [1, 2, 3]`), and nested class constants (`Outer.Inner.VALUE`)
+
+### Fixed
+- Stacked `@parametrize` decorators now process bottom-to-top (innermost first), matching pytest's behavior for correct test ID generation
+- Support for argnames as lists or tuples of strings in `@parametrize`, e.g., `@parametrize(("a", "b"), ...)`
+- Generic base classes with type parameters (e.g., `class TestHelper(GenericBase[MyClass])`) no longer cause collection to fail
+
 ## [0.0.39] - 2026-01-03
 
 ### Fixed
