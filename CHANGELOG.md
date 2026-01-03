@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.41] - 2026-01-03
+
+### Added
+- Per-repository benchmark overrides with skip support for more flexible benchmarking configuration
+
+### Chores
+- GitHub releases are now created automatically when publishing to PyPI
+- Benchmark script no longer exits prematurely when capturing compare_results exit code
+
 ## [0.0.40] - 2026-01-03
 
 ### Added
