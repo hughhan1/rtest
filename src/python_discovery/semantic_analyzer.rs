@@ -500,6 +500,10 @@ impl SemanticTestDiscovery {
         module_resolver: &mut ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<bool> {
+        if self.is_stdlib_module_to_skip(&resolved.module_path) {
+            return Ok(false);
+        }
+
         // Check for cycles
         let key = (resolved.module_path.clone(), resolved.class_name.clone());
         if visited.contains(&key) {
@@ -551,6 +555,10 @@ impl SemanticTestDiscovery {
         module_resolver: &mut ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
+        if self.is_stdlib_module_to_skip(&resolved.module_path) {
+            return Ok(None);
+        }
+
         // Check for cycles
         let key = (resolved.module_path.clone(), resolved.class_name.clone());
         if visited.contains(&key) {
@@ -711,6 +719,15 @@ impl SemanticTestDiscovery {
                 }
                 Ok(None)
             }
+            Expr::Subscript(subscript_expr) => {
+                // Handle parameterized generics like GenericBase[T] by resolving the base type
+                self.resolve_base_class(
+                    &subscript_expr.value,
+                    current_module_path,
+                    imports,
+                    _semantic,
+                )
+            }
             _ => Ok(None),
         }
     }
@@ -788,6 +805,12 @@ impl SemanticTestDiscovery {
                 } else {
                     format!("<complex>.{}", attr_expr.attr)
                 }
+            }
+            Expr::Subscript(subscript_expr) => {
+                format!(
+                    "{}[...]",
+                    self.format_base_class_expr(&subscript_expr.value)
+                )
             }
             _ => "<unresolvable>".to_string(),
         }

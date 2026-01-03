@@ -5,13 +5,13 @@
 **ALWAYS:**
 - Use `uv run` for ALL Python commands (`uv run pytest`, `uv run rtest`, `uv run python`)
 - Run `git submodule update --init` after cloning (ruff is a git submodule for AST parsing)
-- Run formatters before committing: `cargo fmt` and `uv run ruff format python/ tests/ scripts/`
 - Use conventional commits: `feat|fix|docs|test|refactor|chore: description`
 
 **NEVER:**
 - Run `pytest` or `python` directly without `uv run`
 - Use `panic!` or `unwrap()` in Rust library code—use `Result<T, E>` with proper error handling
-- Commit without running formatters (CI will fail on `cargo fmt --check` and `ruff format --check`)
+
+**Note:** Formatting is automatic via Claude hooks (`.claude/settings.json`). CI will fail on `cargo fmt --check` and `ruff format --check`.
 
 ## Quick Reference
 
