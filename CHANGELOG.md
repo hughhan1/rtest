@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.39] - 2026-01-03
+
+### Fixed
+- Parameterized test IDs now use value-based format (`[1]`, `[2]`, `[3]`) instead of index-based (`[0]`, `[1]`, `[2]`), matching pytest's behavior and enabling workflows where rtest handles discovery while pytest handles execution
+
 ## [0.0.38] - 2026-01-02
 
 ### Added
