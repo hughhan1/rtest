@@ -33,6 +33,7 @@ repositories:
   # Has requirements.txt with all test deps: pytest, trio, trustme, uvicorn, etc.
   # Must use requirements_file method since no dependency-groups exist
   # Python 3.10+ required because rtest requires Python>=3.10
+  # Note: execution benchmarks skipped - test suite has 1 failing test and hangs with xdist
   - name: "httpx"
     url: "https://github.com/encode/httpx"
     category: "http_library"
@@ -42,6 +43,11 @@ repositories:
       dependency_groups: []
       extra_packages: []
     python_version: "3.10"
+    benchmark_overrides:
+      execution_native:
+        skip: true  # Test suite has failing test, pytest-xdist hangs
+      execution_pytest:
+        skip: true  # Test suite has failing test, pytest-xdist hangs
 
   # Pydantic - data validation (mentioned in README benchmarks)
   # Uses hatchling backend with dependency-groups (PEP 735)
@@ -82,6 +88,7 @@ repositories:
   # more-itertools - iterator building blocks
   # Uses hatchling backend, pure unittest.TestCase style tests
   # No conftest.py or pytest fixtures - ideal for execution benchmarks
+  # Note: pytest-xdist (-n 4) fails due to serialization issues with range/Decimal/type objects
   - name: "more-itertools"
     url: "https://github.com/more-itertools/more-itertools"
     category: "utility_library"
@@ -91,6 +98,10 @@ repositories:
       dependency_groups: []
       extra_packages: []
     python_version: "3.10"
+    benchmark_overrides:
+      execution_pytest:
+        pytest_args: ""  # No -n 4 due to xdist serialization errors
+        rtest_args: "--runner pytest"
 
   # boltons - bags of Python utilities
   # Uses setuptools, mostly simple class-based tests
