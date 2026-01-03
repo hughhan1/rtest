@@ -224,9 +224,32 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
                 Ok(names)
             }
         }
+        // Support list/tuple of strings: ["a", "b", "c"] or ("a", "b", "c")
+        Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
+            let mut names = Vec::with_capacity(elts.len());
+            for elt in elts {
+                match elt {
+                    Expr::StringLiteral(s) => {
+                        names.push(s.value.to_str().to_string());
+                    }
+                    _ => {
+                        return Err(CannotExpandReason::UnsupportedExpression(
+                            "argnames list must contain only strings".to_string(),
+                        ))
+                    }
+                }
+            }
+            if names.is_empty() {
+                Err(CannotExpandReason::UnsupportedExpression(
+                    "empty argnames".to_string(),
+                ))
+            } else {
+                Ok(names)
+            }
+        }
         Expr::Name(name) => Err(CannotExpandReason::VariableReference(name.id.to_string())),
         _ => Err(CannotExpandReason::UnsupportedExpression(
-            "argnames must be a string".to_string(),
+            "argnames must be a string or list/tuple of strings".to_string(),
         )),
     }
 }
@@ -468,7 +491,8 @@ pub fn expand_cases(specs: &[CasesSpec]) -> Vec<ExpandedCase> {
         return vec![];
     }
 
-    let expanded_specs: Vec<Vec<String>> = specs.iter().map(expand_single_spec).collect();
+    // Reverse specs to process innermost decorator first (bottom-to-top order)
+    let expanded_specs: Vec<Vec<String>> = specs.iter().rev().map(expand_single_spec).collect();
 
     let mut result: Vec<Vec<String>> = vec![vec![]];
     for spec_ids in expanded_specs {
@@ -602,7 +626,8 @@ mod tests {
         ];
         let cases = expand_cases(&specs);
         let ids: Vec<&str> = cases.iter().map(|c| c.case_id.as_str()).collect();
-        assert_eq!(ids, vec!["1-a", "1-b", "2-a", "2-b"]);
+        // Bottom decorator (y) processed first, so y varies before x
+        assert_eq!(ids, vec!["a-1", "a-2", "b-1", "b-2"]);
     }
 
     #[test]

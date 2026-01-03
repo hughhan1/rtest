@@ -24,12 +24,12 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 421 ms ± 12 ms | 43 ms ± 3 ms | **9.81x** |
-| [click](https://github.com/pallets/click) | 570 ms ± 341 ms | 86 ms ± 8 ms | **6.61x** |
-| [httpx](https://github.com/encode/httpx) | 1.71 s ± 0.76 s | 51 ms ± 5 ms | **33.53x** |
-| [pydantic](https://github.com/pydantic/pydantic) | 2.84 s ± 0.24 s | 121 ms ± 9 ms | **23.42x** |
-| [fastapi](https://github.com/tiangolo/fastapi) | 2.98 s ± 0.29 s | 107 ms ± 14 ms | **27.80x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 209 ms ± 20 ms | 28 ms ± 1 ms | **7.39x** |
+| [flask](https://github.com/pallets/flask) | 227 ms ± 7 ms | 32 ms ± 4 ms | **7.11x** |
+| [click](https://github.com/pallets/click) | 218 ms ± 10 ms | 34 ms ± 9 ms | **6.32x** |
+| [httpx](https://github.com/encode/httpx) | 342 ms ± 11 ms | 34 ms ± 8 ms | **10.02x** |
+| [fastapi](https://github.com/tiangolo/fastapi) | 1.65 s ± 48 ms | 65 ms ± 7 ms | **25.24x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 166 ms ± 10 ms | 28 ms ± 3 ms | **5.83x** |
+| [boltons](https://github.com/mahmoud/boltons) | 228 ms ± 12 ms | 30 ms ± 10 ms | **7.64x** |
 
 ### Test Execution (`--runner native`)
 
@@ -44,7 +44,9 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 17.96 s ± 2.17 s | 2.49 s ± 0.41 s | **7.20x** |
+| [flask](https://github.com/pallets/flask) | 758 ms ± 11 ms | 213 ms ± 15 ms | **3.56x** |
+| [fastapi](https://github.com/tiangolo/fastapi) | 10.66 s ± 145 ms | 390 ms ± 16 ms | **27.37x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.88 s ± 88 ms | 1.34 s ± 234 ms | **6.63x** |
 
 > **Note**: Native runner execution benchmarks are limited to repositories that use simple test patterns (unittest.TestCase,
 > plain assertions) without pytest fixtures. Most real-world projects use fixtures and conftest.py, which require the
@@ -62,13 +64,8 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
   ".venv/bin/rtest --runner pytest -n 4 tests"
 ```
 
-| Repository | pytest | rtest | Speedup |
-|------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 2.04 s ± 0.20 s | 0.91 s ± 0.11 s | **2.24x** |
-| [click](https://github.com/pallets/click) | 2.78 s ± 0.64 s | 1.12 s ± 1.30 s | **2.48x** |
-
-> **Note**: The `--runner pytest` mode uses pytest for test execution, so all pytest features (fixtures, plugins, markers)
-> work normally. The speedup comes from rtest's faster test collection phase.
+> **Note**: Benchmarks for `--runner pytest` mode are temporarily unavailable due to
+> [test ID escaping issues](https://github.com/hughhan1/rtest/issues/124) with certain parametrized string values.
 
 ## Quick Start
 

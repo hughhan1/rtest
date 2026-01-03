@@ -275,13 +275,13 @@ class TestWorkerExitCode:
     """Tests for worker exit code behavior."""
 
     @rtest.mark.cases(
-        "fixture,expected_code",
+        "test_file,expected_code",
         [
             ("test_parametrize.py", 0),  # all pass
             ("test_outcomes.py", 1),  # has failures
         ],
     )
-    def test_exit_code(self, fixture: str, expected_code: int) -> None:
+    def test_exit_code(self, test_file: str, expected_code: int) -> None:
         """Worker exit code reflects test results."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -295,7 +295,7 @@ class TestWorkerExitCode:
                     str(FIXTURES_DIR.parent.parent),
                     "--out",
                     str(output_file),
-                    str(FIXTURES_DIR / fixture),
+                    str(FIXTURES_DIR / test_file),
                 ],
                 capture_output=True,
                 text=True,
