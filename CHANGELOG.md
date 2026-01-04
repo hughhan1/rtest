@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.42] - 2026-01-03
+
+### Fixed
+- Diamond inheritance patterns (where a class inherits from multiple parents that share a common ancestor) no longer cause collection to fail with spurious cycle detection errors
+
 ## [0.0.41] - 2026-01-03
 
 ### Added
