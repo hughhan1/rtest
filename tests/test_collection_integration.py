@@ -1662,6 +1662,231 @@ class TestCollectionIntegration(unittest.TestCase):
             self.assertIn("ERRORS", result.output)
             self.assertIn("test_enum_subclass.py", result.output)
 
+    def test_parametrize_with_dataclass_instances(self) -> None:
+        """Test that @parametrize with dataclass instances generates positional IDs (issue #134)."""
+        files = {
+            "test_dataclass_params.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class MyData:
+                    value: int
+
+                @pytest.mark.parametrize("data", [MyData(1), MyData(2), MyData(3)])
+                def test_with_dataclass(data):
+                    assert data.value in [1, 2, 3]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate positional IDs like data0, data1, data2
+            expected_patterns = [
+                "test_dataclass_params.py::test_with_dataclass[data0]",
+                "test_dataclass_params.py::test_with_dataclass[data1]",
+                "test_dataclass_params.py::test_with_dataclass[data2]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
+    def test_parametrize_with_nested_dicts(self) -> None:
+        """Test that @parametrize with nested dicts generates positional IDs (issue #134)."""
+        files = {
+            "test_dict_params.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("config", [
+                    {"nested": {"key": 1}},
+                    {"nested": {"key": 2}},
+                ])
+                def test_with_nested_dict(config):
+                    assert "nested" in config
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate positional IDs like config0, config1
+            expected_patterns = [
+                "test_dict_params.py::test_with_nested_dict[config0]",
+                "test_dict_params.py::test_with_nested_dict[config1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_with_mixed_literal_and_complex(self) -> None:
+        """Test that @parametrize with mixed literals and complex objects works correctly."""
+        files = {
+            "test_mixed_params.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class Config:
+                    name: str
+
+                @pytest.mark.parametrize("value", [
+                    1,
+                    "string",
+                    Config("test"),
+                    None,
+                ])
+                def test_mixed_types(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Literals should have their value as ID, complex objects get positional ID
+            expected_patterns = [
+                "test_mixed_params.py::test_mixed_types[1]",
+                "test_mixed_params.py::test_mixed_types[string]",
+                "test_mixed_params.py::test_mixed_types[value2]",
+                "test_mixed_params.py::test_mixed_types[None]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_parametrize_with_class_instance_call(self) -> None:
+        """Test that @parametrize with regular class instantiation generates positional IDs."""
+        files = {
+            "test_class_params.py": textwrap.dedent("""
+                import pytest
+
+                class MyClass:
+                    def __init__(self, value):
+                        self.value = value
+
+                @pytest.mark.parametrize("obj", [MyClass(1), MyClass(2)])
+                def test_with_class_instance(obj):
+                    assert obj.value in [1, 2]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            expected_patterns = [
+                "test_class_params.py::test_with_class_instance[obj0]",
+                "test_class_params.py::test_with_class_instance[obj1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_with_set_literal(self) -> None:
+        """Test that @parametrize with set literals generates positional IDs."""
+        files = {
+            "test_set_params.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("items", [{1, 2}, {3, 4, 5}])
+                def test_with_set(items):
+                    assert len(items) >= 2
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            expected_patterns = [
+                "test_set_params.py::test_with_set[items0]",
+                "test_set_params.py::test_with_set[items1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_multiple_decorators_with_complex_objects(self) -> None:
+        """Test multiple @parametrize decorators with complex objects."""
+        files = {
+            "test_multi_param.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class Input:
+                    x: int
+
+                @dataclass
+                class Expected:
+                    y: int
+
+                @pytest.mark.parametrize("expected", [Expected(10), Expected(20)])
+                @pytest.mark.parametrize("input", [Input(1), Input(2)])
+                def test_cartesian(input, expected):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should generate cartesian product: 2 x 2 = 4 tests
+            expected_patterns = [
+                "test_multi_param.py::test_cartesian[input0-expected0]",
+                "test_multi_param.py::test_cartesian[input0-expected1]",
+                "test_multi_param.py::test_cartesian[input1-expected0]",
+                "test_multi_param.py::test_cartesian[input1-expected1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_parametrize_multi_param_with_complex_in_tuple(self) -> None:
+        """Test multi-param @parametrize where tuples contain complex objects."""
+        files = {
+            "test_tuple_complex.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class Config:
+                    value: int
+
+                @pytest.mark.parametrize("a,b", [
+                    (1, Config(10)),
+                    (2, Config(20)),
+                ])
+                def test_mixed_tuple(a, b):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Tuple contains opaque value, so entire param set gets positional ID
+            expected_patterns = [
+                "test_tuple_complex.py::test_mixed_tuple[a0]",
+                "test_tuple_complex.py::test_mixed_tuple[a1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

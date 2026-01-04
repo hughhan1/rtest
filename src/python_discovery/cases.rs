@@ -17,6 +17,9 @@ pub enum LiteralValue {
     None,
     /// A tuple/list of literal values (for multi-param cases like `(1, "a")`).
     Sequence(Vec<LiteralValue>),
+    /// A value we can count but cannot statically evaluate (e.g., dataclass instances, dicts).
+    /// Used for generating positional fallback IDs.
+    Opaque,
 }
 
 /// Specification for a single `@cases` or `@parametrize` decorator.
@@ -154,10 +157,13 @@ fn parse_single_decorator(
         Err(reason) => return DecoratorParseResult::CannotExpand(reason),
     };
 
-    let (argvalues, value_ids) = match extract_argvalues(&call.arguments.args[1], resolver) {
-        Ok(result) => result,
-        Err(reason) => return DecoratorParseResult::CannotExpand(reason),
-    };
+    // Use the first argname for generating positional IDs for opaque values
+    let first_argname = argnames.first().map(|s| s.as_str()).unwrap_or("arg");
+    let (argvalues, value_ids) =
+        match extract_argvalues(&call.arguments.args[1], resolver, first_argname) {
+            Ok(result) => result,
+            Err(reason) => return DecoratorParseResult::CannotExpand(reason),
+        };
 
     let ids = extract_ids_kwarg(&call.arguments.keywords, resolver);
 
@@ -257,18 +263,27 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
 /// Extract argument values from the second decorator argument.
 ///
 /// Returns `(values, value_ids)` where `value_ids` contains the ID string for each value.
+/// For opaque values (complex objects we can't evaluate), generates positional IDs
+/// using the first argname (e.g., `data0`, `data1`).
 fn extract_argvalues(
     expr: &Expr,
     resolver: Option<&ConstantResolver>,
+    first_argname: &str,
 ) -> Result<(Vec<LiteralValue>, Vec<String>), CannotExpandReason> {
     match expr {
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
             let mut values = Vec::with_capacity(elts.len());
             let mut ids = Vec::with_capacity(elts.len());
-            for elt in elts.iter() {
+            for (idx, elt) in elts.iter().enumerate() {
                 let (value, id) = extract_literal(elt, resolver)?;
+                // For opaque values, generate positional ID like "data0", "data1"
+                let final_id = if id.is_empty() {
+                    format!("{}{}", first_argname, idx)
+                } else {
+                    id
+                };
                 values.push(value);
-                ids.push(id);
+                ids.push(final_id);
             }
             Ok((values, ids))
         }
@@ -360,7 +375,12 @@ fn extract_literal(
                 sub_ids.push(id);
             }
             let lit = LiteralValue::Sequence(values);
-            let id = sub_ids.join("-");
+            // If any sub-element is opaque (empty id), the whole tuple needs positional fallback
+            let id = if sub_ids.iter().any(|s| s.is_empty()) {
+                String::new()
+            } else {
+                sub_ids.join("-")
+            };
             Ok((lit, id))
         }
         Expr::Name(_) | Expr::Attribute(_) => {
@@ -370,63 +390,19 @@ fn extract_literal(
                     return Ok((value, id));
                 }
             }
-            if let Expr::Name(name) = expr {
-                Err(CannotExpandReason::VariableReference(name.id.to_string()))
-            } else {
-                Err(CannotExpandReason::UnsupportedExpression(
-                    "attribute access".to_string(),
-                ))
-            }
+            // Unresolved name/attribute - treat as opaque (can count but not evaluate)
+            Ok((LiteralValue::Opaque, String::new()))
         }
-        Expr::Call(call) => {
-            let func_name = get_call_name(&call.func);
-            Err(CannotExpandReason::FunctionCall(func_name))
-        }
+        // Function calls (including dataclass/class instantiation) - opaque
+        Expr::Call(_) => Ok((LiteralValue::Opaque, String::new())),
+        // Dict and set literals - opaque (we can count them but not stringify nicely)
+        Expr::Dict(_) | Expr::Set(_) => Ok((LiteralValue::Opaque, String::new())),
+        // Comprehensions cannot be counted without evaluation
         Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
             Err(CannotExpandReason::Comprehension)
         }
-        _ => Err(CannotExpandReason::UnsupportedExpression(
-            expr_type_name(expr).to_string(),
-        )),
-    }
-}
-
-/// Get a human-readable name for an expression type.
-fn expr_type_name(expr: &Expr) -> &'static str {
-    match expr {
-        Expr::BoolOp(_) => "boolean operation",
-        Expr::Named(_) => "named expression",
-        Expr::BinOp(_) => "binary operation",
-        Expr::UnaryOp(_) => "unary operation",
-        Expr::Lambda(_) => "lambda",
-        Expr::If(_) => "conditional expression",
-        Expr::Dict(_) => "dict literal",
-        Expr::Set(_) => "set literal",
-        Expr::ListComp(_) => "list comprehension",
-        Expr::SetComp(_) => "set comprehension",
-        Expr::DictComp(_) => "dict comprehension",
-        Expr::Generator(_) => "generator expression",
-        Expr::Await(_) => "await expression",
-        Expr::Yield(_) => "yield expression",
-        Expr::YieldFrom(_) => "yield from expression",
-        Expr::Compare(_) => "comparison",
-        Expr::Call(_) => "function call",
-        Expr::FString(_) => "f-string",
-        Expr::TString(_) => "t-string",
-        Expr::StringLiteral(_) => "string literal",
-        Expr::BytesLiteral(_) => "bytes literal",
-        Expr::NumberLiteral(_) => "number literal",
-        Expr::BooleanLiteral(_) => "boolean literal",
-        Expr::NoneLiteral(_) => "None",
-        Expr::EllipsisLiteral(_) => "ellipsis",
-        Expr::Attribute(_) => "attribute access",
-        Expr::Subscript(_) => "subscript",
-        Expr::Starred(_) => "starred expression",
-        Expr::Name(_) => "variable reference",
-        Expr::List(_) => "list",
-        Expr::Tuple(_) => "tuple",
-        Expr::Slice(_) => "slice",
-        Expr::IpyEscapeCommand(_) => "IPython escape command",
+        // Other expressions - treat as opaque if we can count them
+        _ => Ok((LiteralValue::Opaque, String::new())),
     }
 }
 
@@ -482,6 +458,8 @@ pub fn literal_to_id_string(value: &LiteralValue) -> String {
             let parts: Vec<String> = seq.iter().map(literal_to_id_string).collect();
             parts.join("-")
         }
+        // Opaque values get positional IDs assigned in extract_argvalues
+        LiteralValue::Opaque => String::new(),
     }
 }
 
