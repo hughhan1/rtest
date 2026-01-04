@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.43] - 2026-01-03
+
+### Fixed
+- `run_tests()` now returns exit code 1 when collection errors occur, matching the CLI behavior
+
 ## [0.0.42] - 2026-01-03
 
 ### Fixed
