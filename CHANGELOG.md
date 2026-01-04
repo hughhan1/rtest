@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.45] - 2026-01-03
+
+### Fixed
+- Multi-param parametrize tests with complex objects now preserve literal IDs for non-complex parameters (e.g., `(MyData(1), 2, 3)` produces `[data0-2-3]` instead of `[data0]`)
+
 ## [0.0.44] - 2026-01-03
 
 ### Fixed

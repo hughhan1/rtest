@@ -339,6 +339,7 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
 /// - Position 0: "" (empty) -> "data0"
 /// - Position 1: "2" (non-empty, keep)
 /// - Position 2: "3" (non-empty, keep)
+///
 /// Result: "data0-2-3"
 fn fill_opaque_placeholders(id: &str, argnames: &[String], tuple_idx: usize) -> String {
     let parts: Vec<&str> = id.split('-').collect();
