@@ -534,21 +534,29 @@ impl SemanticTestDiscovery {
         // Get the base class info
         let base_info = match self.class_cache.get(&key) {
             Some(info) => info.clone(),
-            None => return Ok(false),
+            None => {
+                visited.remove(&key);
+                return Ok(false);
+            }
         };
 
         // If this class has __init__, return true
         if base_info.has_init {
+            visited.remove(&key);
             return Ok(true);
         }
 
         // Otherwise, recursively check all parent classes
         for parent in &base_info.base_classes {
             if self.base_class_has_init_impl(parent, module_resolver, visited)? {
+                visited.remove(&key);
                 return Ok(true);
             }
         }
 
+        // Remove from visited after processing to allow sibling branches in diamond
+        // inheritance patterns to revisit this class without false cycle detection
+        visited.remove(&key);
         Ok(false)
     }
 
@@ -593,6 +601,9 @@ impl SemanticTestDiscovery {
         let base_info = match self.class_cache.get(&key) {
             Some(info) => info.clone(),
             None => {
+                // Remove from visited before early return to allow sibling branches
+                // to process this class without false cycle detection
+                visited.remove(&key);
                 return Ok(None);
             }
         };
@@ -610,6 +621,10 @@ impl SemanticTestDiscovery {
 
         // Then add this class's own methods
         all_methods.extend(base_info.test_methods.clone());
+
+        // Remove from visited after processing to allow sibling branches in diamond
+        // inheritance patterns to revisit this class without false cycle detection
+        visited.remove(&key);
 
         Ok(Some(all_methods))
     }
