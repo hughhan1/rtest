@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.44] - 2026-01-03
+
+### Fixed
+- Class-level `@pytest.mark.parametrize` decorators now correctly expand to all methods in the class, including inherited methods
+- Parametrized tests with complex objects like dataclass instances, nested dictionaries, and class instantiations now expand correctly with positional fallback IDs
+
 ## [0.0.43] - 2026-01-03
 
 ### Fixed
