@@ -3,7 +3,7 @@
 ## Critical Rules
 
 **ALWAYS:**
-- Use `uv run` for ALL Python commands (`uv run pytest`, `uv run rtest`, `uv run python`)
+- Use `uv run` for ALL Python commands (`uv run rtest`, `uv run python`)
 - Run `git submodule update --init` after cloning (ruff is a git submodule for AST parsing)
 - Use conventional commits: `feat|fix|docs|test|refactor|chore: description`
 
@@ -25,7 +25,9 @@ uv run rtest tests/ -n auto         # Run tests in parallel
 ### Testing
 ```bash
 cargo test                          # Rust unit tests
-uv run pytest tests/ -v             # Python integration tests
+uv run rtest tests/ -v              # Python integration tests (use rtest, not pytest)
+uv run rtest tests/ -k <pattern>    # Run specific tests
+uv run rtest tests/ -n auto         # Run tests in parallel
 ```
 
 ### Linting & Formatting
