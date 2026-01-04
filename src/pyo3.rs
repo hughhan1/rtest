@@ -137,6 +137,11 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
 
     display_collection_results(&test_nodes, &errors);
 
+    // Exit early if there are collection errors
+    if !errors.errors.is_empty() {
+        return exit_codes::TESTS_FAILED;
+    }
+
     if test_nodes.is_empty() {
         println!("No tests found.");
         return 0;

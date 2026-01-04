@@ -1621,6 +1621,47 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 2 items", result.output)
 
+    def test_collection_errors_return_nonzero_exit_code(self) -> None:
+        """Test that collection errors return exit code 1, even when some tests are collected."""
+        files = {
+            "test_valid.py": textwrap.dedent("""
+                def test_valid_function():
+                    assert True
+
+                class TestValidClass:
+                    def test_method(self):
+                        pass
+            """),
+            "test_enum_subclass.py": textwrap.dedent("""
+                from enum import Enum
+
+                class TestStatus(Enum):
+                    PASSED = 1
+                    FAILED = 2
+
+                    def test_method(self):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Should return exit code 1 due to collection errors
+            self.assertEqual(
+                result.returncode,
+                ExitCodeValues.TESTS_FAILED,
+                f"Expected exit code 1 for collection errors, got {result.returncode}. Output: {result.output}",
+            )
+
+            # Should still display the valid tests that were collected
+            self.assertIn("test_valid.py::test_valid_function", result.output)
+            self.assertIn("test_valid.py::TestValidClass::test_method", result.output)
+
+            # Should display error information
+            self.assertIn("ERRORS", result.output)
+            self.assertIn("test_enum_subclass.py", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()
