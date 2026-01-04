@@ -232,10 +232,8 @@ fn parse_single_decorator(
         Err(reason) => return DecoratorParseResult::CannotExpand(reason),
     };
 
-    // Use the first argname for generating positional IDs for opaque values
-    let first_argname = argnames.first().map(|s| s.as_str()).unwrap_or("arg");
     let (argvalues, value_ids) =
-        match extract_argvalues(&call.arguments.args[1], resolver, first_argname) {
+        match extract_argvalues(&call.arguments.args[1], resolver, &argnames) {
             Ok(result) => result,
             Err(reason) => return DecoratorParseResult::CannotExpand(reason),
         };
@@ -335,28 +333,68 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
     }
 }
 
+/// Replace empty segments in a multi-param ID with positional IDs.
+///
+/// For ID "-2-3" with argnames ["data", "num", "count"] at tuple index 0:
+/// - Position 0: "" (empty) -> "data0"
+/// - Position 1: "2" (non-empty, keep)
+/// - Position 2: "3" (non-empty, keep)
+/// Result: "data0-2-3"
+fn fill_opaque_placeholders(id: &str, argnames: &[String], tuple_idx: usize) -> String {
+    let parts: Vec<&str> = id.split('-').collect();
+    let filled: Vec<String> = parts
+        .iter()
+        .enumerate()
+        .map(|(pos, part)| {
+            if part.is_empty() {
+                let argname = argnames.get(pos).map(|s| s.as_str()).unwrap_or("arg");
+                format!("{}{}", argname, tuple_idx)
+            } else {
+                (*part).to_string()
+            }
+        })
+        .collect();
+    filled.join("-")
+}
+
 /// Extract argument values from the second decorator argument.
 ///
 /// Returns `(values, value_ids)` where `value_ids` contains the ID string for each value.
 /// For opaque values (complex objects we can't evaluate), generates positional IDs
-/// using the first argname (e.g., `data0`, `data1`).
+/// using the corresponding argname (e.g., `data0`, `num1`).
 fn extract_argvalues(
     expr: &Expr,
     resolver: Option<&ConstantResolver>,
-    first_argname: &str,
+    argnames: &[String],
 ) -> Result<(Vec<LiteralValue>, Vec<String>), CannotExpandReason> {
+    let first_argname = argnames.first().map(|s| s.as_str()).unwrap_or("arg");
+
     match expr {
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
             let mut values = Vec::with_capacity(elts.len());
             let mut ids = Vec::with_capacity(elts.len());
             for (idx, elt) in elts.iter().enumerate() {
                 let (value, id) = extract_literal(elt, resolver)?;
-                // For opaque values, generate positional ID like "data0", "data1"
+
+                // Fill in positional IDs for opaque positions
                 let final_id = if id.is_empty() {
+                    // Single opaque value - use first argname
                     format!("{}{}", first_argname, idx)
+                } else if matches!(value, LiteralValue::Sequence(_)) && id.contains('-') {
+                    // Multi-param tuple - may have opaque placeholders (empty segments between dashes)
+                    fill_opaque_placeholders(&id, argnames, idx)
+                } else if matches!(value, LiteralValue::Sequence(_)) {
+                    // Single-element sequence or all-opaque sequence
+                    // Check if the id itself is empty (single opaque in sequence)
+                    if id.is_empty() {
+                        format!("{}{}", first_argname, idx)
+                    } else {
+                        fill_opaque_placeholders(&id, argnames, idx)
+                    }
                 } else {
                     id
                 };
+
                 values.push(value);
                 ids.push(final_id);
             }
@@ -450,12 +488,9 @@ fn extract_literal(
                 sub_ids.push(id);
             }
             let lit = LiteralValue::Sequence(values);
-            // If any sub-element is opaque (empty id), the whole tuple needs positional fallback
-            let id = if sub_ids.iter().any(|s| s.is_empty()) {
-                String::new()
-            } else {
-                sub_ids.join("-")
-            };
+            // Join sub_ids, preserving empty strings as placeholders for opaque elements.
+            // The caller (extract_argvalues) will fill in positional IDs for empty positions.
+            let id = sub_ids.join("-");
             Ok((lit, id))
         }
         Expr::Name(_) | Expr::Attribute(_) => {
@@ -850,5 +885,55 @@ mod tests {
             }
             _ => panic!("Expected Expanded, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn test_fill_opaque_placeholders_first_opaque() {
+        // Issue #137: Complex first argument with trailing literals
+        // (MyData(1), 2, 3) with argnames ["data", "num", "count"] at index 0
+        let argnames = vec!["data".to_string(), "num".to_string(), "count".to_string()];
+        assert_eq!(fill_opaque_placeholders("-2-3", &argnames, 0), "data0-2-3");
+        assert_eq!(fill_opaque_placeholders("-5-6", &argnames, 1), "data1-5-6");
+    }
+
+    #[test]
+    fn test_fill_opaque_placeholders_last_opaque() {
+        // (1, Config(10)) with argnames ["a", "b"] at index 0
+        let argnames = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(fill_opaque_placeholders("1-", &argnames, 0), "1-b0");
+        assert_eq!(fill_opaque_placeholders("2-", &argnames, 1), "2-b1");
+    }
+
+    #[test]
+    fn test_fill_opaque_placeholders_middle_opaque() {
+        // (1, Config(10), 100) with argnames ["start", "config", "end"] at index 0
+        let argnames = vec!["start".to_string(), "config".to_string(), "end".to_string()];
+        assert_eq!(
+            fill_opaque_placeholders("1--100", &argnames, 0),
+            "1-config0-100"
+        );
+        assert_eq!(
+            fill_opaque_placeholders("2--200", &argnames, 1),
+            "2-config1-200"
+        );
+    }
+
+    #[test]
+    fn test_fill_opaque_placeholders_all_opaque() {
+        // (Data(1), Data(2)) with argnames ["a", "b"] at index 0
+        let argnames = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(fill_opaque_placeholders("-", &argnames, 0), "a0-b0");
+        assert_eq!(fill_opaque_placeholders("-", &argnames, 1), "a1-b1");
+    }
+
+    #[test]
+    fn test_fill_opaque_placeholders_no_opaque() {
+        // All literals - should be unchanged
+        let argnames = vec!["x".to_string(), "y".to_string()];
+        assert_eq!(fill_opaque_placeholders("1-2", &argnames, 0), "1-2");
+        assert_eq!(
+            fill_opaque_placeholders("hello-world", &argnames, 1),
+            "hello-world"
+        );
     }
 }

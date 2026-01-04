@@ -1,7 +1,10 @@
 //! AST visitor for discovering tests in Python code.
 
 use crate::python_discovery::{
-    cases::{combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs, MethodCasesInfo},
+    cases::{
+        combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs,
+        MethodCasesInfo,
+    },
     constant_resolver::ConstantResolver,
     discovery::{TestDiscoveryConfig, TestInfo},
     pattern,
@@ -77,7 +80,8 @@ impl TestDiscoveryVisitor {
                             let method_name = func.name.as_str();
                             if self.is_test_function(method_name) {
                                 // Store only method-level specs (not combined with class)
-                                let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                                let method_specs =
+                                    parse_decorators_to_specs(&func.decorator_list, Some(resolver));
                                 methods.push(CachedMethodInfo {
                                     name: method_name.to_string(),
                                     line: func.range.start().to_u32() as usize,
@@ -87,10 +91,8 @@ impl TestDiscoveryVisitor {
                         }
                     }
 
-                    self.class_cache.insert(name.to_string(), CachedClassInfo {
-                        methods,
-                        has_init,
-                    });
+                    self.class_cache
+                        .insert(name.to_string(), CachedClassInfo { methods, has_init });
                 }
             }
         }
@@ -136,7 +138,9 @@ impl TestDiscoveryVisitor {
         let class_specs = parse_decorators_to_specs(&class.decorator_list, Some(resolver));
 
         // Collect methods defined directly in this class (to filter inherited methods)
-        let own_method_names: HashSet<String> = class.body.iter()
+        let own_method_names: HashSet<String> = class
+            .body
+            .iter()
             .filter_map(|stmt| {
                 if let Stmt::FunctionDef(func) = stmt {
                     let name = func.name.as_str();
@@ -163,10 +167,8 @@ impl TestDiscoveryVisitor {
 
                             // Combine CHILD class specs with PARENT method specs
                             // This is the key fix: inherited methods get the child's class decorators
-                            let cases_expansion = combine_and_expand_specs(
-                                &class_specs,
-                                &parent_method.method_specs,
-                            );
+                            let cases_expansion =
+                                combine_and_expand_specs(&class_specs, &parent_method.method_specs);
 
                             self.tests.push(TestInfo {
                                 name: parent_method.name.clone(),
@@ -186,7 +188,8 @@ impl TestDiscoveryVisitor {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs =
+                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
                     let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
 
                     self.tests.push(TestInfo {

@@ -2001,10 +2001,116 @@ class TestCollectionIntegration(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
 
-            # Tuple contains opaque value, so entire param set gets positional ID
+            # Literal values keep their IDs, opaque values get positional IDs
+            # (1, Config(10)) -> "1-b0", (2, Config(20)) -> "2-b1"
             expected_patterns = [
-                "test_tuple_complex.py::test_mixed_tuple[a0]",
-                "test_tuple_complex.py::test_mixed_tuple[a1]",
+                "test_tuple_complex.py::test_mixed_tuple[1-b0]",
+                "test_tuple_complex.py::test_mixed_tuple[2-b1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_complex_first_with_trailing_literals(self) -> None:
+        """Test that complex first argument preserves trailing literal IDs (issue #137)."""
+        files = {
+            "test_complex_first.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class MyData:
+                    value: int
+
+                @pytest.mark.parametrize("data, num, count", [
+                    (MyData(1), 2, 3),
+                    (MyData(4), 5, 6),
+                ])
+                def test_complex_first(data, num, count):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Complex first argument gets positional ID, literals keep their values
+            # (MyData(1), 2, 3) -> "data0-2-3", (MyData(4), 5, 6) -> "data1-5-6"
+            expected_patterns = [
+                "test_complex_first.py::test_complex_first[data0-2-3]",
+                "test_complex_first.py::test_complex_first[data1-5-6]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_all_opaque_multi_param(self) -> None:
+        """Test that all-opaque multi-param tuples get per-position IDs."""
+        files = {
+            "test_all_opaque.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class Data:
+                    value: int
+
+                @pytest.mark.parametrize("a, b", [
+                    (Data(1), Data(2)),
+                    (Data(3), Data(4)),
+                ])
+                def test_all_opaque(a, b):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Both params are opaque, each gets its own positional ID
+            # (Data(1), Data(2)) -> "a0-b0", (Data(3), Data(4)) -> "a1-b1"
+            expected_patterns = [
+                "test_all_opaque.py::test_all_opaque[a0-b0]",
+                "test_all_opaque.py::test_all_opaque[a1-b1]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_opaque_middle_position(self) -> None:
+        """Test that opaque value in middle position gets correct argname."""
+        files = {
+            "test_opaque_middle.py": textwrap.dedent("""
+                from dataclasses import dataclass
+                import pytest
+
+                @dataclass
+                class Config:
+                    value: int
+
+                @pytest.mark.parametrize("start, config, end", [
+                    (1, Config(10), 100),
+                    (2, Config(20), 200),
+                ])
+                def test_opaque_middle(start, config, end):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Middle param is opaque, uses its argname "config"
+            # (1, Config(10), 100) -> "1-config0-100", (2, Config(20), 200) -> "2-config1-200"
+            expected_patterns = [
+                "test_opaque_middle.py::test_opaque_middle[1-config0-100]",
+                "test_opaque_middle.py::test_opaque_middle[2-config1-200]",
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)

@@ -9,7 +9,10 @@ use std::path::Path;
 
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::python_discovery::{
-    cases::{combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs, MethodCasesInfo},
+    cases::{
+        combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs,
+        MethodCasesInfo,
+    },
     constant_resolver::ConstantResolver,
     discovery::{TestDiscoveryConfig, TestInfo},
     module_resolver::ModuleResolver,
@@ -244,7 +247,8 @@ impl SemanticTestDiscovery {
                 if self.is_test_class(class_name) {
                     let has_init = self.class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, resolver);
-                    let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
+                    let class_specs =
+                        parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
                     let imports = self.collect_imports_from_module(module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
@@ -282,7 +286,8 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     // Store only method-level specs (not combined with class)
-                    let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs =
+                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
                     methods.push(TestMethodInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -377,7 +382,9 @@ impl SemanticTestDiscovery {
         let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
 
         // Collect methods defined directly in this class (to filter inherited methods)
-        let own_method_names: std::collections::HashSet<String> = class_def.body.iter()
+        let own_method_names: std::collections::HashSet<String> = class_def
+            .body
+            .iter()
             .filter_map(|stmt| {
                 if let Stmt::FunctionDef(func) = stmt {
                     let name = func.name.as_str();
@@ -416,10 +423,8 @@ impl SemanticTestDiscovery {
 
                                 // Combine CHILD class specs with PARENT method specs
                                 // This is the key fix: inherited methods get the child's class decorators
-                                let cases_expansion = combine_and_expand_specs(
-                                    &class_specs,
-                                    &method.method_specs,
-                                );
+                                let cases_expansion =
+                                    combine_and_expand_specs(&class_specs, &method.method_specs);
 
                                 all_tests.push(TestInfo {
                                     name: method.name.clone(),
@@ -447,7 +452,8 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs =
+                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
                     let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
 
                     all_tests.push(TestInfo {
@@ -682,7 +688,10 @@ impl SemanticTestDiscovery {
                     // They might be used as base classes
                     let has_init = self.class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, &external_resolver);
-                    let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(&external_resolver));
+                    let class_specs = parse_decorators_to_specs(
+                        &class_def.decorator_list,
+                        Some(&external_resolver),
+                    );
                     let imports = self.collect_imports_from_module(&parsed_module.module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
