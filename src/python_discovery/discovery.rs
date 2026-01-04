@@ -378,4 +378,119 @@ class TestDerived(TestBase):
             .iter()
             .all(|t| t.class_name.as_ref().is_some_and(|c| c == "TestDerived")));
     }
+
+    #[test]
+    fn test_inherited_method_with_class_parametrize() {
+        let source = r#"
+import pytest
+
+class TestParent:
+    def test_inherited(self, x):
+        pass
+
+@pytest.mark.parametrize("x", [1, 2])
+class TestChild(TestParent):
+    pass
+"#;
+
+        let config = TestDiscoveryConfig::default();
+        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
+
+        // Should have 2 TestInfo:
+        // - TestParent::test_inherited (no parametrize)
+        // - TestChild::test_inherited (with parametrize expansion)
+        assert_eq!(tests.len(), 2, "Expected 2 TestInfo, got: {:?}", tests);
+
+        // Check parent test (no expansion)
+        let parent_tests: Vec<&TestInfo> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestParent"))
+            .collect();
+        assert_eq!(parent_tests.len(), 1);
+        assert!(matches!(
+            parent_tests[0].cases_expansion,
+            CasesExpansion::NotDecorated
+        ));
+
+        // Check child test (should have Expanded with 2 cases)
+        let child_tests: Vec<&TestInfo> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestChild"))
+            .collect();
+        assert_eq!(child_tests.len(), 1, "Child should have 1 TestInfo");
+
+        // The expansion should produce [1] and [2]
+        if let CasesExpansion::Expanded(cases) = &child_tests[0].cases_expansion {
+            assert_eq!(cases.len(), 2, "Expected 2 cases in expansion");
+            assert_eq!(cases[0].case_id, "1");
+            assert_eq!(cases[1].case_id, "2");
+        } else {
+            panic!(
+                "Expected child test to have Expanded cases, got: {:?}",
+                child_tests[0].cases_expansion
+            );
+        }
+    }
+
+    #[test]
+    fn test_inherited_method_with_class_parametrize_semantic() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temp directory
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test_inherit.py");
+
+        let source = r#"
+import pytest
+
+class TestParent:
+    def test_inherited(self, x):
+        pass
+
+@pytest.mark.parametrize("x", [1, 2])
+class TestChild(TestParent):
+    pass
+"#;
+        fs::write(&test_path, source).unwrap();
+
+        let config = TestDiscoveryConfig::default();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
+
+        // Should have 2 TestInfo:
+        // - TestParent::test_inherited (no parametrize)
+        // - TestChild::test_inherited (with parametrize expansion)
+        assert_eq!(tests.len(), 2, "Expected 2 TestInfo, got: {:?}", tests);
+
+        // Check parent test (no expansion)
+        let parent_tests: Vec<&TestInfo> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestParent"))
+            .collect();
+        assert_eq!(parent_tests.len(), 1);
+        assert!(matches!(
+            parent_tests[0].cases_expansion,
+            CasesExpansion::NotDecorated
+        ));
+
+        // Check child test (should have Expanded with 2 cases)
+        let child_tests: Vec<&TestInfo> = tests
+            .iter()
+            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestChild"))
+            .collect();
+        assert_eq!(child_tests.len(), 1, "Child should have 1 TestInfo");
+
+        // The expansion should produce [1] and [2]
+        if let CasesExpansion::Expanded(cases) = &child_tests[0].cases_expansion {
+            assert_eq!(cases.len(), 2, "Expected 2 cases in expansion");
+            assert_eq!(cases[0].case_id, "1");
+            assert_eq!(cases[1].case_id, "2");
+        } else {
+            panic!(
+                "Expected child test to have Expanded cases, got: {:?}",
+                child_tests[0].cases_expansion
+            );
+        }
+    }
 }

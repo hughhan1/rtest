@@ -1592,6 +1592,129 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 2 items", result.output)
 
+    def test_class_level_parametrize(self) -> None:
+        """Test that class-level @pytest.mark.parametrize is expanded to all methods (issue #133)."""
+        files = {
+            "test_class_parametrize.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("x", [True, False])
+                class TestClassLevel:
+                    def test_foo(self, x):
+                        pass
+
+                    def test_bar(self, x):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Class parametrize should expand to all methods
+            expected_patterns = [
+                "test_class_parametrize.py::TestClassLevel::test_foo[True]",
+                "test_class_parametrize.py::TestClassLevel::test_foo[False]",
+                "test_class_parametrize.py::TestClassLevel::test_bar[True]",
+                "test_class_parametrize.py::TestClassLevel::test_bar[False]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_class_and_method_parametrize_cartesian(self) -> None:
+        """Test cartesian product of class-level and method-level parametrize."""
+        files = {
+            "test_combined.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("x", [1, 2])
+                class TestCombined:
+                    @pytest.mark.parametrize("y", ["a", "b"])
+                    def test_method(self, x, y):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should produce cartesian product: method params vary fastest (innermost)
+            expected_patterns = [
+                "test_combined.py::TestCombined::test_method[a-1]",
+                "test_combined.py::TestCombined::test_method[a-2]",
+                "test_combined.py::TestCombined::test_method[b-1]",
+                "test_combined.py::TestCombined::test_method[b-2]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_multiple_class_level_parametrize(self) -> None:
+        """Test multiple stacked class-level parametrize decorators."""
+        files = {
+            "test_multi_class.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("a", [1, 2])
+                @pytest.mark.parametrize("b", [3, 4])
+                class TestMultipleClassLevel:
+                    def test_multi(self, a, b):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Should produce cartesian product of both class decorators
+            expected_patterns = [
+                "test_multi_class.py::TestMultipleClassLevel::test_multi[3-1]",
+                "test_multi_class.py::TestMultipleClassLevel::test_multi[3-2]",
+                "test_multi_class.py::TestMultipleClassLevel::test_multi[4-1]",
+                "test_multi_class.py::TestMultipleClassLevel::test_multi[4-2]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_inherited_method_with_class_parametrize(self) -> None:
+        """Test that inherited methods get the child class's @parametrize decorator."""
+        files = {
+            "test_inherit.py": textwrap.dedent("""
+                import pytest
+
+                class TestParent:
+                    def test_inherited(self, x):
+                        pass
+
+                @pytest.mark.parametrize("x", [1, 2])
+                class TestChild(TestParent):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Inherited method should get the child class's parametrize
+            expected_patterns = [
+                "test_inherit.py::TestParent::test_inherited",  # Parent: no parametrize
+                "test_inherit.py::TestChild::test_inherited[1]",  # Child: parametrized
+                "test_inherit.py::TestChild::test_inherited[2]",
+            ]
+
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
     def test_parametrize_unicode_escape_ids(self) -> None:
         """Test that unicode escape sequences in parametrize generate correct IDs (issue #124)."""
         files = {

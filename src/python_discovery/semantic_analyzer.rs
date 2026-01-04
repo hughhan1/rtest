@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::python_discovery::{
-    cases::parse_decorators_for_cases,
+    cases::{combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs, MethodCasesInfo},
     constant_resolver::ConstantResolver,
     discovery::{TestDiscoveryConfig, TestInfo},
     module_resolver::ModuleResolver,
@@ -33,14 +33,16 @@ pub struct ResolvedBaseClass {
     is_local: bool,
 }
 
-use crate::python_discovery::cases::CasesExpansion;
-
-/// Lightweight test method information without redundant data
+/// Lightweight test method information for caching.
+///
+/// Stores method-level specs (not expanded) so they can be combined with
+/// child class decorators during inheritance.
 #[derive(Debug, Clone)]
 pub struct TestMethodInfo {
     pub name: String,
     pub line: usize,
-    pub cases_expansion: CasesExpansion,
+    /// Method-level decorator specs (not yet combined with class decorators)
+    pub method_specs: MethodCasesInfo,
 }
 
 /// Test class information including methods
@@ -50,6 +52,8 @@ pub struct TestClassInfo {
     pub has_init: bool,
     pub test_methods: Vec<TestMethodInfo>,
     pub base_classes: Vec<ResolvedBaseClass>,
+    /// Class-level decorator specs
+    pub class_specs: MethodCasesInfo,
 }
 
 /// Enhanced test discovery with semantic analysis
@@ -240,6 +244,7 @@ impl SemanticTestDiscovery {
                 if self.is_test_class(class_name) {
                     let has_init = self.class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, resolver);
+                    let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
                     let imports = self.collect_imports_from_module(module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
@@ -249,6 +254,7 @@ impl SemanticTestDiscovery {
                         has_init,
                         test_methods,
                         base_classes,
+                        class_specs,
                     };
 
                     self.class_cache
@@ -260,7 +266,10 @@ impl SemanticTestDiscovery {
         Ok(())
     }
 
-    /// Collect test methods from a class
+    /// Collect test methods from a class (method-level specs only, not expanded).
+    ///
+    /// This stores only method-level decorator specs, allowing them to be combined
+    /// with child class decorators during inheritance resolution.
     fn collect_test_methods(
         &self,
         class_def: &StmtClassDef,
@@ -272,12 +281,12 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let cases_expansion =
-                        parse_decorators_for_cases(&func.decorator_list, Some(resolver));
+                    // Store only method-level specs (not combined with class)
+                    let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
                     methods.push(TestMethodInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
-                        cases_expansion,
+                        method_specs,
                     });
                 }
             }
@@ -364,6 +373,22 @@ impl SemanticTestDiscovery {
             return Ok(None);
         }
 
+        // Parse class-level decorators once
+        let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
+
+        // Collect methods defined directly in this class (to filter inherited methods)
+        let own_method_names: std::collections::HashSet<String> = class_def.body.iter()
+            .filter_map(|stmt| {
+                if let Stmt::FunctionDef(func) = stmt {
+                    let name = func.name.as_str();
+                    if self.is_test_function(name) {
+                        return Some(name.to_string());
+                    }
+                }
+                None
+            })
+            .collect();
+
         let mut all_tests = Vec::new();
 
         // Collect inherited methods
@@ -376,23 +401,32 @@ impl SemanticTestDiscovery {
                     Some(resolved) => {
                         // Skip inheritance analysis for known stdlib modules that we can't analyze
                         if self.is_stdlib_module_to_skip(&resolved.module_path) {
-                            // Skip inheritance collection for stdlib modules like unittest.TestCase
-                            // The class will still be collected with its own methods
                             continue;
                         }
 
-                        // Get methods from the base class
+                        // Get method specs from the base class (not yet combined with class decorators)
                         if let Some(base_methods) =
                             self.get_base_class_methods(&resolved, module_resolver)?
                         {
                             for method in base_methods {
-                                // Create a copy with the current class name
+                                // Skip if this method is overridden in the child class
+                                if own_method_names.contains(&method.name) {
+                                    continue;
+                                }
+
+                                // Combine CHILD class specs with PARENT method specs
+                                // This is the key fix: inherited methods get the child's class decorators
+                                let cases_expansion = combine_and_expand_specs(
+                                    &class_specs,
+                                    &method.method_specs,
+                                );
+
                                 all_tests.push(TestInfo {
                                     name: method.name.clone(),
                                     line: method.line,
                                     is_method: true,
                                     class_name: Some(class_name.to_string()),
-                                    cases_expansion: method.cases_expansion.clone(),
+                                    cases_expansion,
                                 });
                             }
                         }
@@ -409,14 +443,13 @@ impl SemanticTestDiscovery {
         }
 
         // Collect methods defined in this class
-        let mut own_method_names = std::collections::HashSet::new();
         for stmt in &class_def.body {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    own_method_names.insert(method_name.to_string());
-                    let cases_expansion =
-                        parse_decorators_for_cases(&func.decorator_list, Some(resolver));
+                    let method_specs = parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
+
                     all_tests.push(TestInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -427,14 +460,6 @@ impl SemanticTestDiscovery {
                 }
             }
         }
-
-        // Remove inherited methods that are overridden by methods defined in this class
-        all_tests.retain(|test| {
-            // Keep the test if it's defined in this class OR if it's not overridden
-            (test.class_name.as_ref() == Some(&class_name.to_string())
-                && test.line >= class_def.range().start().to_u32() as usize)
-                || !own_method_names.contains(&test.name)
-        });
 
         Ok(Some(all_tests))
     }
@@ -657,6 +682,7 @@ impl SemanticTestDiscovery {
                     // They might be used as base classes
                     let has_init = self.class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, &external_resolver);
+                    let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(&external_resolver));
                     let imports = self.collect_imports_from_module(&parsed_module.module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
@@ -666,6 +692,7 @@ impl SemanticTestDiscovery {
                         has_init,
                         test_methods,
                         base_classes,
+                        class_specs,
                     };
 
                     self.class_cache
@@ -682,6 +709,7 @@ impl SemanticTestDiscovery {
                 has_init: false,
                 test_methods: vec![],
                 base_classes: vec![],
+                class_specs: MethodCasesInfo::NotDecorated,
             },
         );
 

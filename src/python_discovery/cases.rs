@@ -38,6 +38,20 @@ pub struct CasesSpec {
     pub ids: Option<Vec<String>>,
 }
 
+/// Parsed decorator information (specs, not yet expanded).
+///
+/// This intermediate representation allows combining class-level and method-level
+/// specs before expansion, which is necessary for proper inheritance handling.
+#[derive(Debug, Clone)]
+pub enum MethodCasesInfo {
+    /// No `@cases` or `@parametrize` decorators found.
+    NotDecorated,
+    /// Successfully parsed decorator specs.
+    Specs(Vec<CasesSpec>),
+    /// Cannot statically parse; will fall back to base test name.
+    CannotExpand(CannotExpandReason),
+}
+
 /// Reason why cases could not be statically expanded.
 #[derive(Debug, Clone)]
 pub enum CannotExpandReason {
@@ -120,6 +134,67 @@ pub fn parse_decorators_for_cases(
         CasesExpansion::NotDecorated
     } else {
         CasesExpansion::Expanded(expand_cases(&specs))
+    }
+}
+
+/// Parse decorators into specs without expanding.
+///
+/// This is useful for caching method-level specs separately from class-level specs,
+/// allowing proper combination during inheritance.
+pub fn parse_decorators_to_specs(
+    decorators: &[Decorator],
+    resolver: Option<&ConstantResolver>,
+) -> MethodCasesInfo {
+    let mut specs = Vec::new();
+
+    for decorator in decorators {
+        match parse_single_decorator(decorator, resolver) {
+            DecoratorParseResult::CasesSpec(spec) => specs.push(spec),
+            DecoratorParseResult::CannotExpand(reason) => {
+                return MethodCasesInfo::CannotExpand(reason);
+            }
+            DecoratorParseResult::NotCasesDecorator => {}
+        }
+    }
+
+    if specs.is_empty() {
+        MethodCasesInfo::NotDecorated
+    } else {
+        MethodCasesInfo::Specs(specs)
+    }
+}
+
+/// Combine class-level and method-level specs, then expand.
+///
+/// Class specs become outer (slower-varying) parameters, method specs become
+/// inner (faster-varying) parameters. This matches pytest's behavior for
+/// class-level `@parametrize` decorators.
+pub fn combine_and_expand_specs(
+    class_info: &MethodCasesInfo,
+    method_info: &MethodCasesInfo,
+) -> CasesExpansion {
+    // Handle CannotExpand cases first
+    if let MethodCasesInfo::CannotExpand(reason) = class_info {
+        return CasesExpansion::CannotExpand(reason.clone());
+    }
+    if let MethodCasesInfo::CannotExpand(reason) = method_info {
+        return CasesExpansion::CannotExpand(reason.clone());
+    }
+
+    // Collect specs: class first (outer), then method (inner)
+    let mut combined_specs = Vec::new();
+
+    if let MethodCasesInfo::Specs(specs) = class_info {
+        combined_specs.extend(specs.iter().cloned());
+    }
+    if let MethodCasesInfo::Specs(specs) = method_info {
+        combined_specs.extend(specs.iter().cloned());
+    }
+
+    if combined_specs.is_empty() {
+        CasesExpansion::NotDecorated
+    } else {
+        CasesExpansion::Expanded(expand_cases(&combined_specs))
     }
 }
 
@@ -718,5 +793,62 @@ mod tests {
             ascii_escape_string("hello\\world☃"),
             "hello\\\\world\\u2603"
         );
+    }
+
+    #[test]
+    fn test_combine_and_expand_specs_class_only() {
+        // When class has parametrize but method doesn't, should still expand
+        let class_specs = MethodCasesInfo::Specs(vec![CasesSpec {
+            argnames: vec!["x".to_string()],
+            argvalues: vec![LiteralValue::Int(1), LiteralValue::Int(2)],
+            value_ids: vec!["1".to_string(), "2".to_string()],
+            ids: None,
+        }]);
+        let method_specs = MethodCasesInfo::NotDecorated;
+
+        let result = combine_and_expand_specs(&class_specs, &method_specs);
+
+        match result {
+            CasesExpansion::Expanded(cases) => {
+                assert_eq!(cases.len(), 2);
+                assert_eq!(cases[0].case_id, "1");
+                assert_eq!(cases[1].case_id, "2");
+            }
+            _ => panic!("Expected Expanded, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_combine_and_expand_specs_both() {
+        // When both class and method have parametrize, should combine
+        let class_specs = MethodCasesInfo::Specs(vec![CasesSpec {
+            argnames: vec!["x".to_string()],
+            argvalues: vec![LiteralValue::Int(1), LiteralValue::Int(2)],
+            value_ids: vec!["1".to_string(), "2".to_string()],
+            ids: None,
+        }]);
+        let method_specs = MethodCasesInfo::Specs(vec![CasesSpec {
+            argnames: vec!["y".to_string()],
+            argvalues: vec![
+                LiteralValue::String("a".to_string()),
+                LiteralValue::String("b".to_string()),
+            ],
+            value_ids: vec!["a".to_string(), "b".to_string()],
+            ids: None,
+        }]);
+
+        let result = combine_and_expand_specs(&class_specs, &method_specs);
+
+        match result {
+            CasesExpansion::Expanded(cases) => {
+                assert_eq!(cases.len(), 4);
+                // Method params vary fastest (innermost)
+                assert_eq!(cases[0].case_id, "a-1");
+                assert_eq!(cases[1].case_id, "a-2");
+                assert_eq!(cases[2].case_id, "b-1");
+                assert_eq!(cases[3].case_id, "b-2");
+            }
+            _ => panic!("Expected Expanded, got {:?}", result),
+        }
     }
 }
