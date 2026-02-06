@@ -433,6 +433,71 @@ class TestChild(TestParent):
     }
 
     #[test]
+    fn test_stdlib_inheritance_graceful() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test_enum.py");
+
+        let source = r#"
+from enum import Enum
+
+class TestStatus(Enum):
+    A = 1
+
+class TestReal:
+    def test_works(self):
+        pass
+"#;
+        fs::write(&test_path, source).unwrap();
+
+        let config = TestDiscoveryConfig::default();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
+
+        // TestStatus(Enum) should be skipped gracefully, TestReal::test_works collected
+        let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            test_names.contains(&"test_works"),
+            "Expected test_works, got: {:?}",
+            test_names
+        );
+        assert_eq!(tests.len(), 1, "Expected only 1 test, got: {:?}", tests);
+    }
+
+    #[test]
+    fn test_external_package_inheritance_graceful() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test_external.py");
+
+        let source = r#"
+from nonexistent_package import SomeBase
+
+class TestDerived(SomeBase):
+    def test_method(self):
+        pass
+"#;
+        fs::write(&test_path, source).unwrap();
+
+        let config = TestDiscoveryConfig::default();
+        let (tests, _warnings) =
+            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
+
+        // Should not crash; TestDerived::test_method should still be collected
+        let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            test_names.contains(&"test_method"),
+            "Expected test_method, got: {:?}",
+            test_names
+        );
+        assert_eq!(tests.len(), 1, "Expected 1 test, got: {:?}", tests);
+    }
+
+    #[test]
     fn test_inherited_method_with_class_parametrize_semantic() {
         use std::fs;
         use tempfile::TempDir;

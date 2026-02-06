@@ -948,8 +948,8 @@ class TestCollectionIntegration(unittest.TestCase):
             # Check that no tests were collected
             self.assertIn("No tests collected", result.output)
 
-    def test_unresolvable_base_class_error(self) -> None:
-        """Test that unresolvable base classes result in collection errors."""
+    def test_unresolvable_base_class_graceful(self) -> None:
+        """Test that unresolvable base classes are handled gracefully (issue #131)."""
         files = {
             "test_unresolvable.py": textwrap.dedent("""
                 # Test with an imported base class that doesn't exist
@@ -962,14 +962,14 @@ class TestCollectionIntegration(unittest.TestCase):
         }
 
         with create_test_project(files) as project_path:
-            # This should fail due to unresolvable imported base class
             result = run_collection(project_path)
 
-            # Should exit with error code due to import error
-            self.assertNotEqual(result.returncode, 0)
-            # Error message should mention the import error (could be in stdout or stderr)
-            error_text = result.stdout + result.stderr
-            self.assertIn("Could not find module: nonexistent_module", error_text)
+            # Should succeed — the class's own test methods are still collected
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                ["test_unresolvable.py::TestWithUnresolvableImportedBase::test_method"],
+            )
 
     def test_unittest_testcase_inheritance_supported(self) -> None:
         """Test that inheritance from unittest.TestCase is properly supported."""
@@ -1755,16 +1755,7 @@ class TestCollectionIntegration(unittest.TestCase):
                     def test_method(self):
                         pass
             """),
-            "test_enum_subclass.py": textwrap.dedent("""
-                from enum import Enum
-
-                class TestStatus(Enum):
-                    PASSED = 1
-                    FAILED = 2
-
-                    def test_method(self):
-                        pass
-            """),
+            "test_syntax_error.py": "def test_broken(\n",
         }
 
         with create_test_project(files) as project_path:
@@ -1783,7 +1774,7 @@ class TestCollectionIntegration(unittest.TestCase):
 
             # Should display error information
             self.assertIn("ERRORS", result.output)
-            self.assertIn("test_enum_subclass.py", result.output)
+            self.assertIn("test_syntax_error.py", result.output)
 
     def test_parametrize_with_dataclass_instances(self) -> None:
         """Test that @parametrize with dataclass instances generates positional IDs (issue #134)."""
@@ -2115,6 +2106,88 @@ class TestCollectionIntegration(unittest.TestCase):
 
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 2 items", result.output)
+
+    def test_stdlib_inheritance_skipped_gracefully(self) -> None:
+        """Test that inheriting from stdlib classes doesn't crash collection (issue #131)."""
+        files = {
+            "test_enum_subclass.py": textwrap.dedent("""
+                from enum import Enum
+
+                class TestStatus(Enum):
+                    PASSED = 1
+                    FAILED = 2
+
+                class TestReal:
+                    def test_works(self):
+                        pass
+            """),
+            "test_typed_dict.py": textwrap.dedent("""
+                from typing import TypedDict
+
+                class TestConfig(TypedDict):
+                    name: str
+                    value: int
+
+                class TestActual:
+                    def test_real_test(self):
+                        pass
+            """),
+            "test_collections.py": textwrap.dedent("""
+                from collections import OrderedDict
+
+                class TestOrderedDict(OrderedDict):
+                    pass
+
+                class TestSuite:
+                    def test_something(self):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # Real test methods should still be collected
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_enum_subclass.py::TestReal::test_works",
+                    "test_typed_dict.py::TestActual::test_real_test",
+                    "test_collections.py::TestSuite::test_something",
+                ],
+            )
+
+    def test_external_package_inheritance_skipped_gracefully(self) -> None:
+        """Test that inheriting from unresolvable external packages doesn't crash collection."""
+        files = {
+            "test_external.py": textwrap.dedent("""
+                from some_nonexistent_package import BaseModel
+
+                class TestModel(BaseModel):
+                    def test_method(self):
+                        pass
+
+                class TestPlain:
+                    def test_plain(self):
+                        pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+
+            # The plain test should be collected; TestModel's own method should also be collected
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_external.py::TestPlain::test_plain",
+                    "test_external.py::TestModel::test_method",
+                ],
+            )
 
 
 if __name__ == "__main__":
