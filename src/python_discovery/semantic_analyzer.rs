@@ -3,6 +3,7 @@
 use ruff_python_ast::{Expr, Mod, ModModule, Stmt, StmtClassDef};
 use ruff_python_parser::{parse, Mode, ParseOptions};
 use ruff_python_semantic::{Module as SemanticModule, ModuleKind, ModuleSource, SemanticModel};
+use ruff_python_stdlib::sys::is_known_standard_library;
 use ruff_text_size::Ranged;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -327,16 +328,10 @@ impl SemanticTestDiscovery {
                     ),
                 )?;
 
-                match resolved {
-                    Some(resolved) => base_classes.push(resolved),
-                    None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for class '{}'",
-                            self.format_base_class_expr(base),
-                            class_def.name
-                        )));
-                    }
+                if let Some(resolved) = resolved {
+                    base_classes.push(resolved);
                 }
+                // Skip unresolvable base class expressions (e.g., complex metaclasses)
             }
         }
 
@@ -437,11 +432,8 @@ impl SemanticTestDiscovery {
                         }
                     }
                     None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for inheritance in class '{}'",
-                            self.format_base_class_expr(base_expr),
-                            class_name
-                        )));
+                        // Skip unresolvable base class expressions
+                        continue;
                     }
                 }
             }
@@ -515,11 +507,8 @@ impl SemanticTestDiscovery {
                         }
                     }
                     None => {
-                        return Err(CollectionError::ImportError(format!(
-                            "Could not resolve base class '{}' for __init__ check in class '{}'",
-                            self.format_base_class_expr(base_expr),
-                            class_def.name
-                        )));
+                        // Skip unresolvable base class expressions — assume no __init__
+                        continue;
                     }
                 }
             }
@@ -674,7 +663,24 @@ impl SemanticTestDiscovery {
 
         // Load the module and collect test classes
         {
-            let parsed_module = module_resolver.resolve_and_load(module_path)?;
+            let parsed_module = match module_resolver.resolve_and_load(module_path) {
+                Ok(pm) => pm,
+                Err(CollectionError::ImportError(_)) => {
+                    // Module is external or unresolvable — mark as attempted so we don't retry
+                    self.class_cache.insert(
+                        cache_key,
+                        TestClassInfo {
+                            name: String::new(),
+                            has_init: false,
+                            test_methods: vec![],
+                            base_classes: vec![],
+                            class_specs: MethodCasesInfo::NotDecorated,
+                        },
+                    );
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
 
             // Build resolver for constants in this external module
             let external_resolver = ConstantResolver::from_module(&parsed_module.module);
@@ -864,40 +870,15 @@ impl SemanticTestDiscovery {
         false
     }
 
-    /// Format a base class expression for error messages
-    fn format_base_class_expr(&self, base_expr: &Expr) -> String {
-        match base_expr {
-            Expr::Name(name_expr) => name_expr.id.to_string(),
-            Expr::Attribute(attr_expr) => {
-                if let Expr::Name(module_name) = &*attr_expr.value {
-                    format!("{}.{}", module_name.id, attr_expr.attr)
-                } else {
-                    format!("<complex>.{}", attr_expr.attr)
-                }
-            }
-            Expr::Subscript(subscript_expr) => {
-                format!(
-                    "{}[...]",
-                    self.format_base_class_expr(&subscript_expr.value)
-                )
-            }
-            _ => "<unresolvable>".to_string(),
-        }
-    }
-
-    /// Check if a module should be skipped for inheritance analysis
+    /// Check if a module should be skipped for inheritance analysis.
+    ///
+    /// Uses ruff's comprehensive stdlib detection to skip all standard library modules,
+    /// since the module resolver can only resolve project-local modules.
     fn is_stdlib_module_to_skip(&self, module_path: &[String]) -> bool {
         if module_path.is_empty() {
             return false;
         }
-
-        let module_name = &module_path[0];
-        matches!(
-            module_name.as_str(),
-            "unittest"    // unittest.TestCase and related
-            | "abc"       // abc.ABC for abstract base classes  
-            | "typing" // typing.Protocol, typing.Generic, etc.
-        )
+        is_known_standard_library(11, &module_path[0])
     }
 
     /// Helper to get alias name with fallback to the original name
