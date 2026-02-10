@@ -30,13 +30,13 @@ impl PytestRunner {
                 if let Some((key, value)) = env_str.split_once('=') {
                     Some((key.to_string(), value.to_string()))
                 } else {
-                    eprintln!("Warning: Invalid environment variable format: {}", env_str);
+                    log::warn!("Invalid environment variable format: {}", env_str);
                     None
                 }
             })
             .collect();
 
-        println!("Pytest command: {} {}", program, initial_args.join(" "));
+        log::debug!("Pytest command: {} {}", program, initial_args.join(" "));
 
         PytestRunner {
             program,
@@ -48,7 +48,7 @@ impl PytestRunner {
 
 /// Execute tests in parallel across multiple workers
 pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<String>) -> i32 {
-    println!(
+    log::info!(
         "Running tests with {} workers using {} distribution",
         config.worker_count, config.dist_mode
     );
@@ -56,7 +56,7 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
     let distribution_mode = match config.dist_mode.parse::<DistributionMode>() {
         Ok(mode) => mode,
         Err(e) => {
-            eprintln!("Invalid distribution mode '{}': {e}", config.dist_mode);
+            log::warn!("Invalid distribution mode '{}': {e}", config.dist_mode);
             return 1;
         }
     };
@@ -94,7 +94,7 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
         }
 
         if worker_id == 0 {
-            println!("No test batches to execute.");
+            log::info!("No test batches to execute.");
             return 0;
         }
 
@@ -121,7 +121,7 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
         let test_batches = scheduler.distribute_tests(test_nodes, config.worker_count);
 
         if test_batches.is_empty() {
-            println!("No test batches to execute.");
+            log::info!("No test batches to execute.");
             return 0;
         }
 
@@ -183,5 +183,31 @@ mod tests {
         // (Environment variables are currently just acknowledged, not stored)
         assert_eq!(runner.program, "python3");
         assert_eq!(runner.initial_args, vec!["-m", "pytest"]);
+    }
+
+    #[test]
+    fn test_env_var_parsing_skips_invalid() {
+        let env_vars = vec![
+            "VALID=value".into(),
+            "INVALID_NO_EQUALS".into(),
+            "ALSO_VALID=another".into(),
+        ];
+        let runner = PytestRunner::new(env_vars);
+        assert_eq!(runner.env_vars.len(), 2);
+        assert_eq!(runner.env_vars[0], ("VALID".to_string(), "value".to_string()));
+        assert_eq!(runner.env_vars[1], ("ALSO_VALID".to_string(), "another".to_string()));
+    }
+
+    #[test]
+    fn test_execute_tests_nonexistent_program() {
+        let exit_code = crate::pytest_executor::execute_tests(
+            "nonexistent_program_xyz_12345",
+            &[],
+            vec!["test::something".into()],
+            vec![],
+            None,
+            &[],
+        );
+        assert_eq!(exit_code, 1);
     }
 }

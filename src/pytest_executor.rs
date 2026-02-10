@@ -43,10 +43,13 @@ pub fn execute_tests(
     let run_status = match run_cmd.status() {
         Ok(status) => status,
         Err(e) => {
-            eprintln!("Failed to execute pytest command: {e}");
+            log::error!("Failed to execute pytest command: {e}");
             return 1;
         }
     };
 
-    run_status.code().unwrap_or(1)
+    run_status.code().unwrap_or_else(|| {
+        log::warn!("Pytest process terminated by signal");
+        1
+    })
 }
