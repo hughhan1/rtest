@@ -432,7 +432,11 @@ mod tests {
         assert!(result.is_ok(), "perform_collect should succeed");
         let (collectors, path_errors) = result.expect("expected Ok");
         // The valid file should produce a Module collector
-        assert_eq!(collectors.len(), 1, "should have one collector for the valid file");
+        assert_eq!(
+            collectors.len(),
+            1,
+            "should have one collector for the valid file"
+        );
         assert!(
             path_errors.is_empty(),
             "should have no path errors for valid file"
