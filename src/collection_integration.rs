@@ -25,7 +25,11 @@ pub fn collect_tests_rust(
     };
 
     match session.perform_collect(args) {
-        Ok(collectors) => {
+        Ok((collectors, path_errors)) => {
+            for (path, error) in path_errors {
+                collection_errors.errors.push((path, error));
+            }
+
             let mut test_nodes = Vec::new();
 
             for collector in collectors {
