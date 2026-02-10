@@ -22,6 +22,10 @@ pub trait Collector: std::fmt::Debug {
     fn parent(&self) -> Option<&dyn Collector>;
 
     /// Collect child nodes
+    #[expect(
+        clippy::type_complexity,
+        reason = "returns both child nodes and warnings"
+    )]
     fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)>;
 
     /// Get the path associated with this collector
