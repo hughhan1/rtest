@@ -43,16 +43,15 @@ impl ModuleResolver {
 
     /// Resolve a module path to a file and load it
     pub fn resolve_and_load(&mut self, module_path: &[String]) -> CollectionResult<&ParsedModule> {
-        // Check cache first
-        if self.cache.contains_key(module_path) {
-            return Ok(self.cache.get(module_path).unwrap());
+        if !self.cache.contains_key(module_path) {
+            let file_path = self.resolve_with_search_paths(module_path)?;
+            let parsed = self.load_module(&file_path)?;
+            self.cache.insert(module_path.to_vec(), parsed);
         }
-
-        // Resolve using search paths
-        let file_path = self.resolve_with_search_paths(module_path)?;
-        let parsed = self.load_module(&file_path)?;
-        self.cache.insert(module_path.to_vec(), parsed);
-        Ok(self.cache.get(module_path).unwrap())
+        Ok(self
+            .cache
+            .get(module_path)
+            .expect("cache entry was just inserted or confirmed present"))
     }
 
     /// Resolve module using search paths
@@ -205,6 +204,26 @@ mod tests {
 
         // Test non-existent module
         assert!(resolver.resolve_and_load(&["nonexistent".into()]).is_err());
+    }
+
+    #[test]
+    fn test_resolve_and_load_cache_hit() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        // Create a simple Python file
+        fs::write(root.join("cached_module.py"), "x = 1\n").unwrap();
+
+        let mut resolver = ModuleResolver::new(root).unwrap();
+        let module_path: Vec<String> = vec!["cached_module".into()];
+
+        // First call resolves from disk
+        let first = resolver.resolve_and_load(&module_path).unwrap();
+        assert_eq!(first.path, root.join("cached_module.py"));
+
+        // Second call exercises the cache-hit path
+        let second = resolver.resolve_and_load(&module_path).unwrap();
+        assert_eq!(second.path, root.join("cached_module.py"));
     }
 
     #[test]
