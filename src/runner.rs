@@ -50,7 +50,8 @@ impl PytestRunner {
 pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<String>) -> i32 {
     log::info!(
         "Running tests with {} workers using {} distribution",
-        config.worker_count, config.dist_mode
+        config.worker_count,
+        config.dist_mode
     );
 
     let distribution_mode = match config.dist_mode.parse::<DistributionMode>() {
@@ -194,8 +195,14 @@ mod tests {
         ];
         let runner = PytestRunner::new(env_vars);
         assert_eq!(runner.env_vars.len(), 2);
-        assert_eq!(runner.env_vars[0], ("VALID".to_string(), "value".to_string()));
-        assert_eq!(runner.env_vars[1], ("ALSO_VALID".to_string(), "another".to_string()));
+        assert_eq!(
+            runner.env_vars[0],
+            ("VALID".to_string(), "value".to_string())
+        );
+        assert_eq!(
+            runner.env_vars[1],
+            ("ALSO_VALID".to_string(), "another".to_string())
+        );
     }
 
     #[test]
