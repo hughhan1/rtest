@@ -45,10 +45,11 @@ impl Session {
             .collect()
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn perform_collect(
         self: Rc<Self>,
         args: &[String],
-    ) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    ) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<(String, CollectionError)>)> {
         let paths = if args.is_empty() {
             let pytest_config = crate::config::read_pytest_config(&self.rootpath);
 
@@ -73,11 +74,15 @@ impl Session {
             resolved
         };
 
-        Ok(paths
-            .into_iter()
-            .filter_map(|path| self.collect_path(&path).ok())
-            .flatten()
-            .collect())
+        let mut collectors: Vec<Box<dyn Collector>> = Vec::new();
+        let mut path_errors: Vec<(String, CollectionError)> = Vec::new();
+        for path in paths {
+            match self.collect_path(&path) {
+                Ok(items) => collectors.extend(items),
+                Err(e) => path_errors.push((path.to_string_lossy().into_owned(), e)),
+            }
+        }
+        Ok((collectors, path_errors))
     }
 
     fn collect_path(self: &Rc<Self>, path: &Path) -> CollectionResult<Vec<Box<dyn Collector>>> {
@@ -401,5 +406,68 @@ pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
             Some(e),
             vec![],
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_perform_collect_returns_tuple_with_collectors_and_errors() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = temp_dir.path().canonicalize().expect("canonicalize");
+
+        // Create a valid test file
+        let valid_file = root.join("test_valid.py");
+        fs::write(&valid_file, "def test_ok():\n    pass\n").expect("failed to write valid file");
+
+        let session = Rc::new(Session::new(root.clone()));
+
+        // Pass the valid file explicitly as an arg
+        let result = session.perform_collect(&[valid_file.to_string_lossy().into_owned()]);
+        assert!(result.is_ok(), "perform_collect should succeed");
+        let (collectors, path_errors) = result.expect("expected Ok");
+        // The valid file should produce a Module collector
+        assert_eq!(collectors.len(), 1, "should have one collector for the valid file");
+        assert!(
+            path_errors.is_empty(),
+            "should have no path errors for valid file"
+        );
+    }
+
+    #[test]
+    fn test_perform_collect_explicit_nonexistent_path_returns_error() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = temp_dir.path().canonicalize().expect("canonicalize");
+
+        let session = Rc::new(Session::new(root));
+
+        // Explicit args with non-existent path should return Err (FileNotFound)
+        let result = session.perform_collect(&["nonexistent.py".to_string()]);
+        assert!(result.is_err());
+        match result.expect_err("expected error") {
+            CollectionError::FileNotFound(_) => {}
+            other => panic!("expected FileNotFound, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_perform_collect_signature_returns_errors_vec() {
+        // Verify that perform_collect returns the new tuple type
+        // by checking the type system accepts destructuring into
+        // (Vec<Box<dyn Collector>>, Vec<(String, CollectionError)>)
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = temp_dir.path().canonicalize().expect("canonicalize");
+
+        let valid_file = root.join("test_a.py");
+        fs::write(&valid_file, "def test_a():\n    pass\n").expect("write");
+
+        let session = Rc::new(Session::new(root));
+        let result = session.perform_collect(&[valid_file.to_string_lossy().into_owned()]);
+        let (_collectors, errors) = result.expect("should succeed");
+        // With a valid file the errors vec should be empty
+        assert!(errors.is_empty());
     }
 }

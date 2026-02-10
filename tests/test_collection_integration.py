@@ -2190,5 +2190,36 @@ class TestCollectionIntegration(unittest.TestCase):
             )
 
 
+class TestCollectionErrorPropagation(unittest.TestCase):
+    """Test that collection errors from invalid files are reported, not silently dropped."""
+
+    def test_collection_errors_reported_for_invalid_files(self) -> None:
+        """Test that collection errors from files with syntax errors are reported."""
+        files = {
+            "test_valid.py": textwrap.dedent("""
+                def test_ok():
+                    assert True
+            """),
+            "test_syntax_error.py": textwrap.dedent("""
+                def test_broken(
+                    # missing closing paren and colon - syntax error
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # The valid test should still be collected
+            assert_tests_found(
+                result.output_lines,
+                ["test_valid.py::test_ok"],
+            )
+
+            # The syntax error should be reported in the output
+            assert any("ERROR collecting" in line or "error" in line.lower() for line in result.output_lines), (
+                f"Expected collection error to be reported, got:\n{result.output}"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
