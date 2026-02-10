@@ -52,6 +52,7 @@ fn collect_items_recursive(
         test_nodes.push(collector.nodeid().into());
     } else {
         let report = collect_one_node(collector);
+        collection_errors.warnings.extend(report.warnings);
         match report.outcome {
             CollectionOutcome::Passed => {
                 for child in report.result {

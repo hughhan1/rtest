@@ -1,6 +1,6 @@
 //! Collection types and traits.
 
-use super::error::CollectionResult;
+use super::error::{CollectionResult, CollectionWarning};
 use std::path::{Path, PathBuf};
 
 /// Location information for a test item
@@ -22,7 +22,7 @@ pub trait Collector: std::fmt::Debug {
     fn parent(&self) -> Option<&dyn Collector>;
 
     /// Collect child nodes
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>>;
+    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)>;
 
     /// Get the path associated with this collector
     #[allow(dead_code)]

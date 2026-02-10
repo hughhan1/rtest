@@ -1,7 +1,7 @@
 //! Collection node implementations.
 
 use super::config::CollectionConfig;
-use super::error::{CollectionError, CollectionOutcome, CollectionResult};
+use super::error::{CollectionError, CollectionOutcome, CollectionResult, CollectionWarning};
 use super::types::{Collector, Location};
 use super::utils::glob_match;
 use crate::python_discovery::{
@@ -146,9 +146,9 @@ impl Collector for Session {
         None
     }
 
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
         // Session collection is handled by perform_collect
-        Ok(vec![])
+        Ok((vec![], vec![]))
     }
 
     fn path(&self) -> &Path {
@@ -193,12 +193,12 @@ impl Collector for Directory {
         Some(self.session() as &dyn Collector)
     }
 
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
         let read_dir_result = std::fs::read_dir(&self.path);
         let dir_entries = match read_dir_result {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Ok(vec![]);
+                return Ok((vec![], vec![]));
             }
             Err(err) => return Err(err.into()),
         };
@@ -228,7 +228,7 @@ impl Collector for Directory {
             }
         }
 
-        Ok(items)
+        Ok((items, vec![]))
     }
 
     fn path(&self) -> &Path {
@@ -273,7 +273,7 @@ impl Collector for Module {
         Some(self.session() as &dyn Collector)
     }
 
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
         // Read the Python file
         let source = std::fs::read_to_string(&self.path)?;
 
@@ -286,15 +286,11 @@ impl Collector for Module {
         // Use the session's root path for module resolution
         let root_path = &self.session().rootpath;
 
-        let (tests, warnings) =
+        let (tests, discovery_warnings) =
             discover_tests_with_inheritance(&self.path, &source, &discovery_config, root_path)?;
 
-        // Print warnings to stderr
-        for warning in &warnings {
-            eprintln!("{}", warning);
-        }
+        let mut all_warnings: Vec<CollectionWarning> = discovery_warnings;
 
-        let mut expansion_warnings = Vec::new();
         let functions: Vec<Box<dyn Collector>> = tests
             .into_iter()
             .flat_map(|test| {
@@ -304,18 +300,19 @@ impl Collector for Module {
                     } else {
                         format!("{}::{}", self.nodeid, test.name)
                     };
-                    expansion_warnings.push(format_cannot_expand_warning(&nodeid, reason));
+                    let warning_str = format_cannot_expand_warning(&nodeid, reason);
+                    all_warnings.push(CollectionWarning {
+                        file_path: self.path.to_string_lossy().into_owned(),
+                        line: 0,
+                        message: warning_str,
+                    });
                 }
                 test_info_to_functions(&test, &self.path, &self.nodeid)
             })
             .map(|function| Box::new(function) as Box<dyn Collector>)
             .collect();
 
-        for warning in &expansion_warnings {
-            eprintln!("{}", warning);
-        }
-
-        Ok(functions)
+        Ok((functions, all_warnings))
     }
 
     fn path(&self) -> &Path {
@@ -341,9 +338,9 @@ impl Collector for Function {
         None // TODO: Store parent reference
     }
 
-    fn collect(&self) -> CollectionResult<Vec<Box<dyn Collector>>> {
+    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
         // Functions are leaf nodes, they don't collect
-        Ok(vec![])
+        Ok((vec![], vec![]))
     }
 
     fn path(&self) -> &Path {
@@ -364,6 +361,7 @@ pub struct CollectReport {
     pub longrepr: Option<String>,
     pub error_type: Option<CollectionError>,
     pub result: Vec<Box<dyn Collector>>,
+    pub warnings: Vec<CollectionWarning>,
 }
 
 impl CollectReport {
@@ -373,6 +371,7 @@ impl CollectReport {
         longrepr: Option<String>,
         error_type: Option<CollectionError>,
         result: Vec<Box<dyn Collector>>,
+        warnings: Vec<CollectionWarning>,
     ) -> Self {
         Self {
             nodeid,
@@ -380,6 +379,7 @@ impl CollectReport {
             longrepr,
             error_type,
             result,
+            warnings,
         }
     }
 }
@@ -387,18 +387,20 @@ impl CollectReport {
 /// Collect a single node and return a report
 pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
     match collector.collect() {
-        Ok(result) => CollectReport::new(
+        Ok((result, warnings)) => CollectReport::new(
             collector.nodeid().into(),
             CollectionOutcome::Passed,
             None,
             None,
             result,
+            warnings,
         ),
         Err(e) => CollectReport::new(
             collector.nodeid().into(),
             CollectionOutcome::Failed,
             Some(e.to_string()),
             Some(e),
+            vec![],
             vec![],
         ),
     }
