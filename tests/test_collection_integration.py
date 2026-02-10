@@ -2189,6 +2189,30 @@ class TestCollectionIntegration(unittest.TestCase):
                 ],
             )
 
+    def test_collection_warnings_for_init_classes_in_summary(self) -> None:
+        """Test that classes with __init__ produce warnings in the collection summary."""
+        files = {
+            "test_init_warning.py": textwrap.dedent("""
+                class TestWithInit:
+                    def __init__(self):
+                        pass
+                    def test_method(self):
+                        pass
+
+                class TestGood:
+                    def test_ok(self):
+                        pass
+            """),
+        }
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            # Verify the warning about __init__ appears in output
+            combined = result.output
+            assert "__init__" in combined or "warning" in combined.lower(), (
+                f"Expected warning about __init__ in output, got:\n{combined}"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
