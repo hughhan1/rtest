@@ -11,6 +11,10 @@ A Python test runner built with Rust, featuring high-performance test collection
 
 ## Performance
 
+`rtest` replaces pytest's import-heavy collection with static AST analysis, so it never needs to import test modules to
+discover tests. On smaller open-source projects this yields a 5-25x speedup; on large monorepos the advantage is far
+more dramatic (100-200x+) because import overhead scales with codebase size.
+
 ### Test Collection (`--collect-only`)
 
 Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with the following command:
@@ -24,11 +28,12 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
+| **[Valon](https://github.com/valon-technologies/) monorepo** | **245 s ± 25 s** | **899 ms ± 25 ms** | **273x** |
 | [flask](https://github.com/pallets/flask) | 226 ms ± 5 ms | 34 ms ± 11 ms | **6.57x** |
 | [click](https://github.com/pallets/click) | 221 ms ± 10 ms | 38 ms ± 7 ms | **5.77x** |
-| [httpx](https://github.com/encode/httpx) | 344 ms ± 12 ms | 33 ms ± 4 ms | **10.56x** |
-| [pydantic](https://github.com/pydantic/pydantic) | 1.60 s ± 21 ms | 82 ms ± 13 ms | **19.52x** |
-| [fastapi](https://github.com/tiangolo/fastapi) | 1.59 s ± 20 ms | 62 ms ± 5 ms | **25.57x** |
+| [httpx](https://github.com/encode/httpx) | 344 ms ± 12 ms | 33 ms ± 4 ms | **10.6x** |
+| [pydantic](https://github.com/pydantic/pydantic) | 1.60 s ± 21 ms | 82 ms ± 13 ms | **19.5x** |
+| [fastapi](https://github.com/tiangolo/fastapi) | 1.59 s ± 20 ms | 62 ms ± 5 ms | **25.6x** |
 | [more-itertools](https://github.com/more-itertools/more-itertools) | 156 ms ± 5 ms | 29 ms ± 5 ms | **5.32x** |
 | [boltons](https://github.com/mahmoud/boltons) | 234 ms ± 7 ms | 35 ms ± 3 ms | **6.77x** |
 
@@ -45,8 +50,8 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 764 ms ± 15 ms | 205 ms ± 5 ms | **3.72x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.90 s ± 194 ms | 1.34 s ± 185 ms | **6.65x** |
+| [flask](https://github.com/pallets/flask) | 764 ms ± 15 ms | 205 ms ± 5 ms | **3.73x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.90 s ± 194 ms | 1.34 s ± 185 ms | **6.64x** |
 
 > **Note**: Native runner execution benchmarks are limited to repositories that use simple test patterns (unittest.TestCase,
 > plain assertions) without pytest fixtures. Most real-world projects use fixtures and conftest.py, which require the
@@ -66,11 +71,12 @@ hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
 
 | Repository | pytest | rtest | Speedup |
 |------------|--------|-------|---------|
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.96 s ± 218 ms | 1.48 s ± 240 ms | **6.04x** |
+| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.96 s ± 218 ms | 1.48 s ± 240 ms | **6.05x** |
 
-> **Note**: Most repositories have limited `--runner pytest` benchmarks due to
+> **Note**: Earlier versions had limited `--runner pytest` benchmarks due to
 > [test ID generation differences](https://github.com/hughhan1/rtest/issues/124) between rtest and pytest for certain
-> parametrized values. When rtest generates a different test ID than pytest expects, pytest cannot locate the test.
+> parametrized values (e.g., escaped unicode strings, backslash escaping). This has been fixed. Some edge cases in
+> parametrized ID generation may still exist for complex or dynamic expressions.
 
 ## Quick Start
 
@@ -204,6 +210,32 @@ slashes (`/`) regardless of platform. For example:
 - Both show: `tests/unit/test_example.py::test_function`
 
 This difference is intentional as `rtest` preserves the native path format of the operating system.
+
+### Native Runner Scope
+
+The native runner (`--runner native`) does not currently support pytest fixtures or `conftest.py` discovery. Projects
+that rely on fixtures should use `--runner pytest` instead. Fixture support is tracked in
+[#105](https://github.com/hughhan1/rtest/issues/105).
+
+### pytest-xdist Serialization with Decimal Objects
+
+When using `--runner pytest -n N` (parallel pytest execution), projects that use `Decimal` objects in parametrized test
+data may fail with a serialization error:
+
+```plaintext
+execnet.gateway_base.DumpError: can't serialize <class 'decimal.Decimal'>
+```
+
+This is a limitation of pytest-xdist's inter-process communication, which cannot serialize certain Python types. Tests
+pass when run without parallelization (`--runner pytest` without `-n`). See
+[#116](https://github.com/hughhan1/rtest/issues/116) for details.
+
+### Collection Failures on Complex Codebases
+
+Some projects with complex runtime behavior (e.g., extensive use of plugins, dynamic imports, or metaclass-heavy
+patterns) may fail during `rtest` collection despite working correctly with `pytest`. For example, the
+[pydantic](https://github.com/pydantic/pydantic) repository encounters errors when collected by `rtest`. See
+[#55](https://github.com/hughhan1/rtest/issues/55) for details.
 
 ## Contributing
 
