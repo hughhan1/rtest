@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.46] - 2026-02-20
+
+### Added
+- `rtest.raises()` context manager for testing expected exceptions, with support for exception type matching (including tuples and subclasses), optional regex matching on exception messages, and a `.value` attribute for accessing the caught exception
+
+### Fixed
+- Gracefully handle stdlib and external package inheritance instead of failing during collection
+- Propagate collection path errors instead of silently dropping them
+- Propagate collection warnings through the pipeline instead of printing directly to stderr
+- Remove `unwrap()` calls from library code in favor of proper error handling
+- Replace `println`/`eprintln` with structured log macros in runner and executor
+
+### Docs
+- Expand README with Valon monorepo benchmarks (236x collection speedup) and documented known limitations
+
 ## [0.0.45] - 2026-01-03
 
 ### Fixed
