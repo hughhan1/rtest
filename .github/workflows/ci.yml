@@ -46,8 +46,10 @@ jobs:
     - name: Install dependencies in virtual environment
       run: |
         if [ "${{ runner.os }}" = "Windows" ]; then
+          .venv\\Scripts\\python -m pip install --upgrade pip
           .venv\\Scripts\\pip install maturin pytest==8.3.5
         else
+          .venv/bin/pip install --upgrade pip
           .venv/bin/pip install maturin[patchelf] pytest==8.3.5
         fi
       shell: bash
