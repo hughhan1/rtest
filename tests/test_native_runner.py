@@ -271,6 +271,32 @@ class TestOutcomes:
             assert with_output[0]["stderr"].strip() == "stderr message"
 
 
+class TestRaisesIntegration:
+    def test_raises_outcomes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            output_file = tmp_path / "results.jsonl"
+            results = run_worker(
+                FIXTURES_DIR / "test_raises.py",
+                FIXTURES_DIR.parent.parent,
+                output_file,
+            )
+
+            def outcome_for(name: str) -> str:
+                matches = [r for r in results if r["nodeid"].endswith(f"::{name}")]
+                assert len(matches) == 1, f"Expected 1 result for {name}, got {len(matches)}"
+                return matches[0]["outcome"]
+
+            assert outcome_for("test_raises_expected") == "passed"
+            assert outcome_for("test_raises_with_match") == "passed"
+            assert outcome_for("test_raises_no_exception") == "failed"
+            assert outcome_for("test_raises_wrong_exception") == "error"
+            assert outcome_for("test_raises_match_fails") == "failed"
+            assert outcome_for("test_raises_value_attribute") == "passed"
+            assert outcome_for("test_raises_exception_tuple") == "passed"
+            assert outcome_for("test_raises_subclass") == "passed"
+
+
 class TestWorkerExitCode:
     """Tests for worker exit code behavior."""
 
