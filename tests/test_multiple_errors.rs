@@ -1,7 +1,9 @@
 //! Test that multiple syntax errors are collected and reported
 
 use indoc::indoc;
-use rtest::collection_integration::{collect_tests_rust, display_collection_results};
+use rtest::collection_integration::{
+    collect_tests_rust, display_collection_results, CollectionDisplayStats,
+};
 use rtest::CollectionError;
 use std::fs;
 use tempfile::TempDir;
@@ -53,10 +55,10 @@ fn test_collection_multiple_syntax_errors() {
     assert_eq!(test_nodes.len(), 2, "Should find tests from valid file");
     assert!(test_nodes
         .iter()
-        .any(|n| n.contains("test_valid.py::test_valid")));
-    assert!(test_nodes
-        .iter()
-        .any(|n| n.contains("test_valid.py::TestValidClass::test_method")));
+        .any(|n| n.nodeid.contains("test_valid.py::test_valid")));
+    assert!(test_nodes.iter().any(|n| n
+        .nodeid
+        .contains("test_valid.py::TestValidClass::test_method")));
 
     assert_eq!(errors.errors.len(), 3, "Should collect all 3 syntax errors");
 
@@ -78,6 +80,6 @@ fn test_collection_multiple_syntax_errors() {
     }
 
     println!("\n--- Test output ---");
-    display_collection_results(&test_nodes, &errors);
+    display_collection_results(&test_nodes, &errors, CollectionDisplayStats::default());
     println!("--- End test output ---\n");
 }

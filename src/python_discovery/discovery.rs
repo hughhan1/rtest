@@ -3,6 +3,8 @@
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::collection::nodes::Function;
 use crate::collection::types::Location;
+use std::collections::HashSet;
+
 use crate::python_discovery::cases::CasesExpansion;
 use crate::python_discovery::module_resolver::ModuleResolver;
 use crate::python_discovery::semantic_analyzer::SemanticTestDiscovery;
@@ -101,6 +103,32 @@ fn path_to_module_path(file_path: &Path, root_path: &Path) -> Vec<String> {
     parts
 }
 
+/// Build pytest-style keyword names used for `-k` expression matching.
+pub fn build_keywords(test: &TestInfo, module_nodeid: &str) -> Vec<String> {
+    let mut names = HashSet::new();
+
+    if let Some(file_part) = module_nodeid.split("::").next() {
+        names.insert(file_part.to_lowercase());
+        if let Some(stem) = Path::new(file_part).file_stem() {
+            names.insert(stem.to_string_lossy().to_lowercase());
+        }
+    }
+
+    if let Some(class_name) = &test.class_name {
+        names.insert(class_name.to_lowercase());
+    }
+    names.insert(test.name.to_lowercase());
+
+    if let CasesExpansion::Expanded(cases) = &test.cases_expansion {
+        for case in cases {
+            names.insert(case.case_id.to_lowercase());
+            names.insert(format!("{}[{}]", test.name, case.case_id).to_lowercase());
+        }
+    }
+
+    names.into_iter().collect()
+}
+
 /// Convert TestInfo to one or more Function collectors.
 ///
 /// Returns multiple Functions if the test has expanded cases (e.g., `test_foo[0]`, `test_foo[1]`).
@@ -115,12 +143,14 @@ pub fn test_info_to_functions(
     } else {
         format!("{}::{}", module_nodeid, test.name)
     };
+    let base_keywords = build_keywords(test, module_nodeid);
 
     match &test.cases_expansion {
         CasesExpansion::NotDecorated | CasesExpansion::CannotExpand(_) => {
             vec![Function {
                 name: test.name.clone(),
                 nodeid: base_nodeid,
+                keywords: base_keywords,
                 location: Location {
                     path: module_path.to_path_buf(),
                     line: Some(test.line),
@@ -133,9 +163,13 @@ pub fn test_info_to_functions(
             .map(|case| {
                 let nodeid = format!("{}[{}]", base_nodeid, case.case_id);
                 let name_with_case = format!("{}[{}]", test.name, case.case_id);
+                let mut keywords = base_keywords.clone();
+                keywords.push(case.case_id.clone());
+                keywords.push(name_with_case.clone());
                 Function {
                     name: name_with_case.clone(),
                     nodeid,
+                    keywords,
                     location: Location {
                         path: module_path.to_path_buf(),
                         line: Some(test.line),

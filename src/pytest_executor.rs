@@ -1,20 +1,17 @@
 //! Handles the execution of pytest with collected test nodes.
 
+use crate::cache::{parse_junit_xml, TestOutcome};
 use std::path::Path;
 use std::process::Command;
 
+pub struct PytestExecutionResult {
+    pub exit_code: i32,
+    pub outcomes: Vec<(String, TestOutcome)>,
+}
+
 /// Executes pytest with the given program, initial arguments, collected test nodes, and additional pytest arguments.
 ///
-/// # Arguments
-///
-/// * `program` - The pytest executable or package manager command.
-/// * `initial_args` - Initial arguments to pass to the program (e.g., `run` for `uv`).
-/// * `test_nodes` - A `Vec<String>` of test node IDs to execute.
-/// * `pytest_args` - Additional arguments to pass directly to pytest.
-/// * `working_dir` - Optional working directory for pytest execution.
-/// * `env_vars` - Environment variables to set for pytest execution.
-///
-/// Returns the exit code from pytest.
+/// When `junit_xml` is set, passes `--junitxml=PATH` and parses structured outcomes from that file.
 pub fn execute_tests(
     program: &str,
     initial_args: &[String],
@@ -22,11 +19,11 @@ pub fn execute_tests(
     pytest_args: Vec<String>,
     working_dir: Option<&Path>,
     env_vars: &[(String, String)],
-) -> i32 {
+    junit_xml: Option<&Path>,
+) -> PytestExecutionResult {
     let mut run_cmd = Command::new(program);
     run_cmd.args(initial_args);
 
-    // Set environment variables
     for (key, value) in env_vars {
         run_cmd.env(key, value);
     }
@@ -37,19 +34,61 @@ pub fn execute_tests(
         run_cmd.arg(dir);
     }
 
-    run_cmd.args(test_nodes);
-    run_cmd.args(pytest_args);
+    run_cmd.args(&test_nodes);
+    run_cmd.args(&pytest_args);
+
+    if let Some(path) = junit_xml {
+        run_cmd.arg(format!("--junitxml={}", path.display()));
+    }
 
     let run_status = match run_cmd.status() {
         Ok(status) => status,
         Err(e) => {
             log::error!("Failed to execute pytest command: {e}");
-            return 1;
+            return PytestExecutionResult {
+                exit_code: 1,
+                outcomes: vec![],
+            };
         }
     };
 
-    run_status.code().unwrap_or_else(|| {
+    let exit_code = run_status.code().unwrap_or_else(|| {
         log::warn!("Pytest process terminated by signal");
         1
-    })
+    });
+
+    let outcomes = if let Some(path) = junit_xml {
+        parse_junit_xml(path).unwrap_or_else(|e| {
+            log::warn!("Failed to parse junit xml {}: {e}", path.display());
+            Vec::new()
+        })
+    } else {
+        Vec::new()
+    };
+
+    PytestExecutionResult {
+        exit_code,
+        outcomes,
+    }
+}
+
+/// Convenience wrapper when junit outcomes are not needed.
+pub fn execute_tests_exit_code(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: Vec<String>,
+    pytest_args: Vec<String>,
+    working_dir: Option<&Path>,
+    env_vars: &[(String, String)],
+) -> i32 {
+    execute_tests(
+        program,
+        initial_args,
+        test_nodes,
+        pytest_args,
+        working_dir,
+        env_vars,
+        None,
+    )
+    .exit_code
 }

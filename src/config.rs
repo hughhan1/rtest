@@ -15,6 +15,8 @@ pub struct PytestConfig {
     pub python_classes: Vec<String>,
     /// Patterns for test function/method names (e.g., "test*")
     pub python_functions: Vec<String>,
+    /// Pytest cache directory (e.g. `.pytest_cache`)
+    pub cache_dir: Option<PathBuf>,
 }
 
 /// Read pytest configuration from pyproject.toml
@@ -104,6 +106,14 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
             "Found python_functions in pyproject.toml: {:?}",
             config.python_functions
         );
+    }
+
+    if let Some(cache_dir) = ini_options
+        .and_then(|i| i.get("cache_dir"))
+        .and_then(|v| v.as_str())
+    {
+        config.cache_dir = Some(PathBuf::from(cache_dir));
+        debug!("Found cache_dir in pyproject.toml: {:?}", config.cache_dir);
     }
 
     config
