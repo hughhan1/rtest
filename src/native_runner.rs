@@ -1,6 +1,8 @@
 //! Native test runner that executes tests via Python workers.
 
+use crate::cache::TestOutcome;
 use crate::collection::glob_match;
+use crate::collection_integration::CollectedItem;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -51,6 +53,8 @@ pub struct NativeRunnerConfig {
     pub python_files: Vec<String>,
     pub python_classes: Vec<String>,
     pub python_functions: Vec<String>,
+    /// When non-empty, workers only execute tests with these nodeids.
+    pub selected_nodeids: Vec<String>,
 }
 
 /// Default pytest python_files patterns
@@ -195,50 +199,62 @@ fn print_summary(results: &AggregatedResults) {
     );
 }
 
-fn run_worker(
+fn write_nodeids_file(path: &Path, nodeids: &[String]) -> Result<(), String> {
+    let content = nodeids.join("\n");
+    std::fs::write(path, content).map_err(|e| format!("Failed to write nodeids file: {e}"))
+}
+
+struct WorkerInvocation<'a> {
     worker_id: usize,
-    python: &str,
-    root: &Path,
-    output_file: &Path,
-    files: &[PathBuf],
-    python_classes: &[String],
-    python_functions: &[String],
-) -> Result<(), String> {
-    let mut cmd = Command::new(python);
+    python: &'a str,
+    root: &'a Path,
+    output_file: &'a Path,
+    files: &'a [PathBuf],
+    python_classes: &'a [String],
+    python_functions: &'a [String],
+    nodeids_file: Option<&'a Path>,
+}
+
+fn run_worker(task: &WorkerInvocation<'_>) -> Result<(), String> {
+    let mut cmd = Command::new(task.python);
     cmd.arg("-m")
         .arg("rtest.worker")
         .arg("--root")
-        .arg(root)
+        .arg(task.root)
         .arg("--out")
-        .arg(output_file);
+        .arg(task.output_file);
 
-    if !python_classes.is_empty() {
+    if !task.python_classes.is_empty() {
         cmd.arg("--python-classes");
-        for pattern in python_classes {
+        for pattern in task.python_classes {
             cmd.arg(pattern);
         }
     }
 
-    if !python_functions.is_empty() {
+    if !task.python_functions.is_empty() {
         cmd.arg("--python-functions");
-        for pattern in python_functions {
+        for pattern in task.python_functions {
             cmd.arg(pattern);
         }
+    }
+
+    if let Some(path) = task.nodeids_file {
+        cmd.arg("--nodeids-file").arg(path);
     }
 
     // Use -- to separate options from positional file arguments
     cmd.arg("--");
-    for file in files {
+    for file in task.files {
         cmd.arg(file);
     }
 
-    cmd.current_dir(root)
+    cmd.current_dir(task.root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     let output = cmd
         .output()
-        .map_err(|e| format!("Worker {} failed to start: {}", worker_id, e))?;
+        .map_err(|e| format!("Worker {} failed to start: {}", task.worker_id, e))?;
 
     // Check worker exit code - non-zero indicates test failures or errors
     if !output.status.success() {
@@ -249,12 +265,12 @@ fn run_worker(
             if !output.stderr.is_empty() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if !stderr.trim().is_empty() {
-                    eprintln!("Worker {} stderr:\n{}", worker_id, stderr);
+                    eprintln!("Worker {} stderr:\n{}", task.worker_id, stderr);
                 }
             }
             return Err(format!(
                 "Worker {} crashed with exit code {} (expected 0 or 1)",
-                worker_id, exit_code
+                task.worker_id, exit_code
             ));
         }
     }
@@ -262,10 +278,40 @@ fn run_worker(
     Ok(())
 }
 
-pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> i32 {
+pub struct NativeExecutionResult {
+    pub exit_code: i32,
+    pub outcomes: Vec<(String, TestOutcome)>,
+}
+
+/// Derive unique test file paths from collected nodeids (file prefix before `::`).
+pub fn files_from_nodeids(root: &Path, items: &[CollectedItem]) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = items
+        .iter()
+        .filter_map(|item| {
+            let file_part = item.nodeid.split("::").next()?;
+            let path = Path::new(file_part);
+            if path.is_absolute() {
+                Some(path.to_path_buf())
+            } else {
+                Some(root.join(file_part))
+            }
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
+pub fn execute_native(
+    config: &NativeRunnerConfig,
+    test_files: Vec<PathBuf>,
+) -> NativeExecutionResult {
     if test_files.is_empty() {
         println!("No test files to run.");
-        return 0;
+        return NativeExecutionResult {
+            exit_code: 0,
+            outcomes: vec![],
+        };
     }
 
     let num_workers = config.num_workers.max(1);
@@ -279,8 +325,25 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("Failed to create temp directory: {}", e);
-            return 1;
+            return NativeExecutionResult {
+                exit_code: 1,
+                outcomes: vec![],
+            };
         }
+    };
+
+    let nodeids_file = if config.selected_nodeids.is_empty() {
+        None
+    } else {
+        let path = temp_dir.path().join("selected-nodeids.txt");
+        if let Err(e) = write_nodeids_file(&path, &config.selected_nodeids) {
+            eprintln!("Failed to write selected nodeids: {e}");
+            return NativeExecutionResult {
+                exit_code: 1,
+                outcomes: vec![],
+            };
+        }
+        Some(path)
     };
 
     let shards = shard_files(test_files, num_workers);
@@ -295,16 +358,19 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         let output_file = output_file.clone();
         let python_classes = config.python_classes.clone();
         let python_functions = config.python_functions.clone();
+        let nodeids_file = nodeids_file.clone();
         let handle = thread::spawn(move || {
-            run_worker(
-                i,
-                &python,
-                &root,
-                &output_file,
-                &shard,
-                &python_classes,
-                &python_functions,
-            )
+            let task = WorkerInvocation {
+                worker_id: i,
+                python: &python,
+                root: &root,
+                output_file: &output_file,
+                files: &shard,
+                python_classes: &python_classes,
+                python_functions: &python_functions,
+                nodeids_file: nodeids_file.as_deref(),
+            };
+            run_worker(&task)
         });
         handles.push(handle);
     }
@@ -332,15 +398,33 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         }
     }
 
+    let outcomes: Vec<(String, TestOutcome)> = all_results
+        .iter()
+        .flatten()
+        .map(|result| {
+            let outcome = match result.outcome.as_str() {
+                "passed" => TestOutcome::Passed,
+                "failed" => TestOutcome::Failed,
+                "skipped" => TestOutcome::Skipped,
+                "error" => TestOutcome::Error,
+                _ => TestOutcome::Error,
+            };
+            (result.nodeid.clone(), outcome)
+        })
+        .collect();
+
     let aggregated = aggregate_results(all_results);
     print_summary(&aggregated);
 
-    // TempDir is automatically cleaned up when dropped
-
-    if aggregated.failed > 0 || aggregated.error > 0 || !worker_errors.is_empty() {
+    let exit_code = if aggregated.failed > 0 || aggregated.error > 0 || !worker_errors.is_empty() {
         1
     } else {
         0
+    };
+
+    NativeExecutionResult {
+        exit_code,
+        outcomes,
     }
 }
 

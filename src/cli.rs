@@ -44,6 +44,30 @@ pub struct Args {
     #[arg(long)]
     pub collect_only: bool,
 
+    /// Only run tests matching the keyword expression
+    #[arg(short = 'k', value_name = "EXPRESSION")]
+    pub keyword_expr: Option<String>,
+
+    /// Run only tests that failed in the last run
+    #[arg(long = "lf", alias = "last-failed", conflicts_with = "failed_first")]
+    pub last_failed: bool,
+
+    /// Run failed tests first, then the rest
+    #[arg(long = "ff", alias = "failed-first", conflicts_with = "last_failed")]
+    pub failed_first: bool,
+
+    /// Behavior when `--lf` finds no failures: `all` (default) or `none`
+    #[arg(
+        long = "lfnf",
+        alias = "last-failed-no-failures",
+        default_value = "all"
+    )]
+    pub lfnf: String,
+
+    /// Clear the failure cache before running tests
+    #[arg(long = "cache-clear")]
+    pub cache_clear: bool,
+
     /// Test runner backend
     #[arg(long, value_enum, default_value = "pytest")]
     pub runner: Runner,
@@ -212,5 +236,17 @@ mod tests {
 
         let args = Args::parse_from(["rtest", "--runner", "pytest"]);
         assert!(matches!(args.runner, Runner::Pytest));
+    }
+
+    #[test]
+    fn test_cli_parsing_with_keyword_and_last_failed() {
+        let args = Args::parse_from(["rtest", "-k", "foo and not bar"]);
+        assert_eq!(args.keyword_expr.as_deref(), Some("foo and not bar"));
+
+        let err = Args::try_parse_from(["rtest", "--lf", "--ff"]);
+        assert!(err.is_err());
+
+        let args = Args::parse_from(["rtest", "--cache-clear"]);
+        assert!(args.cache_clear);
     }
 }

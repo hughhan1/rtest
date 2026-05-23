@@ -42,6 +42,12 @@ def main() -> int:
         help="Glob patterns for test function/method names using fnmatch syntax (default: test*)",
     )
     parser.add_argument(
+        "--nodeids-file",
+        type=Path,
+        default=None,
+        help="Optional file listing nodeids to run (one per line); omit to run all discovered tests",
+    )
+    parser.add_argument(
         "files",
         nargs="+",
         type=Path,
@@ -56,6 +62,7 @@ def main() -> int:
     test_files: list[Path] = args.files
     python_classes: list[str] = args.python_classes
     python_functions: list[str] = args.python_functions
+    nodeids_file: Path | None = args.nodeids_file
 
     return run_tests(
         root=root,
@@ -63,6 +70,7 @@ def main() -> int:
         test_files=test_files,
         python_classes=python_classes,
         python_functions=python_functions,
+        nodeids_file=nodeids_file,
     )
 
 

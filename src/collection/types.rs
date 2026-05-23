@@ -36,4 +36,9 @@ pub trait Collector: std::fmt::Debug {
     fn is_item(&self) -> bool {
         false
     }
+
+    /// Keyword names for `-k` expression matching (empty for non-items).
+    fn keywords(&self) -> &[String] {
+        &[]
+    }
 }

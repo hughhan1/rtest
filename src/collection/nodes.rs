@@ -24,10 +24,29 @@ pub struct Session {
 
 impl Session {
     pub fn new(rootpath: PathBuf) -> Self {
+        let mut config = CollectionConfig::default();
+        let pytest_config = crate::config::read_pytest_config(&rootpath);
+        if !pytest_config.python_files.is_empty() {
+            config.python_files = pytest_config.python_files;
+        }
+        if !pytest_config.python_classes.is_empty() {
+            config.python_classes = pytest_config.python_classes;
+        }
+        if !pytest_config.python_functions.is_empty() {
+            config.python_functions = pytest_config.python_functions;
+        }
+        if !pytest_config.testpaths.is_empty() {
+            config.testpaths = pytest_config
+                .testpaths
+                .iter()
+                .map(|p| rootpath.join(p))
+                .collect();
+        }
+
         Self {
             nodeid: String::new(),
             rootpath,
-            config: CollectionConfig::default(),
+            config,
             cache: HashMap::new(),
         }
     }
@@ -331,6 +350,7 @@ pub struct Function {
     #[allow(dead_code)]
     pub name: String,
     pub nodeid: String,
+    pub keywords: Vec<String>,
     pub location: Location,
 }
 
@@ -354,6 +374,10 @@ impl Collector for Function {
 
     fn is_item(&self) -> bool {
         true
+    }
+
+    fn keywords(&self) -> &[String] {
+        &self.keywords
     }
 }
 

@@ -1,14 +1,12 @@
 //! Pattern matching utilities for test discovery.
 
-/// Check if a name matches a pattern (supports * wildcards)
+use glob::Pattern;
+
+/// Check if a name matches a pytest-style glob pattern (fnmatch / `glob` semantics).
 pub fn matches(pattern: &str, name: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        name.starts_with(prefix)
-    } else if let Some(suffix) = pattern.strip_prefix('*') {
-        name.ends_with(suffix)
-    } else {
-        pattern == name
-    }
+    Pattern::new(pattern)
+        .map(|p| p.matches(name))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -27,5 +25,9 @@ mod tests {
 
         assert!(matches("*_test", "foo_test"));
         assert!(!matches("*_test", "test_foo"));
+
+        assert!(matches("*Test*", "MyTestCase"));
+        assert!(matches("*Test*", "SuiteTestRunner"));
+        assert!(!matches("*Test*", "NoMatch"));
     }
 }

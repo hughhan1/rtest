@@ -250,12 +250,23 @@ def _run_single_test(test_case: TestCase) -> TestResult:
     )
 
 
+def _load_selected_nodeids(path: Path) -> set[str]:
+    """Load coordinator-selected nodeids (one per line)."""
+    selected: set[str] = set()
+    for line in path.read_text().splitlines():
+        nodeid = line.strip()
+        if nodeid:
+            selected.add(nodeid)
+    return selected
+
+
 def run_tests(
     root: Path,
     output_file: Path,
     test_files: list[Path],
     python_classes: list[str] | None = None,
     python_functions: list[str] | None = None,
+    nodeids_file: Path | None = None,
 ) -> int:
     """Run tests from the given files and write results to JSONL.
 
@@ -310,6 +321,10 @@ def run_tests(
                     error_type=type(e).__name__,
                 )
             )
+
+    if nodeids_file is not None:
+        selected_nodeids = _load_selected_nodeids(nodeids_file)
+        all_test_cases = [tc for tc in all_test_cases if tc.nodeid in selected_nodeids]
 
     all_test_cases.sort(key=lambda tc: tc.nodeid)
 

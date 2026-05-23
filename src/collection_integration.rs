@@ -6,6 +6,25 @@ use crate::collection::types::Collector;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+/// A collected test item with metadata for post-collection selection.
+#[derive(Debug, Clone)]
+pub struct CollectedItem {
+    pub nodeid: String,
+    pub keywords: Vec<String>,
+}
+
+impl CollectedItem {
+    pub fn nodeids(items: &[Self]) -> Vec<String> {
+        items.iter().map(|item| item.nodeid.clone()).collect()
+    }
+}
+
+/// Summary counts for collection display when selection filters items.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CollectionDisplayStats {
+    pub deselected: usize,
+}
+
 /// Holds errors and warnings encountered during collection
 #[derive(Debug)]
 pub struct CollectionErrors {
@@ -13,11 +32,11 @@ pub struct CollectionErrors {
     pub warnings: Vec<CollectionWarning>,
 }
 
-/// Run the Rust-based collection and return test node IDs
+/// Run the Rust-based collection and return test items
 pub fn collect_tests_rust(
     rootpath: PathBuf,
     args: &[String],
-) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
+) -> Result<(Vec<CollectedItem>, CollectionErrors), CollectionError> {
     let session = Rc::new(Session::new(rootpath));
     let mut collection_errors = CollectionErrors {
         errors: Vec::new(),
@@ -30,17 +49,17 @@ pub fn collect_tests_rust(
                 collection_errors.errors.push((path, error));
             }
 
-            let mut test_nodes = Vec::new();
+            let mut test_items = Vec::new();
 
             for collector in collectors {
                 collect_items_recursive(
                     collector.as_ref(),
-                    &mut test_nodes,
+                    &mut test_items,
                     &mut collection_errors,
                 );
             }
 
-            Ok((test_nodes, collection_errors))
+            Ok((test_items, collection_errors))
         }
         Err(e) => Err(e),
     }
@@ -49,18 +68,21 @@ pub fn collect_tests_rust(
 /// Recursively collect all test items
 fn collect_items_recursive(
     collector: &dyn Collector,
-    test_nodes: &mut Vec<String>,
+    test_items: &mut Vec<CollectedItem>,
     collection_errors: &mut CollectionErrors,
 ) {
     if collector.is_item() {
-        test_nodes.push(collector.nodeid().into());
+        test_items.push(CollectedItem {
+            nodeid: collector.nodeid().to_string(),
+            keywords: collector.keywords().to_vec(),
+        });
     } else {
         let report = collect_one_node(collector);
         collection_errors.warnings.extend(report.warnings);
         match report.outcome {
             CollectionOutcome::Passed => {
                 for child in report.result {
-                    collect_items_recursive(child.as_ref(), test_nodes, collection_errors);
+                    collect_items_recursive(child.as_ref(), test_items, collection_errors);
                 }
             }
             CollectionOutcome::Failed => {
@@ -76,7 +98,11 @@ fn collect_items_recursive(
 }
 
 /// Display collection results in a format similar to pytest
-pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErrors) {
+pub fn display_collection_results(
+    test_items: &[CollectedItem],
+    errors: &CollectionErrors,
+    stats: CollectionDisplayStats,
+) {
     // ANSI color codes
     const RED: &str = "\x1b[31m";
     const BOLD_RED: &str = "\x1b[1;31m";
@@ -116,21 +142,29 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
         );
     }
 
-    let item_count = test_nodes.len();
+    let item_count = test_items.len();
     let error_count = errors.errors.len();
     let warning_count = errors.warnings.len();
 
-    if item_count == 0 && error_count == 0 {
+    if item_count == 0 && error_count == 0 && stats.deselected == 0 {
         println!("No tests collected.");
     } else {
         let mut summary_parts = Vec::new();
 
-        if item_count > 0 {
+        if item_count > 0 || stats.deselected > 0 {
             summary_parts.push(format!(
                 "collected {} item{}",
-                item_count,
-                if item_count == 1 { "" } else { "s" }
+                item_count + stats.deselected,
+                if item_count + stats.deselected == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             ));
+        }
+
+        if stats.deselected > 0 {
+            summary_parts.push(format!("{} deselected", stats.deselected));
         }
 
         if error_count > 0 {
@@ -153,10 +187,10 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
             println!("{}", summary_parts.join(" / "));
         }
 
-        if !test_nodes.is_empty() {
+        if !test_items.is_empty() {
             println!();
-            for node in test_nodes {
-                println!("  {node}");
+            for item in test_items {
+                println!("  {}", item.nodeid);
             }
         }
     }

@@ -750,7 +750,8 @@ mod tests {
     #[test]
     fn test_literal_to_id_string() {
         assert_eq!(literal_to_id_string(&LiteralValue::Int(42)), "42");
-        assert_eq!(literal_to_id_string(&LiteralValue::Float(3.14)), "3.14");
+        let value = 1.23_f64;
+        assert_eq!(literal_to_id_string(&LiteralValue::Float(value)), "1.23");
         assert_eq!(
             literal_to_id_string(&LiteralValue::String("hello".to_string())),
             "hello"
