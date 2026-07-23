@@ -106,6 +106,33 @@ fn parse_results_file(path: &Path) -> Result<Vec<TestResult>, String> {
     Ok(results)
 }
 
+/// Read each worker's results file, propagating unreadable output as an error.
+///
+/// A worker that already crashed is recorded in `worker_errors`, so its missing or
+/// partial output is expected and ignored here. But when a worker reported success
+/// we must surface unreadable results as an error rather than silently discarding
+/// them, otherwise lost tests would be reported as a pass.
+fn collect_worker_results(
+    output_files: &[PathBuf],
+    worker_succeeded: &[bool],
+    worker_errors: &mut Vec<String>,
+) -> Vec<Vec<TestResult>> {
+    let mut all_results = Vec::new();
+    for (i, output_file) in output_files.iter().enumerate() {
+        match parse_results_file(output_file) {
+            Ok(results) => all_results.push(results),
+            Err(e) if worker_succeeded.get(i).copied().unwrap_or(false) => {
+                worker_errors.push(format!(
+                    "Worker {} reported success but its results could not be read: {}",
+                    i, e
+                ))
+            }
+            Err(_) => {}
+        }
+    }
+    all_results
+}
+
 fn aggregate_results(all_results: Vec<Vec<TestResult>>) -> AggregatedResults {
     let mut aggregated = AggregatedResults::default();
 
@@ -310,26 +337,19 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
     }
 
     let mut worker_errors = Vec::new();
+    let mut worker_succeeded = vec![false; output_files.len()];
     for (i, handle) in handles.into_iter().enumerate() {
         match handle.join() {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => worker_succeeded[i] = true,
             Ok(Err(e)) => worker_errors.push(format!("Worker {}: {}", i, e)),
             Err(_) => worker_errors.push(format!("Worker {} panicked", i)),
         }
     }
 
+    let all_results = collect_worker_results(&output_files, &worker_succeeded, &mut worker_errors);
+
     for error in &worker_errors {
         eprintln!("{}", error);
-    }
-
-    let mut all_results = Vec::new();
-    for output_file in &output_files {
-        if output_file.exists() {
-            match parse_results_file(output_file) {
-                Ok(results) => all_results.push(results),
-                Err(e) => eprintln!("Warning: {}", e),
-            }
-        }
     }
 
     let aggregated = aggregate_results(all_results);
@@ -541,6 +561,64 @@ mod tests {
         assert_eq!(aggregated.skipped, 1);
         assert_eq!(aggregated.failures.len(), 1);
         assert_eq!(aggregated.total_duration_ms, 30.0);
+    }
+
+    #[test]
+    fn test_collect_worker_results_missing_file_for_successful_worker_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing = temp_dir.path().join("worker-0.jsonl");
+
+        let mut worker_errors = Vec::new();
+        let results = collect_worker_results(&[missing], &[true], &mut worker_errors);
+
+        assert!(results.is_empty());
+        assert_eq!(worker_errors.len(), 1);
+        assert!(worker_errors[0].contains("results could not be read"));
+    }
+
+    #[test]
+    fn test_collect_worker_results_missing_file_for_failed_worker_is_ignored() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing = temp_dir.path().join("worker-0.jsonl");
+
+        // A crashed worker's missing output is already accounted for elsewhere.
+        let mut worker_errors = Vec::new();
+        let results = collect_worker_results(&[missing], &[false], &mut worker_errors);
+
+        assert!(results.is_empty());
+        assert!(worker_errors.is_empty());
+    }
+
+    #[test]
+    fn test_collect_worker_results_malformed_file_for_successful_worker_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("worker-0.jsonl");
+        std::fs::write(&path, "{not valid json}\n").unwrap();
+
+        let mut worker_errors = Vec::new();
+        let results = collect_worker_results(&[path], &[true], &mut worker_errors);
+
+        assert!(results.is_empty());
+        assert_eq!(worker_errors.len(), 1);
+        assert!(worker_errors[0].contains("results could not be read"));
+    }
+
+    #[test]
+    fn test_collect_worker_results_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("worker-0.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"nodeid":"test::foo","outcome":"passed","duration_ms":1.5}"#,
+        )
+        .unwrap();
+
+        let mut worker_errors = Vec::new();
+        let results = collect_worker_results(&[path], &[true], &mut worker_errors);
+
+        assert!(worker_errors.is_empty());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0][0].nodeid, "test::foo");
     }
 
     #[test]

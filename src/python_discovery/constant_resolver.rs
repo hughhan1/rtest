@@ -115,7 +115,10 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
         Expr::NumberLiteral(num) => {
             use ruff_python_ast::Number;
             match &num.value {
-                Number::Int(i) => Some(LiteralValue::Int(i.as_i64().unwrap_or(0))),
+                // Integers that don't fit in i64 can't be represented; returning
+                // None lets the caller fall back to a warning rather than silently
+                // resolving the parametrized value to a bogus 0.
+                Number::Int(i) => i.as_i64().map(LiteralValue::Int),
                 Number::Float(f) => Some(LiteralValue::Float(*f)),
                 Number::Complex { .. } => None,
             }
@@ -260,6 +263,27 @@ class Config:
                 LiteralValue::Int(3),
             ]))
         );
+    }
+
+    #[test]
+    fn test_int_within_i64_resolves() {
+        let module = parse_module("X = 9223372036854775807");
+        let resolver = ConstantResolver::from_module(&module);
+
+        assert_eq!(
+            resolver.root().resolve_path(&["X"]),
+            Some(LiteralValue::Int(i64::MAX))
+        );
+    }
+
+    #[test]
+    fn test_int_overflowing_i64_is_unresolved() {
+        // Previously this silently resolved to 0, corrupting the parametrized value.
+        // It must now be treated as unresolvable so the caller emits a warning.
+        let module = parse_module("X = 9223372036854775808");
+        let resolver = ConstantResolver::from_module(&module);
+
+        assert_eq!(resolver.root().resolve_path(&["X"]), None);
     }
 
     #[test]
