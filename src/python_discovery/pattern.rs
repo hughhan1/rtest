@@ -11,6 +11,11 @@ pub fn matches(pattern: &str, name: &str) -> bool {
     }
 }
 
+/// Returns `true` if `name` matches any of the given `patterns`.
+pub fn matches_any(patterns: &[String], name: &str) -> bool {
+    patterns.iter().any(|pattern| matches(pattern, name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

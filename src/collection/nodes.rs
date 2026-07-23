@@ -3,7 +3,7 @@
 use super::config::CollectionConfig;
 use super::error::{CollectionError, CollectionOutcome, CollectionResult, CollectionWarning};
 use super::types::{Collector, Location};
-use super::utils::glob_match;
+use super::utils::glob_match_any;
 use crate::python_discovery::{
     discover_tests_with_inheritance, format_cannot_expand_warning, test_info_to_functions,
     CasesExpansion, TestDiscoveryConfig,
@@ -119,10 +119,8 @@ impl Session {
         if path.is_dir() {
             let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-            for pattern in &self.config.norecursedirs {
-                if glob_match(pattern, dir_name) {
-                    return Ok(true);
-                }
+            if glob_match_any(&self.config.norecursedirs, dir_name) {
+                return Ok(true);
             }
         }
 
@@ -132,13 +130,7 @@ impl Session {
     pub fn is_python_file(&self, path: &Path) -> bool {
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-        for pattern in &self.config.python_files {
-            if glob_match(pattern, filename) {
-                return true;
-            }
-        }
-
-        false
+        glob_match_any(&self.config.python_files, filename)
     }
 }
 

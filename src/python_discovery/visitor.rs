@@ -6,8 +6,7 @@ use crate::python_discovery::{
         MethodCasesInfo,
     },
     constant_resolver::ConstantResolver,
-    discovery::{TestDiscoveryConfig, TestInfo},
-    pattern,
+    discovery::{class_has_init, TestDiscoveryConfig, TestInfo},
 };
 use ruff_python_ast::{Expr, ModModule, Stmt, StmtClassDef, StmtFunctionDef};
 use std::collections::{HashMap, HashSet};
@@ -72,7 +71,7 @@ impl TestDiscoveryVisitor {
             if let Stmt::ClassDef(class) = stmt {
                 let name = class.name.as_str();
                 if self.is_test_class(name) {
-                    let has_init = self.class_has_init(class);
+                    let has_init = class_has_init(class);
 
                     let mut methods = Vec::new();
                     for stmt in &class.body {
@@ -208,7 +207,7 @@ impl TestDiscoveryVisitor {
 
     /// Check if a class should be skipped (has __init__ or inherits from class with __init__)
     fn should_skip_class(&self, class: &StmtClassDef) -> bool {
-        if self.class_has_init(class) {
+        if class_has_init(class) {
             return true;
         }
 
@@ -230,31 +229,10 @@ impl TestDiscoveryVisitor {
     }
 
     fn is_test_function(&self, name: &str) -> bool {
-        for pattern in &self.config.python_functions {
-            if pattern::matches(pattern, name) {
-                return true;
-            }
-        }
-        false
+        self.config.is_test_function(name)
     }
 
     fn is_test_class(&self, name: &str) -> bool {
-        for pattern in &self.config.python_classes {
-            if pattern::matches(pattern, name) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn class_has_init(&self, class: &StmtClassDef) -> bool {
-        for stmt in &class.body {
-            if let Stmt::FunctionDef(func) = stmt {
-                if func.name.as_str() == "__init__" {
-                    return true;
-                }
-            }
-        }
-        false
+        self.config.is_test_class(name)
     }
 }

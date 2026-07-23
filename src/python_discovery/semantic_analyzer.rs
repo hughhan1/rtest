@@ -15,9 +15,8 @@ use crate::python_discovery::{
         MethodCasesInfo,
     },
     constant_resolver::ConstantResolver,
-    discovery::{TestDiscoveryConfig, TestInfo},
+    discovery::{class_has_init, TestDiscoveryConfig, TestInfo},
     module_resolver::ModuleResolver,
-    pattern,
 };
 
 /// Information about an import
@@ -246,7 +245,7 @@ impl SemanticTestDiscovery {
                 let class_name = class_def.name.as_str();
 
                 if self.is_test_class(class_name) {
-                    let has_init = self.class_has_init(class_def);
+                    let has_init = class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, resolver);
                     let class_specs =
                         parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
@@ -471,7 +470,7 @@ impl SemanticTestDiscovery {
         module_resolver: &mut ModuleResolver,
     ) -> CollectionResult<bool> {
         // Check if this class has __init__
-        if self.class_has_init(class_def) {
+        if class_has_init(class_def) {
             return Ok(true);
         }
 
@@ -692,7 +691,7 @@ impl SemanticTestDiscovery {
 
                     // Always collect class info for external modules, even if they don't match test patterns
                     // They might be used as base classes
-                    let has_init = self.class_has_init(class_def);
+                    let has_init = class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, &external_resolver);
                     let class_specs = parse_decorators_to_specs(
                         &class_def.decorator_list,
@@ -842,32 +841,11 @@ impl SemanticTestDiscovery {
     }
 
     fn is_test_function(&self, name: &str) -> bool {
-        for pattern in &self.config.python_functions {
-            if pattern::matches(pattern, name) {
-                return true;
-            }
-        }
-        false
+        self.config.is_test_function(name)
     }
 
     fn is_test_class(&self, name: &str) -> bool {
-        for pattern in &self.config.python_classes {
-            if pattern::matches(pattern, name) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn class_has_init(&self, class: &StmtClassDef) -> bool {
-        for stmt in &class.body {
-            if let Stmt::FunctionDef(func) = stmt {
-                if func.name.as_str() == "__init__" {
-                    return true;
-                }
-            }
-        }
-        false
+        self.config.is_test_class(name)
     }
 
     /// Check if a module should be skipped for inheritance analysis.

@@ -1,6 +1,6 @@
 //! Native test runner that executes tests via Python workers.
 
-use crate::collection::glob_match;
+use crate::collection::glob_match_any;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -356,13 +356,7 @@ fn is_test_file(path: &Path, patterns: &[String]) -> bool {
         return false;
     }
 
-    for pattern in patterns {
-        if glob_match(pattern, file_name) {
-            return true;
-        }
-    }
-
-    false
+    glob_match_any(patterns, file_name)
 }
 
 fn collect_test_files_in_dir(dir: &Path, patterns: &[String]) -> Vec<PathBuf> {

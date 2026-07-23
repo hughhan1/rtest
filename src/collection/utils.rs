@@ -21,3 +21,8 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
         }
     }
 }
+
+/// Returns `true` if `text` matches any of the given glob `patterns`.
+pub fn glob_match_any(patterns: &[String], text: &str) -> bool {
+    patterns.iter().any(|pattern| glob_match(pattern, text))
+}

@@ -49,57 +49,29 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
         .and_then(|t| t.get("pytest"))
         .and_then(|p| p.get("ini_options"));
 
-    if let Some(testpaths) = ini_options
-        .and_then(|i| i.get("testpaths"))
-        .and_then(|t| t.as_array())
-    {
-        config.testpaths = testpaths
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(PathBuf::from)
-            .collect();
+    if let Some(values) = read_string_array(ini_options, "testpaths") {
+        config.testpaths = values.map(PathBuf::from).collect();
         debug!("Found testpaths in pyproject.toml: {:?}", config.testpaths);
     }
 
-    if let Some(python_files) = ini_options
-        .and_then(|i| i.get("python_files"))
-        .and_then(|t| t.as_array())
-    {
-        config.python_files = python_files
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(String::from)
-            .collect();
+    if let Some(values) = read_string_array(ini_options, "python_files") {
+        config.python_files = values.map(String::from).collect();
         debug!(
             "Found python_files in pyproject.toml: {:?}",
             config.python_files
         );
     }
 
-    if let Some(python_classes) = ini_options
-        .and_then(|i| i.get("python_classes"))
-        .and_then(|t| t.as_array())
-    {
-        config.python_classes = python_classes
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(String::from)
-            .collect();
+    if let Some(values) = read_string_array(ini_options, "python_classes") {
+        config.python_classes = values.map(String::from).collect();
         debug!(
             "Found python_classes in pyproject.toml: {:?}",
             config.python_classes
         );
     }
 
-    if let Some(python_functions) = ini_options
-        .and_then(|i| i.get("python_functions"))
-        .and_then(|t| t.as_array())
-    {
-        config.python_functions = python_functions
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(String::from)
-            .collect();
+    if let Some(values) = read_string_array(ini_options, "python_functions") {
+        config.python_functions = values.map(String::from).collect();
         debug!(
             "Found python_functions in pyproject.toml: {:?}",
             config.python_functions
@@ -107,6 +79,18 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
     }
 
     config
+}
+
+/// Read a TOML array of strings under the given `key`, yielding an iterator of
+/// its string elements. Returns `None` when the key is absent or not an array.
+fn read_string_array<'a>(
+    ini_options: Option<&'a Value>,
+    key: &str,
+) -> Option<impl Iterator<Item = &'a str>> {
+    ini_options
+        .and_then(|i| i.get(key))
+        .and_then(|t| t.as_array())
+        .map(|array| array.iter().filter_map(|v| v.as_str()))
 }
 
 #[cfg(test)]

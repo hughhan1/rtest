@@ -5,9 +5,10 @@ use crate::collection::nodes::Function;
 use crate::collection::types::Location;
 use crate::python_discovery::cases::CasesExpansion;
 use crate::python_discovery::module_resolver::ModuleResolver;
+use crate::python_discovery::pattern;
 use crate::python_discovery::semantic_analyzer::SemanticTestDiscovery;
 use crate::python_discovery::visitor::TestDiscoveryVisitor;
-use ruff_python_ast::Mod;
+use ruff_python_ast::{Mod, Stmt, StmtClassDef};
 use ruff_python_parser::{parse, Mode, ParseOptions};
 use std::path::Path;
 
@@ -37,6 +38,29 @@ impl Default for TestDiscoveryConfig {
             python_functions: vec!["test*".into()],
         }
     }
+}
+
+impl TestDiscoveryConfig {
+    /// Returns `true` if `name` matches any configured test function pattern.
+    pub fn is_test_function(&self, name: &str) -> bool {
+        pattern::matches_any(&self.python_functions, name)
+    }
+
+    /// Returns `true` if `name` matches any configured test class pattern.
+    pub fn is_test_class(&self, name: &str) -> bool {
+        pattern::matches_any(&self.python_classes, name)
+    }
+}
+
+/// Returns `true` if the class defines an `__init__` method.
+///
+/// pytest skips collecting classes with a constructor, so this is used to
+/// exclude them during discovery.
+pub(crate) fn class_has_init(class: &StmtClassDef) -> bool {
+    class
+        .body
+        .iter()
+        .any(|stmt| matches!(stmt, Stmt::FunctionDef(func) if func.name.as_str() == "__init__"))
 }
 
 /// Parse a Python file and discover test functions/methods

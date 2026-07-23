@@ -8,4 +8,4 @@ pub mod nodes;
 pub mod types;
 mod utils;
 
-pub use utils::glob_match;
+pub use utils::{glob_match, glob_match_any};
