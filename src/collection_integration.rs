@@ -173,3 +173,142 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
         println!("-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tempdir_root() -> (tempfile::TempDir, PathBuf) {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        // Use a normal-named subdirectory as the collection root. The tempdir
+        // itself is named ".tmpXXXX", which matches the ".*" norecursedirs
+        // pattern and would be ignored during directory traversal.
+        let root = temp_dir
+            .path()
+            .canonicalize()
+            .expect("failed to canonicalize temp dir")
+            .join("project");
+        fs::create_dir(&root).expect("create project root");
+        (temp_dir, root)
+    }
+
+    #[test]
+    fn test_collect_tests_rust_collects_functions() {
+        let (_temp, root) = tempdir_root();
+        fs::write(
+            root.join("test_sample.py"),
+            "def test_one():\n    pass\n\ndef test_two():\n    pass\n",
+        )
+        .expect("write test file");
+
+        let (nodes, errors) =
+            collect_tests_rust(root.clone(), &["test_sample.py".to_string()]).expect("collect ok");
+
+        assert_eq!(nodes.len(), 2, "should collect two test functions");
+        assert!(nodes.iter().any(|n| n.ends_with("::test_one")));
+        assert!(nodes.iter().any(|n| n.ends_with("::test_two")));
+        assert!(errors.errors.is_empty());
+    }
+
+    #[test]
+    fn test_collect_tests_rust_directory_recursion() {
+        let (_temp, root) = tempdir_root();
+        fs::write(root.join("test_a.py"), "def test_a():\n    pass\n").expect("write a");
+        let subdir = root.join("sub");
+        fs::create_dir(&subdir).expect("create subdir");
+        fs::write(subdir.join("test_b.py"), "def test_b():\n    pass\n").expect("write b");
+
+        // No args -> collect the whole root directory recursively.
+        let (nodes, errors) = collect_tests_rust(root.clone(), &[]).expect("collect ok");
+
+        assert_eq!(nodes.len(), 2, "should collect across nested directories");
+        assert!(nodes.iter().any(|n| n.ends_with("::test_a")));
+        assert!(nodes.iter().any(|n| n.ends_with("::test_b")));
+        assert!(errors.errors.is_empty());
+    }
+
+    #[test]
+    fn test_collect_tests_rust_nonexistent_path_errors() {
+        let (_temp, root) = tempdir_root();
+        let result = collect_tests_rust(root, &["does_not_exist.py".to_string()]);
+        assert!(matches!(result, Err(CollectionError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_collect_tests_rust_reports_parse_errors() {
+        let (_temp, root) = tempdir_root();
+        // Invalid Python should surface as a collection error rather than panicking.
+        fs::write(root.join("test_broken.py"), "def test_x(:\n    pass\n").expect("write broken");
+
+        let (nodes, errors) =
+            collect_tests_rust(root.clone(), &["test_broken.py".to_string()]).expect("collect ok");
+
+        assert!(nodes.is_empty(), "broken file yields no test nodes");
+        assert_eq!(errors.errors.len(), 1, "broken file yields one error");
+    }
+
+    #[test]
+    fn test_collect_tests_rust_empty_directory() {
+        let (_temp, root) = tempdir_root();
+        let (nodes, errors) = collect_tests_rust(root, &[]).expect("collect ok");
+        assert!(nodes.is_empty());
+        assert!(errors.errors.is_empty());
+    }
+
+    #[test]
+    fn test_display_collection_results_smoke() {
+        // display_collection_results only prints; these calls exercise the
+        // formatting branches without panicking.
+        let empty = CollectionErrors {
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+        display_collection_results(&[], &empty);
+
+        let nodes = vec![
+            "tests/test_a.py::test_one".to_string(),
+            "tests/test_a.py::test_two".to_string(),
+        ];
+        let with_warnings = CollectionErrors {
+            errors: vec![(
+                "tests/test_bad.py".to_string(),
+                CollectionError::ParseError("unexpected token".into()),
+            )],
+            warnings: vec![CollectionWarning {
+                file_path: "tests/test_a.py".into(),
+                line: 3,
+                message: "cannot expand cases".into(),
+            }],
+        };
+        display_collection_results(&nodes, &with_warnings);
+
+        // Exercise the singular-count branches and every error variant.
+        let single = vec!["tests/test_a.py::only".to_string()];
+        let all_errors = CollectionErrors {
+            errors: vec![
+                ("a".to_string(), CollectionError::ImportError("m".into())),
+                (
+                    "b".to_string(),
+                    CollectionError::IoError(std::io::Error::other("io")),
+                ),
+                ("c".to_string(), CollectionError::SkipError("s".into())),
+                (
+                    "d".to_string(),
+                    CollectionError::FileNotFound(PathBuf::from("x.py")),
+                ),
+            ],
+            warnings: Vec::new(),
+        };
+        display_collection_results(&single, &all_errors);
+    }
+
+    #[test]
+    fn test_collection_errors_debug() {
+        let errors = CollectionErrors {
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+        assert!(format!("{errors:?}").contains("CollectionErrors"));
+    }
+}
