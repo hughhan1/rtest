@@ -41,6 +41,14 @@ impl ModuleResolver {
         })
     }
 
+    /// Copy of this resolver's search paths with an empty module cache.
+    pub fn with_search_paths(&self) -> Self {
+        Self {
+            search_paths: self.search_paths.clone(),
+            cache: HashMap::new(),
+        }
+    }
+
     /// Resolve a module path to a file and load it
     pub fn resolve_and_load(&mut self, module_path: &[String]) -> CollectionResult<&ParsedModule> {
         if !self.cache.contains_key(module_path) {
@@ -155,6 +163,25 @@ impl ModuleResolver {
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
+}
+
+/// Resolve a relative import to an absolute module path.
+///
+/// `relative_level` is 0 for absolute imports, 1 for `.`, 2 for `..`, etc.
+pub(crate) fn resolve_relative_import(
+    current_module_path: &[String],
+    relative_level: usize,
+    module_parts: &[String],
+) -> Option<Vec<String>> {
+    if relative_level == 0 {
+        return Some(module_parts.to_vec());
+    }
+    if current_module_path.len() < relative_level {
+        return None;
+    }
+    let mut result = current_module_path[..current_module_path.len() - relative_level].to_vec();
+    result.extend_from_slice(module_parts);
+    Some(result)
 }
 
 /// Get PYTHONPATH environment variable as search paths

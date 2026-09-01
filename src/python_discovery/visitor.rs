@@ -79,8 +79,11 @@ impl TestDiscoveryVisitor {
                             let method_name = func.name.as_str();
                             if self.is_test_function(method_name) {
                                 // Store only method-level specs (not combined with class)
-                                let method_specs =
-                                    parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                                let method_specs = parse_decorators_to_specs(
+                                    &func.decorator_list,
+                                    Some(resolver),
+                                    Some(name),
+                                );
                                 methods.push(CachedMethodInfo {
                                     name: method_name.to_string(),
                                     line: func.range.start().to_u32() as usize,
@@ -108,7 +111,11 @@ impl TestDiscoveryVisitor {
     fn visit_function(&mut self, func: &StmtFunctionDef, resolver: &ConstantResolver) {
         let name = func.name.as_str();
         if self.is_test_function(name) {
-            let cases_expansion = parse_decorators_for_cases(&func.decorator_list, Some(resolver));
+            let cases_expansion = parse_decorators_for_cases(
+                &func.decorator_list,
+                Some(resolver),
+                self.current_class.as_deref(),
+            );
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
@@ -134,7 +141,8 @@ impl TestDiscoveryVisitor {
         self.current_class = Some(class_name.into());
 
         // Parse class-level decorators once
-        let class_specs = parse_decorators_to_specs(&class.decorator_list, Some(resolver));
+        let class_specs =
+            parse_decorators_to_specs(&class.decorator_list, Some(resolver), Some(class_name));
 
         // Collect methods defined directly in this class (to filter inherited methods)
         let own_method_names: HashSet<String> = class
@@ -187,8 +195,11 @@ impl TestDiscoveryVisitor {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let method_specs =
-                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs = parse_decorators_to_specs(
+                        &func.decorator_list,
+                        Some(resolver),
+                        Some(class_name),
+                    );
                     let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
 
                     self.tests.push(TestInfo {

@@ -1808,6 +1808,80 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 3 items", result.output)
 
+    def test_parametrize_stdlib_datetime_constructors_expand(self) -> None:
+        """date/datetime/timedelta/time are constructors; pytest IDs them as argnameN."""
+        files = {
+            "test_dates.py": textwrap.dedent("""
+                from datetime import date, datetime, timedelta, time
+                import datetime as dt
+                import pytest
+
+                @pytest.mark.parametrize("when", [date(2024, 2, 14), date(2024, 2, 15)])
+                def test_date(when):
+                    pass
+
+                @pytest.mark.parametrize("when", [datetime(2024, 1, 1), dt.datetime(2024, 1, 2)])
+                def test_datetime(when):
+                    pass
+
+                @pytest.mark.parametrize("delta", [timedelta(days=1), dt.timedelta(hours=2)])
+                def test_timedelta(delta):
+                    pass
+
+                @pytest.mark.parametrize("clock", [time(9, 0), dt.time(17, 30)])
+                def test_time(clock):
+                    pass
+
+                @pytest.mark.parametrize("when", [dt.date(2024, 1, 1)])
+                def test_datetime_date(when):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            expected_patterns = [
+                "test_dates.py::test_date[when0]",
+                "test_dates.py::test_date[when1]",
+                "test_dates.py::test_datetime[when0]",
+                "test_dates.py::test_datetime[when1]",
+                "test_dates.py::test_timedelta[delta0]",
+                "test_dates.py::test_timedelta[delta1]",
+                "test_dates.py::test_time[clock0]",
+                "test_dates.py::test_time[clock1]",
+                "test_dates.py::test_datetime_date[when0]",
+            ]
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertNotIn("Cannot statically expand", result.output)
+            self.assertIn("collected 9 items", result.output)
+
+    def test_parametrize_str_to_date_helper_is_unexpanded(self) -> None:
+        """Non-constructor date helpers still CannotExpand (pytest IDs the returned date as argnameN)."""
+        files = {
+            "test_str_to_date.py": textwrap.dedent("""
+                from datetime import date
+                import pytest
+
+                def str_to_date(value):
+                    return date.fromisoformat(value)
+
+                @pytest.mark.parametrize("when", [str_to_date("2024-01-01")])
+                def test_parsed(when):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_str_to_date.py::test_parsed"])
+            self.assertNotIn("when0", result.output)
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertIn("rtest-cannot-expand: test_str_to_date.py::test_parsed", result.output)
+
     def test_parametrize_with_nested_dicts(self) -> None:
         """Test that @parametrize with nested dicts generates positional IDs (issue #134)."""
         files = {
@@ -2105,6 +2179,529 @@ class TestCollectionIntegration(unittest.TestCase):
             ]
 
             assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_nested_list_uses_argname_ids(self) -> None:
+        """A list used as one parameter is opaque to pytest (`argnameN`), not its contents."""
+        files = {
+            "test_nested_list.py": textwrap.dedent("""
+                import pytest
+                from enum import Enum
+
+                class Color(Enum):
+                    RED = 1
+
+                @pytest.mark.parametrize(
+                    "activity_types, num, queried",
+                    [
+                        ([Color.RED], 2, 2),
+                        ([Color.RED, Color.RED], 3, 3),
+                    ],
+                )
+                def test_query(activity_types, num, queried):
+                    pass
+
+                @pytest.mark.parametrize(
+                    "offset, limit, expected",
+                    [(100, 25, (0, 100, 25, False, None))],
+                )
+                def test_tuple_expected(offset, limit, expected):
+                    pass
+
+                @pytest.mark.parametrize("items", [[1, 2], [3, 4]])
+                def test_list_value(items):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_nested_list.py::test_query[activity_types0-2-2]",
+                    "test_nested_list.py::test_query[activity_types1-3-3]",
+                    "test_nested_list.py::test_tuple_expected[100-25-expected0]",
+                    "test_nested_list.py::test_list_value[items0]",
+                    "test_nested_list.py::test_list_value[items1]",
+                ],
+            )
+            self.assertNotIn("Color.RED", result.output)
+            self.assertIn("collected 5 items", result.output)
+
+    def test_parametrize_ids_callable_is_unexpanded(self) -> None:
+        """ids= that is not a static list cannot be reproduced; fall back to the base nodeid."""
+        files = {
+            "test_ids_fn.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("value", [1, 2], ids=str)
+                def test_ids_fn(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_ids_fn.py::test_ids_fn"])
+            self.assertNotIn("test_ids_fn[1]", result.output)
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertIn("rtest-cannot-expand: test_ids_fn.py::test_ids_fn", result.output)
+            self.assertIn("collected 1 item", result.output)
+
+    def test_cannot_expand_report_none_omits_marker(self) -> None:
+        """--cannot-expand-report none keeps the warning but not the machine-readable line."""
+        files = {
+            "test_ids_fn.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("value", [1, 2], ids=str)
+                def test_ids_fn(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path, extra_args=["--cannot-expand-report", "none"])
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_ids_fn.py::test_ids_fn"])
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertNotIn("rtest-cannot-expand:", result.output)
+
+    def test_cannot_expand_report_file(self) -> None:
+        """--cannot-expand-report PATH writes records to the file, not stdout."""
+        files = {
+            "test_ids_fn.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("value", [1, 2], ids=str)
+                def test_ids_fn(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            report = project_path / "cannot-expand.txt"
+            result = run_collection(
+                project_path,
+                extra_args=["--cannot-expand-report", str(report)],
+            )
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            self.assertNotIn("rtest-cannot-expand:", result.stdout)
+            self.assertEqual(
+                report.read_text(),
+                "rtest-cannot-expand: test_ids_fn.py::test_ids_fn\n",
+            )
+
+    def test_parametrize_imported_module_constants(self) -> None:
+        """Imported constant lists expand with pytest-style value IDs."""
+        files = {
+            "constants.py": textwrap.dedent("""
+                DATA = [1, 2, 3]
+            """),
+            "test_imported.py": textwrap.dedent("""
+                import pytest
+                from constants import DATA
+
+                @pytest.mark.parametrize("value", DATA)
+                def test_imported(value):
+                    assert value in [1, 2, 3]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            expected_patterns = [
+                "test_imported.py::test_imported[1]",
+                "test_imported.py::test_imported[2]",
+                "test_imported.py::test_imported[3]",
+            ]
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 3 items", result.output)
+
+    def test_parametrize_imported_enum_and_string_values(self) -> None:
+        """Imported enums keep Color.RED IDs; inherited string members use the runtime value."""
+        files = {
+            "status_types.py": textwrap.dedent("""
+                from enum import Enum
+
+                class Color(Enum):
+                    RED = 1
+                    GREEN = 2
+
+                class BaseRole:
+                    READER = "reader"
+
+                class Role(BaseRole):
+                    ADMIN = "admin"
+            """),
+            "test_imported_attrs.py": textwrap.dedent("""
+                import pytest
+                from status_types import Color, Role
+
+                @pytest.mark.parametrize("color", [Color.RED, Color.GREEN])
+                def test_color(color):
+                    pass
+
+                @pytest.mark.parametrize("role", [Role.ADMIN, Role.READER])
+                def test_role(role):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            expected_patterns = [
+                "test_imported_attrs.py::test_color[Color.RED]",
+                "test_imported_attrs.py::test_color[Color.GREEN]",
+                "test_imported_attrs.py::test_role[admin]",
+                "test_imported_attrs.py::test_role[reader]",
+            ]
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_parametrize_named_enum_list_uses_enum_ids(self) -> None:
+        """Named lists of enum members keep Color.RED IDs, matching pytest str(member)."""
+        files = {
+            "test_named_enums.py": textwrap.dedent("""
+                import pytest
+                from enum import Enum
+
+                class Color(Enum):
+                    RED = 1
+                    GREEN = 2
+
+                COLORS = [Color.RED, Color.GREEN]
+
+                @pytest.mark.parametrize("color", COLORS)
+                def test_color(color):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_named_enums.py::test_color[Color.RED]",
+                    "test_named_enums.py::test_color[Color.GREEN]",
+                ],
+            )
+            self.assertIn("collected 2 items", result.output)
+
+    def test_parametrize_unresolved_name_is_unexpanded(self) -> None:
+        """Unresolved names must not become argnameN; peach needs CannotExpand instead."""
+        files = {
+            "test_unresolved.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("value", [UNKNOWN])
+                def test_unknown(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_unresolved.py::test_unknown"])
+            self.assertNotIn("test_unknown[value0]", result.output)
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertIn("rtest-cannot-expand: test_unresolved.py::test_unknown", result.output)
+            self.assertIn("collected 1 item", result.output)
+
+    def test_parametrize_starred_unpack_is_unexpanded(self) -> None:
+        """Star-unpack in argvalues cannot be counted statically; peach falls back to pytest."""
+        files = {
+            "test_star.py": textwrap.dedent("""
+                import pytest
+
+                IGNORED = [".gitignore", ".mcp.json"]
+
+                @pytest.mark.parametrize("ignored_file", [*IGNORED, "README.md"])
+                def test_ignored(ignored_file):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_star.py::test_ignored"])
+            self.assertNotIn("ignored_file0", result.output)
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertIn("rtest-cannot-expand: test_star.py::test_ignored", result.output)
+
+    def test_parametrize_int_binop_and_lambda_match_pytest(self) -> None:
+        """Integer ops fold to pytest IDs; lambdas use __name__ (`<lambda>`)."""
+        files = {
+            "test_ops.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("seconds", [360 * 60, 1 << 31])
+                def test_seconds(seconds):
+                    pass
+
+                @pytest.mark.parametrize("elements, predicate, result", [
+                    ([1], lambda x: x == 1, 1),
+                ])
+                def test_first(elements, predicate, result):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_ops.py::test_seconds[21600]",
+                    "test_ops.py::test_seconds[2147483648]",
+                    "test_ops.py::test_first[elements0-<lambda>-1]",
+                ],
+            )
+            self.assertNotIn("seconds0", result.output)
+            self.assertNotIn("predicate0", result.output)
+
+    def test_parametrize_helper_call_is_unexpanded(self) -> None:
+        """Helper calls that return str/int must not become argnameN (pytest uses str(result))."""
+        files = {
+            "test_helper.py": textwrap.dedent("""
+                import pytest
+
+                def index_name():
+                    return "LIBOR_1M"
+
+                @pytest.mark.parametrize("libor_index, sofr_index", [(index_name(), index_name())])
+                def test_idx(libor_index, sofr_index):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(result.output_lines, ["test_helper.py::test_idx"])
+            self.assertNotIn("libor_index0", result.output)
+            self.assertIn("Cannot statically expand", result.output)
+            self.assertIn("rtest-cannot-expand: test_helper.py::test_idx", result.output)
+
+    def test_parametrize_float_and_empty_string_match_pytest(self) -> None:
+        """Python str(0.0) is 0.0; empty string IDs are empty, not first_name0."""
+        files = {
+            "test_ids.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("rate", [0.0, 1.0])
+                def test_rate(rate):
+                    pass
+
+                @pytest.mark.parametrize("first_name", ["", "bob"])
+                def test_name(first_name):
+                    pass
+
+                @pytest.mark.parametrize("memo", ["Ñoño"])
+                def test_memo(memo):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_ids.py::test_rate[0.0]",
+                    "test_ids.py::test_rate[1.0]",
+                    "test_ids.py::test_name[]",
+                    "test_ids.py::test_name[bob]",
+                    r"test_ids.py::test_memo[\xd1o\xf1o]",
+                ],
+            )
+            self.assertFalse(any(line.strip().endswith("::test_rate[0]") for line in result.output_lines))
+            self.assertNotIn("first_name0", result.output)
+
+    def test_parametrize_bytes_one_tuple_and_pytest_duplicate_ids(self) -> None:
+        """Bytes IDs, 1-tuples, and pytest 7.3 duplicate suffixes (`id0`/`id1`)."""
+        files = {
+            "test_more_ids.py": textwrap.dedent("""
+                import pytest
+
+                @pytest.mark.parametrize("csv_content", [b"id,amount\\n1,100"])
+                def test_csv(csv_content):
+                    pass
+
+                @pytest.mark.parametrize(("admin_action",), [("deactivate",), ("delete",)])
+                def test_action(admin_action):
+                    pass
+
+                @pytest.mark.parametrize("evaluate_all", [(True,), (False,)])
+                def test_flag(evaluate_all):
+                    pass
+
+                @pytest.mark.parametrize("sids", [[], ["WFLD-missing"]])
+                def test_sids(sids):
+                    pass
+
+                @pytest.mark.parametrize("flag", [False, False])
+                def test_dup(flag):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    r"test_more_ids.py::test_csv[id,amount\n1,100]",
+                    "test_more_ids.py::test_action[deactivate]",
+                    "test_more_ids.py::test_action[delete]",
+                    "test_more_ids.py::test_flag[evaluate_all0]",
+                    "test_more_ids.py::test_flag[evaluate_all1]",
+                    "test_more_ids.py::test_sids[sids0]",
+                    "test_more_ids.py::test_sids[sids1]",
+                    "test_more_ids.py::test_dup[False0]",
+                    "test_more_ids.py::test_dup[False1]",
+                ],
+            )
+            self.assertNotIn("admin_action0", result.output)
+            self.assertNotIn("csv_content0", result.output)
+
+    def test_mark_parametrize_and_pytest_param_ids(self) -> None:
+        """`@mark.parametrize` is recognized; pytest.param(id=) is used for case IDs."""
+        files = {
+            "test_mark_param.py": textwrap.dedent("""
+                import pytest
+                from pytest import mark, param
+
+                @mark.parametrize("x", [param(1, id="one"), param(2, id="two")])
+                def test_with_param(x):
+                    pass
+
+                @pytest.mark.parametrize("x", [pytest.param(10, id="ten"), 20])
+                def test_mixed(x):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            expected_patterns = [
+                "test_mark_param.py::test_with_param[one]",
+                "test_mark_param.py::test_with_param[two]",
+                "test_mark_param.py::test_mixed[ten]",
+                "test_mark_param.py::test_mixed[20]",
+            ]
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 4 items", result.output)
+
+    def test_parametrize_enclosing_class_constant(self) -> None:
+        """Class-level lists used as method parametrize argvalues are expanded."""
+        files = {
+            "test_classvar.py": textwrap.dedent("""
+                import pytest
+
+                class TestPackages:
+                    packages = ["alpha", "beta"]
+
+                    @pytest.mark.parametrize("pkg", packages)
+                    def test_pkg(self, pkg):
+                        assert pkg in ["alpha", "beta"]
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            expected_patterns = [
+                "test_classvar.py::TestPackages::test_pkg[alpha]",
+                "test_classvar.py::TestPackages::test_pkg[beta]",
+            ]
+            assert_tests_found(result.output_lines, expected_patterns)
+            self.assertIn("collected 2 items", result.output)
+
+    def test_cases_imported_constants_keep_source_path_ids(self) -> None:
+        """@rtest.mark.cases keeps source-path IDs for imported constants."""
+        files = {
+            "config.py": textwrap.dedent("""
+                class Config:
+                    MAX_SIZE = 100
+            """),
+            "test_cases_imported.py": textwrap.dedent("""
+                import rtest
+                from config import Config
+
+                @rtest.mark.cases("size", [Config.MAX_SIZE])
+                def test_size(size):
+                    assert size == 100
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                ["test_cases_imported.py::test_size[Config.MAX_SIZE]"],
+            )
+            self.assertIn("collected 1 item", result.output)
+
+    def test_dynamic_parametrize_still_unexpanded(self) -> None:
+        """Function calls and comprehensions are not expanded."""
+        files = {
+            "test_dynamic.py": textwrap.dedent("""
+                import pytest
+
+                def get_data():
+                    return [1, 2, 3]
+
+                @pytest.mark.parametrize("value", get_data())
+                def test_call(value):
+                    pass
+
+                @pytest.mark.parametrize("value", [x for x in range(3)])
+                def test_comp(value):
+                    pass
+            """),
+        }
+
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+
+            self.assertEqual(result.returncode, 0, f"Collection failed: {result.output}")
+            assert_tests_found(
+                result.output_lines,
+                [
+                    "test_dynamic.py::test_call",
+                    "test_dynamic.py::test_comp",
+                ],
+            )
+            self.assertNotIn("test_call[1]", result.output)
             self.assertIn("collected 2 items", result.output)
 
     def test_stdlib_inheritance_skipped_gracefully(self) -> None:

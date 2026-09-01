@@ -63,6 +63,7 @@ def run_collection(
     project_path: Path,
     paths: list[str] | None = None,
     env: dict[str, str] | None = None,
+    extra_args: list[str] | None = None,
 ) -> CollectionResult:
     """Run test collection and return result with flexible output access.
 
@@ -70,11 +71,14 @@ def run_collection(
         project_path: Path to the project directory
         paths: Optional list of specific file/directory paths to collect
         env: Optional environment variables to use
+        extra_args: Optional extra CLI args (e.g. --cannot-expand-report)
 
     Returns:
         CollectionResult with returncode, output as string, and output as lines
     """
     args = ["--collect-only"]
+    if extra_args:
+        args.extend(extra_args)
     if paths:
         args.extend(paths)
     returncode, stdout, stderr = run_rtest(args, cwd=str(project_path), env=env)

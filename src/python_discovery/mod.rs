@@ -13,7 +13,10 @@ pub mod semantic_analyzer;
 mod visitor;
 
 // Re-export public API
-pub use cases::{format_cannot_expand_warning, CannotExpandReason, CasesExpansion, ExpandedCase};
+pub use cases::{
+    cannot_expand_nodeid_from_message, format_cannot_expand_marker, format_cannot_expand_warning,
+    CannotExpandReason, CasesExpansion, ExpandedCase, CANNOT_EXPAND_MARKER,
+};
 pub use discovery::{
     discover_tests, discover_tests_with_inheritance, test_info_to_functions, TestDiscoveryConfig,
     TestInfo,

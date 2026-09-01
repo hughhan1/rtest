@@ -127,7 +127,6 @@ For compatibility, `@pytest.mark.parametrize` and `@pytest.mark.skip` decorators
 - **Fixtures** - `@rtest.fixture` with function/class/module scopes and dependency resolution
 - **conftest.py support** - Fixture discovery across directory hierarchy
 - **Distribution modes** - Group tests by module/class, optimized scheduling algorithms
-- **Cross-module constant resolution** - Resolve constants imported from other modules in `@rtest.mark.cases`
 - **Built-in assertions** - `rtest.raises()` and other assertion helpers
 - **Additional markers** - `@rtest.mark.xfail`, `@rtest.mark.skipif`
 - **Test selection** - `-k` expression filtering, `--last-failed`, `--failed-first`
@@ -147,6 +146,9 @@ includes:
 - **Class constants**: `Config.MAX_SIZE`
 - **Enum members**: `Color.RED`
 - **Nested class constants**: `Outer.Inner.VALUE`
+- **Imported constants**: `from other_module import DATA` / `from colors import Color`
+- **Inherited class attributes**: members defined on a parent class
+- **`pytest.param(..., id=...)`**: explicit case IDs
 
 ```python
 from enum import Enum
@@ -167,16 +169,13 @@ def test_enum_values(color):
     assert color.value in [1, 2]
 ```
 
+`@pytest.mark.parametrize` uses pytest-compatible IDs (runtime values for primitives, `Color.RED` for enums).
+`@rtest.mark.cases` keeps source-path IDs (`Config.MAX_SIZE`, `TEST_DATA[1]`).
+
 However, `rtest` cannot statically analyze **truly dynamic expressions** and will emit a warning while falling back to
 the base test name:
 
 ```python
-from other_module import DATA  # Imported from another module
-
-@pytest.mark.parametrize("value", DATA)
-def test_example(value):
-    assert value > 0
-
 @pytest.mark.parametrize("value", get_data())  # Function call
 def test_dynamic(value):
     assert value > 0
@@ -187,10 +186,11 @@ def test_comprehension(value):
 ```
 
 ```plaintext
-warning: Cannot statically expand test cases for 'test.py::test_example': argvalues references variable 'DATA'
 warning: Cannot statically expand test cases for 'test.py::test_dynamic': argvalues contains function call 'get_data'
 warning: Cannot statically expand test cases for 'test.py::test_comprehension': argvalues contains a comprehension
 ```
+
+Use `--cannot-expand-report` to control the extra machine-readable lines (`rtest-cannot-expand: <nodeid>`). The default is `stdout`. Pass `stderr`, a file path, or `none` to omit them (human-readable warnings still print).
 
 In these cases, test execution is still functionally equivalent - pytest automatically runs all parametrized variants
 when given the base function name.

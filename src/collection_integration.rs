@@ -1,8 +1,10 @@
 //! Integration between Rust collection and pytest execution.
 
+use crate::cli::CannotExpandReport;
 use crate::collection::error::{CollectionError, CollectionOutcome, CollectionWarning};
 use crate::collection::nodes::{collect_one_node, Session};
 use crate::collection::types::Collector;
+use crate::python_discovery::{cannot_expand_nodeid_from_message, format_cannot_expand_marker};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -76,7 +78,11 @@ fn collect_items_recursive(
 }
 
 /// Display collection results in a format similar to pytest
-pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErrors) {
+pub fn display_collection_results(
+    test_nodes: &[String],
+    errors: &CollectionErrors,
+    cannot_expand: &CannotExpandReport,
+) {
     // ANSI color codes
     const RED: &str = "\x1b[31m";
     const BOLD_RED: &str = "\x1b[1;31m";
@@ -171,5 +177,41 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
             println!("{YELLOW}{warning}{RESET}");
         }
         println!("-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html");
+    }
+
+    emit_cannot_expand_records(errors, cannot_expand);
+}
+
+fn emit_cannot_expand_records(errors: &CollectionErrors, dest: &CannotExpandReport) {
+    let lines: Vec<String> = errors
+        .warnings
+        .iter()
+        .filter_map(|warning| cannot_expand_nodeid_from_message(&warning.message))
+        .map(format_cannot_expand_marker)
+        .collect();
+    match dest {
+        CannotExpandReport::None => {}
+        CannotExpandReport::Stdout => {
+            for line in &lines {
+                println!("{line}");
+            }
+        }
+        CannotExpandReport::Stderr => {
+            for line in &lines {
+                eprintln!("{line}");
+            }
+        }
+        CannotExpandReport::File(path) => {
+            let mut body = lines.join("\n");
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            if let Err(e) = std::fs::write(path, body) {
+                eprintln!(
+                    "Failed to write cannot-expand report to {}: {e}",
+                    path.display()
+                );
+            }
+        }
     }
 }

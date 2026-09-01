@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use std::env;
 use std::path::PathBuf;
 
-use crate::cli::{exit_codes, Args, Runner};
+use crate::cli::{exit_codes, Args, CannotExpandReport, Runner};
 use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
 use crate::{
@@ -135,7 +135,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         Err(e) => handle_collection_error(e),
     };
 
-    display_collection_results(&test_nodes, &errors);
+    display_collection_results(&test_nodes, &errors, &CannotExpandReport::Stdout);
 
     // Exit early if there are collection errors
     if !errors.errors.is_empty() {
@@ -197,7 +197,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                 Err(e) => handle_collection_error(e),
             };
 
-            display_collection_results(&test_nodes, &errors);
+            display_collection_results(&test_nodes, &errors, &args.cannot_expand_report);
 
             // Exit early if there are collection errors
             if !errors.errors.is_empty() {
@@ -256,7 +256,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                 Err(e) => handle_collection_error(e),
             };
 
-            display_collection_results(&test_nodes, &errors);
+            display_collection_results(&test_nodes, &errors, &args.cannot_expand_report);
 
             // Exit early if there are collection errors to prevent test execution
             if !errors.errors.is_empty() {

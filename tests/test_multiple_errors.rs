@@ -78,6 +78,10 @@ fn test_collection_multiple_syntax_errors() {
     }
 
     println!("\n--- Test output ---");
-    display_collection_results(&test_nodes, &errors);
+    display_collection_results(
+        &test_nodes,
+        &errors,
+        &rtest::cli::CannotExpandReport::Stdout,
+    );
     println!("--- End test output ---\n");
 }

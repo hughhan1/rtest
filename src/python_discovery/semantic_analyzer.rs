@@ -101,8 +101,9 @@ impl SemanticTestDiscovery {
             _ => return Ok((vec![], vec![])),
         };
 
-        // Build constant resolver for this module
-        let resolver = ConstantResolver::from_module(&ast_module);
+        // Build constant resolver for this module, following project-local imports
+        let resolver =
+            ConstantResolver::from_module_with_imports(&ast_module, &module_path, module_resolver);
 
         // Build semantic model
         let semantic_module = SemanticModule {
@@ -133,7 +134,7 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.is_test_function(func.name.as_str()) {
                     let cases_expansion =
-                        parse_decorators_for_cases(&func.decorator_list, Some(&resolver));
+                        parse_decorators_for_cases(&func.decorator_list, Some(&resolver), None);
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -247,8 +248,11 @@ impl SemanticTestDiscovery {
                 if self.is_test_class(class_name) {
                     let has_init = class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, resolver);
-                    let class_specs =
-                        parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
+                    let class_specs = parse_decorators_to_specs(
+                        &class_def.decorator_list,
+                        Some(resolver),
+                        Some(class_name),
+                    );
                     let imports = self.collect_imports_from_module(module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
@@ -286,8 +290,11 @@ impl SemanticTestDiscovery {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
                     // Store only method-level specs (not combined with class)
-                    let method_specs =
-                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs = parse_decorators_to_specs(
+                        &func.decorator_list,
+                        Some(resolver),
+                        Some(class_def.name.as_str()),
+                    );
                     methods.push(TestMethodInfo {
                         name: method_name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -373,7 +380,8 @@ impl SemanticTestDiscovery {
         }
 
         // Parse class-level decorators once
-        let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
+        let class_specs =
+            parse_decorators_to_specs(&class_def.decorator_list, Some(resolver), Some(class_name));
 
         // Collect methods defined directly in this class (to filter inherited methods)
         let own_method_names: std::collections::HashSet<String> = class_def
@@ -443,8 +451,11 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
                 if self.is_test_function(method_name) {
-                    let method_specs =
-                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
+                    let method_specs = parse_decorators_to_specs(
+                        &func.decorator_list,
+                        Some(resolver),
+                        Some(class_name),
+                    );
                     let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
 
                     all_tests.push(TestInfo {
@@ -661,57 +672,55 @@ impl SemanticTestDiscovery {
         }
 
         // Load the module and collect test classes
-        {
-            let parsed_module = match module_resolver.resolve_and_load(module_path) {
-                Ok(pm) => pm,
-                Err(CollectionError::ImportError(_)) => {
-                    // Module is external or unresolvable — mark as attempted so we don't retry
-                    self.class_cache.insert(
-                        cache_key,
-                        TestClassInfo {
-                            name: String::new(),
-                            has_init: false,
-                            test_methods: vec![],
-                            base_classes: vec![],
-                            class_specs: MethodCasesInfo::NotDecorated,
-                        },
-                    );
-                    return Ok(());
-                }
-                Err(e) => return Err(e),
-            };
+        let module_ast = match module_resolver.resolve_and_load(module_path) {
+            Ok(pm) => pm.module.clone(),
+            Err(CollectionError::ImportError(_)) => {
+                // Module is external or unresolvable — mark as attempted so we don't retry
+                self.class_cache.insert(
+                    cache_key,
+                    TestClassInfo {
+                        name: String::new(),
+                        has_init: false,
+                        test_methods: vec![],
+                        base_classes: vec![],
+                        class_specs: MethodCasesInfo::NotDecorated,
+                    },
+                );
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
 
-            // Build resolver for constants in this external module
-            let external_resolver = ConstantResolver::from_module(&parsed_module.module);
+        let external_resolver =
+            ConstantResolver::from_module_with_imports(&module_ast, module_path, module_resolver);
 
-            // Extract test class information without storing the module
-            for stmt in &parsed_module.module.body {
-                if let Stmt::ClassDef(class_def) = stmt {
-                    let class_name = class_def.name.as_str();
+        for stmt in &module_ast.body {
+            if let Stmt::ClassDef(class_def) = stmt {
+                let class_name = class_def.name.as_str();
 
-                    // Always collect class info for external modules, even if they don't match test patterns
-                    // They might be used as base classes
-                    let has_init = class_has_init(class_def);
-                    let test_methods = self.collect_test_methods(class_def, &external_resolver);
-                    let class_specs = parse_decorators_to_specs(
-                        &class_def.decorator_list,
-                        Some(&external_resolver),
-                    );
-                    let imports = self.collect_imports_from_module(&parsed_module.module);
-                    let base_classes =
-                        self.collect_base_class_names(class_def, module_path, &imports)?;
+                // Always collect class info for external modules, even if they don't match test patterns
+                // They might be used as base classes
+                let has_init = class_has_init(class_def);
+                let test_methods = self.collect_test_methods(class_def, &external_resolver);
+                let class_specs = parse_decorators_to_specs(
+                    &class_def.decorator_list,
+                    Some(&external_resolver),
+                    Some(class_name),
+                );
+                let imports = self.collect_imports_from_module(&module_ast);
+                let base_classes =
+                    self.collect_base_class_names(class_def, module_path, &imports)?;
 
-                    let info = TestClassInfo {
-                        name: class_name.to_string(),
-                        has_init,
-                        test_methods,
-                        base_classes,
-                        class_specs,
-                    };
+                let info = TestClassInfo {
+                    name: class_name.to_string(),
+                    has_init,
+                    test_methods,
+                    base_classes,
+                    class_specs,
+                };
 
-                    self.class_cache
-                        .insert((module_path.to_vec(), class_name.to_string()), info);
-                }
+                self.class_cache
+                    .insert((module_path.to_vec(), class_name.to_string()), info);
             }
         }
 
