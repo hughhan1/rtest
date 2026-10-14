@@ -57,22 +57,13 @@ fn find_subproject_root(rootpath: &Path, test_node: &str) -> PathBuf {
         _ => return rootpath.to_path_buf(),
     };
 
-    if let Some(parent) = test_path.parent() {
-        let mut current = parent;
-
-        while current.starts_with(rootpath) && current != rootpath {
-            if current.join("pyproject.toml").exists() {
-                return current.to_path_buf();
-            }
-
-            match current.parent() {
-                Some(parent) => current = parent,
-                None => break,
-            }
-        }
-    }
-
-    rootpath.to_path_buf()
+    test_path
+        .ancestors()
+        .skip(1)
+        .take_while(|current| current.starts_with(rootpath) && *current != rootpath)
+        .find(|current| current.join("pyproject.toml").exists())
+        .unwrap_or(rootpath)
+        .to_path_buf()
 }
 
 pub fn make_test_paths_relative(

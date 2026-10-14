@@ -355,42 +355,17 @@ class RepositoryManager:
 
         method = repo_config.setup.method
 
-        # For uv_sync, let uv manage its own venv
-        # For other methods, we create the venv ourselves
-        if method == "uv_sync":
-            # Step 1: Install dependencies (uv sync creates and manages .venv)
-            if not self._install_dependencies(repo_config, repo_path):
-                return False
-
-            # Step 2: Install pip extras (e.g., .[test]) into the project's venv
-            if not self._install_pip_extras(repo_config, repo_path):
-                return False
-
-            # Step 3: Install extra packages into the project's venv
-            if not self._install_extra_packages(repo_config, repo_path):
-                return False
-
-            # Step 4: Install pytest and rtest into the project's venv
-            if not self._install_test_tools(repo_config, repo_path):
-                return False
-        else:
-            # Step 1: Create venv with uv
-            if not self._create_venv(repo_config, repo_path):
-                return False
-
-            # Step 2: Install repository dependencies based on method
-            if not self._install_dependencies(repo_config, repo_path):
-                return False
-
-            # Step 3: Install extra packages
-            if not self._install_extra_packages(repo_config, repo_path):
-                return False
-
-            # Step 4: Install pytest and rtest
-            if not self._install_test_tools(repo_config, repo_path):
-                return False
-
-        # Final step: Validate installation
+        # uv sync creates its own environment; other methods need one first.
+        if method != "uv_sync" and not self._create_venv(repo_config, repo_path):
+            return False
+        if not self._install_dependencies(repo_config, repo_path):
+            return False
+        if method == "uv_sync" and not self._install_pip_extras(repo_config, repo_path):
+            return False
+        if not self._install_extra_packages(repo_config, repo_path):
+            return False
+        if not self._install_test_tools(repo_config, repo_path):
+            return False
         if not self._validate_installation(repo_config, repo_path):
             return False
 
@@ -452,12 +427,7 @@ class RepositoryManager:
         if result.returncode != 0:
             # Fallback: try without --frozen if lockfile doesn't exist
             logger.warning("[DEPS] uv sync --frozen failed, trying without --frozen")
-            cmd = ["uv", "sync"]
-            if repo_config.setup.dependency_groups:
-                for group in repo_config.setup.dependency_groups:
-                    cmd.extend(["--group", group])
-            else:
-                cmd.append("--all-groups")
+            cmd.remove("--frozen")
 
             logger.info(f"[DEPS] Running: {' '.join(cmd)}")
             result = run_command(cmd, str(repo_path), timeout=300)
@@ -592,28 +562,18 @@ class RepositoryManager:
         pytest_exe = get_venv_executable(venv_path, "pytest")
         rtest_exe = get_venv_executable(venv_path, "rtest")
 
-        # Check executables exist
-        if not pytest_exe.exists():
-            logger.error(f"[VALIDATE] pytest executable not found at {pytest_exe}")
-            return False
+        executables = [("pytest", pytest_exe), ("rtest", rtest_exe)]
+        for name, executable in executables:
+            if not executable.exists():
+                logger.error(f"[VALIDATE] {name} executable not found at {executable}")
+                return False
 
-        if not rtest_exe.exists():
-            logger.error(f"[VALIDATE] rtest executable not found at {rtest_exe}")
-            return False
-
-        # Verify pytest version
-        result = run_command([str(pytest_exe), "--version"], str(repo_path), timeout=30)
-        if result.returncode != 0:
-            logger.error(f"[VALIDATE] pytest --version failed: {result.stderr}")
-            return False
-        logger.info(f"[VALIDATE] pytest: {result.stdout.strip().split(chr(10))[0]}")
-
-        # Verify rtest version
-        result = run_command([str(rtest_exe), "--version"], str(repo_path), timeout=30)
-        if result.returncode != 0:
-            logger.error(f"[VALIDATE] rtest --version failed: {result.stderr}")
-            return False
-        logger.info(f"[VALIDATE] rtest: {result.stdout.strip().split(chr(10))[0]}")
+        for name, executable in executables:
+            result = run_command([str(executable), "--version"], str(repo_path), timeout=30)
+            if result.returncode != 0:
+                logger.error(f"[VALIDATE] {name} --version failed: {result.stderr}")
+                return False
+            logger.info(f"[VALIDATE] {name}: {result.stdout.strip().split(chr(10))[0]}")
 
         return True
 
@@ -751,20 +711,13 @@ class HyperfineRunner:
         pytest_executable = get_venv_executable(venv_path, "pytest")
         rtest_executable = get_venv_executable(venv_path, "rtest")
 
-        # Verify executables exist before benchmarking
-        if not pytest_executable.exists():
-            return ErrorResult(
-                repository=repo_config.name,
-                benchmark=benchmark_config.description,
-                error=f"pytest executable not found: {pytest_executable}",
-            )
-
-        if not rtest_executable.exists():
-            return ErrorResult(
-                repository=repo_config.name,
-                benchmark=benchmark_config.description,
-                error=f"rtest executable not found: {rtest_executable}",
-            )
+        for name, executable in [("pytest", pytest_executable), ("rtest", rtest_executable)]:
+            if not executable.exists():
+                return ErrorResult(
+                    repository=repo_config.name,
+                    benchmark=benchmark_config.description,
+                    error=f"{name} executable not found: {executable}",
+                )
 
         # Build commands with proper quoting, applying any per-repository overrides
         pytest_args = benchmark_config.pytest_args
@@ -818,10 +771,9 @@ class HyperfineRunner:
         pytest_memory = self.measure_memory(pytest_cmd, repo_path, timeout=self.validation_timeout)
         rtest_memory = self.measure_memory(rtest_cmd, repo_path, timeout=self.validation_timeout)
 
-        if pytest_memory:
-            logger.info(f"[MEMORY] pytest peak RSS: {pytest_memory} KB")
-        if rtest_memory:
-            logger.info(f"[MEMORY] rtest peak RSS: {rtest_memory} KB")
+        for name, memory in [("pytest", pytest_memory), ("rtest", rtest_memory)]:
+            if memory:
+                logger.info(f"[MEMORY] {name} peak RSS: {memory} KB")
 
         # Parse results with proper command name matching
         return self._parse_results(
@@ -1050,10 +1002,9 @@ class ResultFormatter:
                     "speedup": result.speedup,
                 }
                 # Add memory data if available
-                if result.pytest_memory_kb is not None:
-                    result_data["pytest"]["memory_kb"] = result.pytest_memory_kb
-                if result.rtest_memory_kb is not None:
-                    result_data["rtest"]["memory_kb"] = result.rtest_memory_kb
+                for name, memory in [("pytest", result.pytest_memory_kb), ("rtest", result.rtest_memory_kb)]:
+                    if memory is not None:
+                        result_data[name]["memory_kb"] = memory
                 serializable_results.append(result_data)
             else:
                 error_data: dict = {

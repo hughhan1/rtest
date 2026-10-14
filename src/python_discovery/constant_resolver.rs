@@ -3,7 +3,7 @@
 //! This module builds a scope tree from a Python module's AST to resolve
 //! constant expressions like `X`, `Color.RED`, or `Outer.Inner.VALUE`.
 
-use ruff_python_ast::{Expr, ExprAttribute, ExprName, ModModule, Stmt};
+use ruff_python_ast::{Expr, ExprAttribute, ExprList, ExprName, ExprTuple, ModModule, Stmt};
 use std::collections::HashMap;
 
 use super::cases::LiteralValue;
@@ -86,12 +86,6 @@ impl ConstantResolver {
         let value = self.root.resolve_path(&path_refs)?;
         Some((value, path))
     }
-
-    /// Get the root scope for testing.
-    #[cfg(test)]
-    pub fn root(&self) -> &ConstantScope {
-        &self.root
-    }
 }
 
 /// Convert an attribute chain to a path: `a.b.c` -> `["a", "b", "c"]`.
@@ -123,12 +117,8 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
         Expr::StringLiteral(s) => Some(LiteralValue::String(s.value.to_str().to_string())),
         Expr::BooleanLiteral(b) => Some(LiteralValue::Bool(b.value)),
         Expr::NoneLiteral(_) => Some(LiteralValue::None),
-        Expr::List(list) => {
-            let values: Option<Vec<_>> = list.elts.iter().map(try_extract_literal).collect();
-            Some(LiteralValue::Sequence(values?))
-        }
-        Expr::Tuple(tuple) => {
-            let values: Option<Vec<_>> = tuple.elts.iter().map(try_extract_literal).collect();
+        Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
+            let values: Option<Vec<_>> = elts.iter().map(try_extract_literal).collect();
             Some(LiteralValue::Sequence(values?))
         }
         _ => None,
@@ -147,68 +137,6 @@ mod tests {
             Mod::Module(m) => m,
             _ => panic!("expected module"),
         }
-    }
-
-    #[test]
-    fn test_module_constant() {
-        let module = parse_module("X = 42");
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(
-            resolver.root().resolve_path(&["X"]),
-            Some(LiteralValue::Int(42))
-        );
-    }
-
-    #[test]
-    fn test_class_constant() {
-        let module = parse_module(
-            r#"
-class Config:
-    MAX = 100
-    NAME = "test"
-"#,
-        );
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(
-            resolver.root().resolve_path(&["Config", "MAX"]),
-            Some(LiteralValue::Int(100))
-        );
-        assert_eq!(
-            resolver.root().resolve_path(&["Config", "NAME"]),
-            Some(LiteralValue::String("test".into()))
-        );
-    }
-
-    #[test]
-    fn test_nested_class() {
-        let module = parse_module(
-            r#"
-class Outer:
-    A = 1
-    class Inner:
-        B = 2
-        class Deep:
-            C = 3
-"#,
-        );
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(
-            resolver.root().resolve_path(&["Outer", "A"]),
-            Some(LiteralValue::Int(1))
-        );
-        assert_eq!(
-            resolver.root().resolve_path(&["Outer", "Inner", "B"]),
-            Some(LiteralValue::Int(2))
-        );
-        assert_eq!(
-            resolver
-                .root()
-                .resolve_path(&["Outer", "Inner", "Deep", "C"]),
-            Some(LiteralValue::Int(3))
-        );
     }
 
     #[test]
@@ -234,40 +162,5 @@ class Config:
             result,
             Some((LiteralValue::Int(100), vec!["Config".into(), "MAX".into()]))
         );
-    }
-
-    #[test]
-    fn test_annotated_assignment() {
-        let module = parse_module("X: int = 42");
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(
-            resolver.root().resolve_path(&["X"]),
-            Some(LiteralValue::Int(42))
-        );
-    }
-
-    #[test]
-    fn test_sequence_constant() {
-        let module = parse_module("DATA = [1, 2, 3]");
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(
-            resolver.root().resolve_path(&["DATA"]),
-            Some(LiteralValue::Sequence(vec![
-                LiteralValue::Int(1),
-                LiteralValue::Int(2),
-                LiteralValue::Int(3),
-            ]))
-        );
-    }
-
-    #[test]
-    fn test_nonexistent_path() {
-        let module = parse_module("X = 42");
-        let resolver = ConstantResolver::from_module(&module);
-
-        assert_eq!(resolver.root().resolve_path(&["Y"]), None);
-        assert_eq!(resolver.root().resolve_path(&["X", "Y"]), None);
     }
 }

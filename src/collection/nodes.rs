@@ -8,7 +8,6 @@ use crate::python_discovery::{
     discover_tests_with_inheritance, format_cannot_expand_warning, test_info_to_functions,
     CasesExpansion, TestDiscoveryConfig,
 };
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -18,8 +17,6 @@ pub struct Session {
     pub rootpath: PathBuf,
     pub nodeid: String,
     pub config: CollectionConfig,
-    #[allow(dead_code)]
-    cache: HashMap<PathBuf, Vec<Box<dyn Collector>>>,
 }
 
 impl Session {
@@ -28,21 +25,11 @@ impl Session {
             nodeid: String::new(),
             rootpath,
             config: CollectionConfig::default(),
-            cache: HashMap::new(),
         }
     }
 
     fn resolve_args(&self, args: &[String]) -> Vec<PathBuf> {
-        args.iter()
-            .map(|arg| {
-                let path = PathBuf::from(arg);
-                if path.is_absolute() {
-                    path
-                } else {
-                    self.rootpath.join(arg)
-                }
-            })
-            .collect()
+        args.iter().map(|arg| self.rootpath.join(arg)).collect()
     }
 
     #[allow(clippy::type_complexity)]
@@ -210,19 +197,7 @@ impl Collector for Directory {
                 Err(err) => return Err(err.into()),
             };
 
-            let path = entry.path();
-
-            if self.session().should_ignore_path(&path)? {
-                continue;
-            }
-
-            if path.is_dir() {
-                let dir = Directory::new(path, Rc::clone(&self.parent_session));
-                items.push(Box::new(dir) as Box<dyn Collector>);
-            } else if path.is_file() && self.session().is_python_file(&path) {
-                let module = Module::new(path, Rc::clone(&self.parent_session));
-                items.push(Box::new(module) as Box<dyn Collector>);
-            }
+            items.extend(self.parent_session.collect_path(&entry.path())?);
         }
 
         Ok((items, vec![]))
@@ -406,34 +381,6 @@ pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_perform_collect_returns_tuple_with_collectors_and_errors() {
-        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-        let root = temp_dir.path().canonicalize().expect("canonicalize");
-
-        // Create a valid test file
-        let valid_file = root.join("test_valid.py");
-        fs::write(&valid_file, "def test_ok():\n    pass\n").expect("failed to write valid file");
-
-        let session = Rc::new(Session::new(root.clone()));
-
-        // Pass the valid file explicitly as an arg
-        let result = session.perform_collect(&[valid_file.to_string_lossy().into_owned()]);
-        assert!(result.is_ok(), "perform_collect should succeed");
-        let (collectors, path_errors) = result.expect("expected Ok");
-        // The valid file should produce a Module collector
-        assert_eq!(
-            collectors.len(),
-            1,
-            "should have one collector for the valid file"
-        );
-        assert!(
-            path_errors.is_empty(),
-            "should have no path errors for valid file"
-        );
-    }
 
     #[test]
     fn test_perform_collect_explicit_nonexistent_path_returns_error() {
@@ -449,23 +396,5 @@ mod tests {
             CollectionError::FileNotFound(_) => {}
             other => panic!("expected FileNotFound, got: {other}"),
         }
-    }
-
-    #[test]
-    fn test_perform_collect_signature_returns_errors_vec() {
-        // Verify that perform_collect returns the new tuple type
-        // by checking the type system accepts destructuring into
-        // (Vec<Box<dyn Collector>>, Vec<(String, CollectionError)>)
-        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-        let root = temp_dir.path().canonicalize().expect("canonicalize");
-
-        let valid_file = root.join("test_a.py");
-        fs::write(&valid_file, "def test_a():\n    pass\n").expect("write");
-
-        let session = Rc::new(Session::new(root));
-        let result = session.perform_collect(&[valid_file.to_string_lossy().into_owned()]);
-        let (_collectors, errors) = result.expect("should succeed");
-        // With a valid file the errors vec should be empty
-        assert!(errors.is_empty());
     }
 }

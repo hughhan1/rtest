@@ -68,21 +68,6 @@ pub fn default_python_functions() -> Vec<String> {
     vec!["test*".into()]
 }
 
-fn shard_files(files: Vec<PathBuf>, num_workers: usize) -> Vec<Vec<PathBuf>> {
-    if num_workers == 0 || files.is_empty() {
-        return vec![];
-    }
-
-    let actual_workers = num_workers.min(files.len());
-    let mut shards: Vec<Vec<PathBuf>> = (0..actual_workers).map(|_| Vec::new()).collect();
-
-    for (i, file) in files.into_iter().enumerate() {
-        shards[i % actual_workers].push(file);
-    }
-
-    shards.into_iter().filter(|s| !s.is_empty()).collect()
-}
-
 fn parse_results_file(path: &Path) -> Result<Vec<TestResult>, String> {
     let file =
         File::open(path).map_err(|e| format!("Failed to open results file {:?}: {}", path, e))?;
@@ -167,19 +152,16 @@ fn print_summary(results: &AggregatedResults) {
     println!();
     let duration_secs = results.total_duration_ms / 1000.0;
 
-    let mut parts = Vec::new();
-    if results.passed > 0 {
-        parts.push(format!("{} passed", results.passed));
-    }
-    if results.failed > 0 {
-        parts.push(format!("{} failed", results.failed));
-    }
-    if results.error > 0 {
-        parts.push(format!("{} error", results.error));
-    }
-    if results.skipped > 0 {
-        parts.push(format!("{} skipped", results.skipped));
-    }
+    let parts: Vec<String> = [
+        (results.passed, "passed"),
+        (results.failed, "failed"),
+        (results.error, "error"),
+        (results.skipped, "skipped"),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, label)| format!("{count} {label}"))
+    .collect();
 
     let status = if results.failed > 0 || results.error > 0 {
         "FAILED"
@@ -212,25 +194,17 @@ fn run_worker(
         .arg("--out")
         .arg(output_file);
 
-    if !python_classes.is_empty() {
-        cmd.arg("--python-classes");
-        for pattern in python_classes {
-            cmd.arg(pattern);
-        }
-    }
-
-    if !python_functions.is_empty() {
-        cmd.arg("--python-functions");
-        for pattern in python_functions {
-            cmd.arg(pattern);
+    for (flag, patterns) in [
+        ("--python-classes", python_classes),
+        ("--python-functions", python_functions),
+    ] {
+        if !patterns.is_empty() {
+            cmd.arg(flag).args(patterns);
         }
     }
 
     // Use -- to separate options from positional file arguments
-    cmd.arg("--");
-    for file in files {
-        cmd.arg(file);
-    }
+    cmd.arg("--").args(files);
 
     cmd.current_dir(root)
         .stdout(Stdio::piped())
@@ -240,23 +214,17 @@ fn run_worker(
         .output()
         .map_err(|e| format!("Worker {} failed to start: {}", worker_id, e))?;
 
-    // Check worker exit code - non-zero indicates test failures or errors
-    if !output.status.success() {
-        let exit_code = output.status.code().unwrap_or(-1);
-        // Exit code 1 is expected when tests fail, only report unexpected codes
-        if exit_code != 1 {
-            // Print stderr only for unexpected failures
-            if !output.stderr.is_empty() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !stderr.trim().is_empty() {
-                    eprintln!("Worker {} stderr:\n{}", worker_id, stderr);
-                }
-            }
-            return Err(format!(
-                "Worker {} crashed with exit code {} (expected 0 or 1)",
-                worker_id, exit_code
-            ));
+    let exit_code = output.status.code().unwrap_or(-1);
+    // Exit code 1 is expected when tests fail, only report unexpected codes.
+    if !matches!(exit_code, 0 | 1) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.trim().is_empty() {
+            eprintln!("Worker {} stderr:\n{}", worker_id, stderr);
         }
+        return Err(format!(
+            "Worker {} crashed with exit code {} (expected 0 or 1)",
+            worker_id, exit_code
+        ));
     }
 
     Ok(())
@@ -283,7 +251,7 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         }
     };
 
-    let shards = shard_files(test_files, num_workers);
+    let shards = crate::scheduler::distribute_round_robin(test_files, num_workers);
     let output_files: Vec<PathBuf> = (0..shards.len())
         .map(|i| temp_dir.path().join(format!("worker-{}.jsonl", i)))
         .collect();
@@ -381,12 +349,7 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
         paths
             .iter()
             .flat_map(|path_str| {
-                let path = Path::new(path_str);
-                let full_path = if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    root.join(path)
-                };
+                let full_path = root.join(path_str);
 
                 if full_path.is_file() && is_test_file(&full_path, patterns) {
                     vec![full_path]
@@ -406,64 +369,6 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_shard_files_empty() {
-        let result = shard_files(vec![], 4);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_shard_files_zero_workers() {
-        let files = vec![PathBuf::from("a.py"), PathBuf::from("b.py")];
-        let result = shard_files(files, 0);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_shard_files_single_worker() {
-        let files = vec![
-            PathBuf::from("a.py"),
-            PathBuf::from("b.py"),
-            PathBuf::from("c.py"),
-        ];
-        let result = shard_files(files.clone(), 1);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], files);
-    }
-
-    #[test]
-    fn test_shard_files_round_robin() {
-        let files = vec![
-            PathBuf::from("a.py"),
-            PathBuf::from("b.py"),
-            PathBuf::from("c.py"),
-            PathBuf::from("d.py"),
-            PathBuf::from("e.py"),
-        ];
-        let result = shard_files(files, 3);
-
-        assert_eq!(result.len(), 3);
-        assert_eq!(
-            result[0],
-            vec![PathBuf::from("a.py"), PathBuf::from("d.py")]
-        );
-        assert_eq!(
-            result[1],
-            vec![PathBuf::from("b.py"), PathBuf::from("e.py")]
-        );
-        assert_eq!(result[2], vec![PathBuf::from("c.py")]);
-    }
-
-    #[test]
-    fn test_shard_files_more_workers_than_files() {
-        let files = vec![PathBuf::from("a.py"), PathBuf::from("b.py")];
-        let result = shard_files(files, 5);
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0], vec![PathBuf::from("a.py")]);
-        assert_eq!(result[1], vec![PathBuf::from("b.py")]);
-    }
 
     #[test]
     fn test_is_test_file() {

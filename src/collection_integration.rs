@@ -24,26 +24,13 @@ pub fn collect_tests_rust(
         warnings: Vec::new(),
     };
 
-    match session.perform_collect(args) {
-        Ok((collectors, path_errors)) => {
-            for (path, error) in path_errors {
-                collection_errors.errors.push((path, error));
-            }
-
-            let mut test_nodes = Vec::new();
-
-            for collector in collectors {
-                collect_items_recursive(
-                    collector.as_ref(),
-                    &mut test_nodes,
-                    &mut collection_errors,
-                );
-            }
-
-            Ok((test_nodes, collection_errors))
-        }
-        Err(e) => Err(e),
+    let (collectors, path_errors) = session.perform_collect(args)?;
+    collection_errors.errors.extend(path_errors);
+    let mut test_nodes = Vec::new();
+    for collector in collectors {
+        collect_items_recursive(collector.as_ref(), &mut test_nodes, &mut collection_errors);
     }
+    Ok((test_nodes, collection_errors))
 }
 
 /// Recursively collect all test items
@@ -123,35 +110,22 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
     if item_count == 0 && error_count == 0 {
         println!("No tests collected.");
     } else {
-        let mut summary_parts = Vec::new();
+        let summary_parts: Vec<String> = [
+            (item_count, "collected ", "item"),
+            (error_count, "", "error"),
+            (warning_count, "", "warning"),
+        ]
+        .into_iter()
+        .filter(|(count, _, _)| *count > 0)
+        .map(|(count, prefix, label)| {
+            format!(
+                "{prefix}{count} {label}{}",
+                if count == 1 { "" } else { "s" }
+            )
+        })
+        .collect();
 
-        if item_count > 0 {
-            summary_parts.push(format!(
-                "collected {} item{}",
-                item_count,
-                if item_count == 1 { "" } else { "s" }
-            ));
-        }
-
-        if error_count > 0 {
-            summary_parts.push(format!(
-                "{} error{}",
-                error_count,
-                if error_count == 1 { "" } else { "s" }
-            ));
-        }
-
-        if warning_count > 0 {
-            summary_parts.push(format!(
-                "{} warning{}",
-                warning_count,
-                if warning_count == 1 { "" } else { "s" }
-            ));
-        }
-
-        if !summary_parts.is_empty() {
-            println!("{}", summary_parts.join(" / "));
-        }
+        println!("{}", summary_parts.join(" / "));
 
         if !test_nodes.is_empty() {
             println!();

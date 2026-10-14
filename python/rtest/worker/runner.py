@@ -41,16 +41,16 @@ class TestCase:
     test_class: type | None = None
 
 
+def _relative_path(file_path: Path, root: Path) -> str:
+    try:
+        return str(file_path.relative_to(root))
+    except ValueError:
+        return str(file_path)
+
+
 def _import_module_from_file(file_path: Path, root: Path) -> ModuleType:
     """Import a Python module from a file path."""
-    try:
-        rel_path = file_path.relative_to(root)
-    except ValueError:
-        rel_path = file_path
-
-    module_name = str(rel_path).replace("/", ".").replace("\\", ".")
-    if module_name.endswith(".py"):
-        module_name = module_name[:-3]
+    module_name = _relative_path(file_path, root).replace("/", ".").replace("\\", ".").removesuffix(".py")
 
     # Add prefix to avoid collisions with installed packages
     module_name = f"_rtest_module_.{module_name}"
@@ -122,12 +122,7 @@ def _discover_tests_in_module(
     """Discover all test cases in a module."""
     from rtest.mark import expand_parametrize, get_case_nodeid_suffix
 
-    try:
-        rel_path = str(file_path.relative_to(root))
-    except ValueError:
-        rel_path = str(file_path)
-
-    rel_path = rel_path.replace("\\", "/")
+    rel_path = _relative_path(file_path, root).replace("\\", "/")
 
     test_cases: list[TestCase] = []
 
@@ -296,14 +291,9 @@ def run_tests(
             test_cases = _discover_tests_in_module(module, file_path, root, python_classes, python_functions)
             all_test_cases.extend(test_cases)
         except Exception as e:
-            try:
-                rel_path = str(file_path.relative_to(root))
-            except ValueError:
-                rel_path = str(file_path)
-
             import_errors.append(
                 TestResult(
-                    nodeid=f"{rel_path}::IMPORT_ERROR",
+                    nodeid=f"{_relative_path(file_path, root)}::IMPORT_ERROR",
                     outcome="error",
                     duration_ms=0.0,
                     error={"traceback": traceback.format_exc()},

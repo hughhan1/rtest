@@ -80,61 +80,45 @@ pub trait Scheduler {
     fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>>;
 }
 
-// Common utility functions to eliminate code duplication
-fn validate_and_handle_edge_cases(
-    tests: &[String],
+/// Distribute items in input order, returning only nonempty workers.
+pub(crate) fn distribute_round_robin<T>(items: Vec<T>, num_workers: usize) -> Vec<Vec<T>> {
+    if num_workers == 0 {
+        return vec![];
+    }
+    let actual_workers = num_workers.min(items.len());
+    let mut workers: Vec<Vec<T>> = (0..actual_workers).map(|_| Vec::new()).collect();
+    for (i, item) in items.into_iter().enumerate() {
+        workers[i % actual_workers].push(item);
+    }
+    workers
+}
+
+fn distribute_by_key(
+    tests: Vec<String>,
     num_workers: usize,
-) -> Option<Vec<Vec<String>>> {
-    if num_workers == 0 || tests.is_empty() {
-        return Some(vec![]);
+    key_extractor: impl Fn(&str) -> String,
+) -> Vec<Vec<String>> {
+    // A single worker preserves input order rather than sorting by group key.
+    if num_workers <= 1 {
+        return distribute_round_robin(tests, num_workers);
     }
 
-    if num_workers == 1 {
-        return Some(vec![tests.to_vec()]);
-    }
-
-    None // Continue with normal processing
-}
-
-fn distribute_groups_to_workers<T>(groups: Vec<Vec<T>>, num_workers: usize) -> Vec<Vec<T>> {
-    let mut workers: Vec<Vec<T>> = (0..num_workers).map(|_| Vec::new()).collect();
-
-    for (i, group) in groups.into_iter().enumerate() {
-        workers[i % num_workers].extend(group);
-    }
-
-    workers.into_iter().filter(|w| !w.is_empty()).collect()
-}
-
-fn group_tests_by_key<F>(tests: Vec<String>, key_extractor: F) -> Vec<Vec<String>>
-where
-    F: Fn(&str) -> String,
-{
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
-
     for test in tests {
-        let key = key_extractor(&test);
-        groups.entry(key).or_default().push(test);
+        groups.entry(key_extractor(&test)).or_default().push(test);
     }
 
-    groups.into_values().collect()
+    distribute_round_robin(groups.into_values().collect(), num_workers)
+        .into_iter()
+        .map(|groups| groups.into_iter().flatten().collect())
+        .collect()
 }
 
 pub struct LoadScheduler;
 
 impl Scheduler for LoadScheduler {
     fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
-        if let Some(result) = validate_and_handle_edge_cases(&tests, num_workers) {
-            return result;
-        }
-
-        let mut workers: Vec<Vec<String>> = vec![Vec::new(); num_workers];
-
-        for (i, test) in tests.into_iter().enumerate() {
-            workers[i % num_workers].push(test);
-        }
-
-        workers.into_iter().filter(|w| !w.is_empty()).collect()
+        distribute_round_robin(tests, num_workers)
     }
 }
 
@@ -142,12 +126,7 @@ pub struct LoadScopeScheduler;
 
 impl Scheduler for LoadScopeScheduler {
     fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
-        if let Some(result) = validate_and_handle_edge_cases(&tests, num_workers) {
-            return result;
-        }
-
-        let groups = group_tests_by_key(tests, extract_scope);
-        distribute_groups_to_workers(groups, num_workers)
+        distribute_by_key(tests, num_workers, extract_scope)
     }
 }
 
@@ -155,12 +134,7 @@ pub struct LoadFileScheduler;
 
 impl Scheduler for LoadFileScheduler {
     fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
-        if let Some(result) = validate_and_handle_edge_cases(&tests, num_workers) {
-            return result;
-        }
-
-        let groups = group_tests_by_key(tests, extract_file);
-        distribute_groups_to_workers(groups, num_workers)
+        distribute_by_key(tests, num_workers, extract_file)
     }
 }
 
@@ -174,20 +148,7 @@ pub struct WorkStealScheduler;
 
 impl Scheduler for WorkStealScheduler {
     fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
-        if let Some(result) = validate_and_handle_edge_cases(&tests, num_workers) {
-            return result;
-        }
-
-        let mut workers: Vec<Vec<String>> = (0..num_workers).map(|_| Vec::new()).collect();
-
-        // Round-robin distribution - this gives better work-stealing characteristics
-        // because it interleaves tests across workers, making it more likely that
-        // when one worker finishes early, there are still tests available for stealing
-        for (i, test) in tests.into_iter().enumerate() {
-            workers[i % num_workers].push(test);
-        }
-
-        workers.into_iter().filter(|w| !w.is_empty()).collect()
+        LoadScheduler.distribute_tests(tests, num_workers)
     }
 }
 
@@ -208,9 +169,7 @@ fn extract_scope(test_path: &str) -> String {
     // Format: path/to/file.py::TestClass::test_method or path/to/file.py::test_function
     let parts: Vec<&str> = test_path.split("::").collect();
     match parts.len() {
-        0 => test_path.to_string(), // Shouldn't happen, but handle gracefully
-        1 => parts[0].to_string(),  // Just file path
-        2 => parts[0].to_string(),  // File::function
+        1 | 2 => parts[0].to_string(), // Just file path or File::function
         _ => format!("{}::{}", parts[0], parts[1]), // File::Class::method
     }
 }

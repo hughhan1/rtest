@@ -76,13 +76,11 @@ def raises(
         A context manager. After the ``with`` block, access the caught
         exception via the ``.value`` attribute.
     """
-    if isinstance(expected_exception, tuple):
-        for exc in expected_exception:
-            if not isinstance(exc, type) or not issubclass(exc, BaseException):
-                raise TypeError(f"{exc!r} is not a valid exception type")
-        if not expected_exception:
-            raise ValueError("expected_exception must not be empty")
-    elif not isinstance(expected_exception, type) or not issubclass(expected_exception, BaseException):
-        raise TypeError(f"{expected_exception!r} is not a valid exception type")
+    exceptions = expected_exception if isinstance(expected_exception, tuple) else (expected_exception,)
+    for exc in exceptions:
+        if not isinstance(exc, type) or not issubclass(exc, BaseException):
+            raise TypeError(f"{exc!r} is not a valid exception type")
+    if not exceptions:
+        raise ValueError("expected_exception must not be empty")
 
     return RaisesContext(expected_exception, match=match)
