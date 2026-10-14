@@ -1,68 +1,48 @@
-# Repository Benchmarking
+# Static collection benchmarks
 
-This directory contains scripts for benchmarking `rtest` performance against `pytest` across popular Python repositories.
+The benchmark measures `rtest --collect-only tests` on pinned Click, Flask, and Pydantic source trees. These cover
+smaller CLI and web projects and a larger, heavily parametrized suite. Source commits are recorded in
+`benchmark_repositories.py` and each run's summary. No upstream packages or test dependencies are installed:
+static collection does not import or execute the upstream tests.
 
-## Usage
+## Run locally
 
-From the project root:
+Install Git, uv, Rust, and Hyperfine 1.20.0 (the version pinned in CI), then run from the project root:
 
 ```bash
-# List available repositories
-uv run python scripts/benchmark/benchmark_repositories.py --list-repos
+git submodule update --init
+uv sync --locked --no-install-project
+uv run --no-sync maturin develop --release
+uv run --no-sync python scripts/benchmark/benchmark_repositories.py
 
-# Run all benchmarks on all repositories
-uv run python scripts/benchmark/benchmark_repositories.py
-
-# Run benchmarks on specific repositories
-uv run python scripts/benchmark/benchmark_repositories.py --repositories fastapi flask click
-
-# Run only test collection benchmarks (skip execution)
-uv run python scripts/benchmark/benchmark_repositories.py --collect-only
-
-# Combine options
-uv run python scripts/benchmark/benchmark_repositories.py --repositories click flask --collect-only
+# Select a workload and write to a fresh output directory.
+uv run --no-sync python scripts/benchmark/benchmark_repositories.py --repositories click --output dist/click-benchmark
 ```
 
-## Configuration
+The script uses the same Python environment that launched it, so it measures the installed release build.
+Each workload gets 3 warmups and 20 measured runs, including CLI startup. Git setup and the initial collection
+check are outside the timing. Run on an idle machine for more stable results.
 
-The `repositories.yml` file contains:
-- Repository definitions (name, URL, test directory)
-- Benchmark configurations (collect_only, execution_native, execution_pytest, startup_time)
-- Per-repository benchmark overrides
+The output directory must be new, to avoid mixing runs. It contains:
 
-### Benchmark Types
+- `summary.md`: timings, Python/platform details, source revisions, and collected item counts.
+- `<repository>-collection.txt`: the initial collection output, including test IDs.
+- `<repository>.json` and `<repository>.md`: unmodified Hyperfine reports.
 
-| Benchmark | Description | pytest args | rtest args |
-|-----------|-------------|-------------|------------|
-| `collect_only` | Test discovery performance | `--collect-only -q` | `--collect-only` |
-| `execution_native` | Test execution with rtest's native runner | (none) | `--runner native` |
-| `execution_pytest` | Test execution via pytest with parallelism | `-n 4` | `--runner pytest -n 4` |
-| `startup_time` | CLI startup overhead | `--version` | `--version` |
+Any checkout error, failed or empty collection, timeout, or failed timing command fails the job.
+Temporary checkouts are removed automatically. CI publishes the summary on success and uploads available
+reports even on failure, so collection diagnostics can be inspected.
 
-### Per-Repository Overrides
+## Scope
 
-Some repositories require custom benchmark configuration due to test suite incompatibilities. Use `benchmark_overrides` in `repositories.yml`:
+These are static collection timings, not tests of upstream execution or pytest compatibility. Comparing them
+with pytest collection would compare different work: pytest imports modules, loads plugins, and evaluates
+fixtures and dynamic parameters. Execution comparisons against unsupported fixture-heavy suites and repeated
+`--version` benchmarks have been removed.
 
-```yaml
-- name: "example-repo"
-  # ... other config ...
-  benchmark_overrides:
-    execution_pytest:
-      pytest_args: ""        # Override pytest arguments
-      rtest_args: "--runner pytest"  # Override rtest arguments
-      skip: true             # Skip this benchmark entirely
-```
+There is no comparison against an old main-branch artifact or percentage-based regression gate. Different
+hosted runners are not a controlled experiment. Use the raw measurements to investigate performance, and
+compare builds on the same machine with the same pinned workloads and collected test IDs.
 
-### Known Repository Issues
-
-| Repository | Issue | Workaround |
-|------------|-------|------------|
-| **httpx** | Test suite has 1 failing test; tests hang with pytest-xdist `-n 4` | `execution_native` and `execution_pytest` benchmarks skipped |
-| **more-itertools** | pytest-xdist can't serialize `range`, `Decimal`, `type` objects in test parameters | `execution_pytest` runs without `-n 4` parallelism |
-
-## Requirements
-
-- `hyperfine` - Command-line benchmarking tool
-- `git` - For cloning repositories
-- `uv` - Python package manager
-- `pyyaml` - For reading configuration (installed via dev dependencies)
+Hyperfine generates the timing tables itself. The harness does not depend on the JSON statistics schema,
+which changed in Hyperfine 2.0.
