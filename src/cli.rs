@@ -1,4 +1,6 @@
 use clap::{Parser, ValueEnum};
+use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Exit codes for the CLI.
 /// These follow standard conventions and match pytest's exit codes where applicable.
@@ -19,6 +21,33 @@ pub enum Runner {
     /// Full pytest compatibility
     #[default]
     Pytest,
+}
+
+/// Where to emit machine-readable cannot-expand records.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CannotExpandReport {
+    /// Print `rtest-cannot-expand:` lines on stdout (default).
+    #[default]
+    Stdout,
+    /// Print `rtest-cannot-expand:` lines on stderr.
+    Stderr,
+    /// Do not emit machine-readable records (human warnings still print).
+    None,
+    /// Write records to this path, one `rtest-cannot-expand: <nodeid>` line per test.
+    File(PathBuf),
+}
+
+impl FromStr for CannotExpandReport {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "stdout" | "-" => Self::Stdout,
+            "stderr" => Self::Stderr,
+            "none" | "off" => Self::None,
+            other => Self::File(PathBuf::from(other)),
+        })
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -43,6 +72,14 @@ pub struct Args {
     /// Collect tests only, don't run them
     #[arg(long)]
     pub collect_only: bool,
+
+    /// Where to write machine-readable cannot-expand records (pytest-incompatible cases).
+    ///
+    /// `stdout` (default) prints `rtest-cannot-expand: <nodeid>` after collection warnings.
+    /// `stderr` writes the same lines to stderr. A file path writes those lines to the file
+    /// and leaves collect-only stdout unchanged. `none` omits the records (warnings remain).
+    #[arg(long, default_value = "stdout", value_name = "DEST")]
+    pub cannot_expand_report: CannotExpandReport,
 
     /// Test runner backend
     #[arg(long, value_enum, default_value = "pytest")]
@@ -100,6 +137,10 @@ mod tests {
         assert!(!args.collect_only);
         assert!(args.files.is_empty());
         assert!(matches!(args.runner, Runner::Pytest));
+        assert!(matches!(
+            args.cannot_expand_report,
+            CannotExpandReport::Stdout
+        ));
     }
 
     #[test]
@@ -212,5 +253,34 @@ mod tests {
 
         let args = Args::parse_from(["rtest", "--runner", "pytest"]);
         assert!(matches!(args.runner, Runner::Pytest));
+    }
+
+    #[test]
+    fn test_cli_parsing_cannot_expand_report() {
+        let args = Args::parse_from(["rtest"]);
+        assert!(matches!(
+            args.cannot_expand_report,
+            CannotExpandReport::Stdout
+        ));
+
+        let args = Args::parse_from(["rtest", "--cannot-expand-report", "stderr"]);
+        assert!(matches!(
+            args.cannot_expand_report,
+            CannotExpandReport::Stderr
+        ));
+
+        let args = Args::parse_from(["rtest", "--cannot-expand-report", "none"]);
+        assert!(matches!(
+            args.cannot_expand_report,
+            CannotExpandReport::None
+        ));
+
+        let args = Args::parse_from(["rtest", "--cannot-expand-report", "report.txt"]);
+        match args.cannot_expand_report {
+            CannotExpandReport::File(path) => {
+                assert_eq!(path, PathBuf::from("report.txt"));
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
     }
 }
