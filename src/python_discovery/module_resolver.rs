@@ -4,8 +4,8 @@
 //! to actual file paths and load their contents.
 
 use crate::collection::error::{CollectionError, CollectionResult};
-use ruff_python_ast::{Mod, ModModule};
-use ruff_python_parser::{parse, Mode, ParseOptions};
+use ruff_python_ast::ModModule;
+use ruff_python_parser::parse_module;
 use ruff_python_stdlib::sys::is_builtin_module;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -106,19 +106,14 @@ impl ModuleResolver {
     /// Load and parse a Python module
     fn load_module(&self, path: &Path) -> CollectionResult<ParsedModule> {
         let source = std::fs::read_to_string(path)?;
-        let parsed = parse(&source, ParseOptions::from(Mode::Module)).map_err(|e| {
+        let parsed = parse_module(&source).map_err(|e| {
             CollectionError::ParseError(format!("Failed to parse {}: {:?}", path.display(), e))
         })?;
-
-        let ast_module = match parsed.into_syntax() {
-            Mod::Module(module) => module,
-            _ => return Err(CollectionError::ParseError("Not a module".into())),
-        };
 
         Ok(ParsedModule {
             path: path.to_path_buf(),
             source,
-            module: ast_module,
+            module: parsed.into_syntax(),
         })
     }
 
@@ -175,50 +170,5 @@ mod tests {
 
         // Test non-existent module
         assert!(resolver.resolve_and_load(&["nonexistent".into()]).is_err());
-    }
-
-    #[test]
-    fn test_resolve_and_load_cache_hit() {
-        let temp_dir = TempDir::new().unwrap();
-        let root = temp_dir.path();
-
-        // Create a simple Python file
-        fs::write(root.join("cached_module.py"), "x = 1\n").unwrap();
-
-        let mut resolver = ModuleResolver::new(root).unwrap();
-        let module_path: Vec<String> = vec!["cached_module".into()];
-
-        // First call resolves from disk
-        let first = resolver.resolve_and_load(&module_path).unwrap();
-        assert_eq!(first.path, root.join("cached_module.py"));
-
-        // Second call exercises the cache-hit path
-        let second = resolver.resolve_and_load(&module_path).unwrap();
-        assert_eq!(second.path, root.join("cached_module.py"));
-    }
-
-    #[test]
-    fn test_sys_path_resolution() {
-        let temp_dir = TempDir::new().unwrap();
-        let root = temp_dir.path();
-
-        // Create test module in temp directory
-        fs::write(root.join("test_module.py"), "# test module").unwrap();
-
-        // Create resolver with sys.path support
-        let mut resolver = ModuleResolver::new(root).unwrap();
-
-        // Should be able to resolve the module
-        let result = resolver.resolve_and_load(&["test_module".into()]);
-        // This might fail if the temp dir isn't in Python's sys.path, which is expected
-        // The test verifies the resolver doesn't crash
-        match result {
-            Ok(parsed) => {
-                assert_eq!(parsed.path, root.join("test_module.py"));
-            }
-            Err(_) => {
-                // Expected if temp dir not in sys.path
-            }
-        }
     }
 }

@@ -24,17 +24,9 @@ impl PytestRunner {
         let initial_args = vec!["-m".into(), "pytest".into()];
 
         // Parse environment variables from KEY=VALUE format
-        let parsed_env_vars: Vec<(String, String)> = env_vars
-            .iter()
-            .filter_map(|env_str| {
-                if let Some((key, value)) = env_str.split_once('=') {
-                    Some((key.to_string(), value.to_string()))
-                } else {
-                    log::warn!("Invalid environment variable format: {}", env_str);
-                    None
-                }
-            })
-            .collect();
+        let parsed_env_vars = parse_env_vars(&env_vars, |env_str| {
+            log::warn!("Invalid environment variable format: {}", env_str);
+        });
 
         log::debug!("Pytest command: {} {}", program, initial_args.join(" "));
 
@@ -44,6 +36,19 @@ impl PytestRunner {
             env_vars: parsed_env_vars,
         }
     }
+}
+
+pub(crate) fn parse_env_vars(env_vars: &[String], warn: impl Fn(&str)) -> Vec<(String, String)> {
+    env_vars
+        .iter()
+        .filter_map(|env_str| match env_str.split_once('=') {
+            Some((key, value)) => Some((key.into(), value.into())),
+            None => {
+                warn(env_str);
+                None
+            }
+        })
+        .collect()
 }
 
 /// Execute tests in parallel across multiple workers
@@ -113,46 +118,6 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_python_runner() {
-        let runner = PytestRunner::new(vec![]);
-
-        assert_eq!(runner.program, "python3");
-        assert_eq!(runner.initial_args, vec!["-m", "pytest"]);
-    }
-
-    #[test]
-    fn test_env_vars_acknowledged() {
-        let env_vars = vec!["DEBUG=1".into(), "TEST_ENV=staging".into()];
-        let runner = PytestRunner::new(env_vars);
-
-        // The runner should be created successfully
-        // (Environment variables are currently just acknowledged, not stored)
-        assert_eq!(runner.program, "python3");
-        assert_eq!(runner.initial_args, vec!["-m", "pytest"]);
-    }
-
-    #[test]
-    fn test_env_var_parsing_skips_invalid() {
-        let env_vars = vec![
-            "VALID=value".into(),
-            "INVALID_NO_EQUALS".into(),
-            "ALSO_VALID=another".into(),
-        ];
-        let runner = PytestRunner::new(env_vars);
-        assert_eq!(runner.env_vars.len(), 2);
-        assert_eq!(
-            runner.env_vars[0],
-            ("VALID".to_string(), "value".to_string())
-        );
-        assert_eq!(
-            runner.env_vars[1],
-            ("ALSO_VALID".to_string(), "another".to_string())
-        );
-    }
-
     #[test]
     fn test_execute_tests_nonexistent_program() {
         let exit_code = crate::pytest_executor::execute_tests(

@@ -3,13 +3,14 @@
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
 use crate::collection::nodes::Function;
 use crate::collection::types::Location;
-use crate::python_discovery::cases::CasesExpansion;
+use crate::python_discovery::cases::{parse_decorators_to_specs, CasesExpansion};
+use crate::python_discovery::constant_resolver::ConstantResolver;
 use crate::python_discovery::module_resolver::ModuleResolver;
 use crate::python_discovery::pattern;
-use crate::python_discovery::semantic_analyzer::SemanticTestDiscovery;
+use crate::python_discovery::semantic_analyzer::{SemanticTestDiscovery, TestMethodInfo};
 use crate::python_discovery::visitor::TestDiscoveryVisitor;
-use ruff_python_ast::{Mod, Stmt, StmtClassDef};
-use ruff_python_parser::{parse, Mode, ParseOptions};
+use ruff_python_ast::{Stmt, StmtClassDef};
+use ruff_python_parser::parse_module;
 use std::path::Path;
 
 /// Information about a discovered test
@@ -63,21 +64,40 @@ pub(crate) fn class_has_init(class: &StmtClassDef) -> bool {
         .any(|stmt| matches!(stmt, Stmt::FunctionDef(func) if func.name.as_str() == "__init__"))
 }
 
+/// Collect method-level specs so each discovery path can apply the child's class decorators.
+pub(crate) fn collect_test_methods(
+    class: &StmtClassDef,
+    config: &TestDiscoveryConfig,
+    resolver: &ConstantResolver,
+) -> Vec<TestMethodInfo> {
+    class
+        .body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::FunctionDef(func) if config.is_test_function(func.name.as_str()) => {
+                Some(TestMethodInfo {
+                    name: func.name.to_string(),
+                    line: func.range.start().to_u32() as usize,
+                    method_specs: parse_decorators_to_specs(&func.decorator_list, Some(resolver)),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Parse a Python file and discover test functions/methods
 pub fn discover_tests(
     path: &Path,
     source: &str,
     config: &TestDiscoveryConfig,
 ) -> CollectionResult<Vec<TestInfo>> {
-    let parsed = parse(source, ParseOptions::from(Mode::Module)).map_err(|e| {
+    let parsed = parse_module(source).map_err(|e| {
         CollectionError::ParseError(format!("Failed to parse {}: {:?}", path.display(), e))
     })?;
 
     let mut visitor = TestDiscoveryVisitor::new(config);
-    let module = parsed.into_syntax();
-    if let Mod::Module(module) = module {
-        visitor.visit_module(&module);
-    }
+    visitor.visit_module(&parsed.into_syntax());
 
     Ok(visitor.into_tests())
 }
