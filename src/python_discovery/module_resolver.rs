@@ -80,35 +80,14 @@ impl ModuleResolver {
 
         self.search_paths
             .iter()
-            .flat_map(|root| self.get_possible_paths_in_root(module_path, root))
+            .flat_map(|root| {
+                let base = root.join(module_path.iter().collect::<PathBuf>());
+                [base.join("__init__.py"), base.with_extension("py")]
+            })
             .find(|path| std::fs::metadata(path).is_ok())
             .ok_or_else(|| {
                 CollectionError::ImportError(format!("Could not find module: {}", module_name))
             })
-    }
-
-    /// Get all possible file paths for a module in a specific root directory
-    fn get_possible_paths_in_root(&self, module_path: &[String], root: &Path) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        let mut base_dir = root.to_path_buf();
-
-        // Build the base directory path from all but the last component
-        base_dir.extend(&module_path[..module_path.len() - 1]);
-
-        let module_name = &module_path[module_path.len() - 1];
-
-        // Try module_name.py (regular module)
-        let mut py_file = base_dir.clone();
-        py_file.push(format!("{}.py", module_name));
-        paths.push(py_file);
-
-        // Try module_name/__init__.py (package)
-        let mut package_init = base_dir;
-        package_init.push(module_name);
-        package_init.push("__init__.py");
-        paths.push(package_init);
-
-        paths
     }
 
     /// Load and parse a Python module
