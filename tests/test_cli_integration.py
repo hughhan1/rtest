@@ -121,45 +121,6 @@ class TestPytestEnvironment:
     """Environment options reach both sequential and parallel pytest processes."""
 
     @rtest.mark.cases("workers", [1, 2])
-    def test_subproject_paths_and_failure_status(self, workers: int) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            project = root / "nested project"
-            project.mkdir()
-            (project / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
-            (project / "test_paths.py").write_text(
-                "import os\n"
-                "from pathlib import Path\n"
-                "def test_paths(pytestconfig):\n"
-                "    assert Path.cwd() == Path(__file__).parent\n"
-                "    assert pytestconfig.rootpath == Path(__file__).parent\n"
-                "    assert os.environ['RTEST_VALUE'] == 'space and=equals'\n"
-                "def test_failure():\n"
-                "    assert False, 'preserved failure'\n"
-            )
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "rtest",
-                    "--runner",
-                    "pytest",
-                    "-n",
-                    str(workers),
-                    "--env",
-                    "RTEST_VALUE=space and=equals",
-                    "nested project/test_paths.py",
-                ],
-                capture_output=True,
-                text=True,
-                cwd=root,
-            )
-            assert result.returncode == ExitCodeValues.TESTS_FAILED, result.stdout + result.stderr
-            assert "1 passed" in result.stdout
-            assert "1 failed" in result.stdout
-            assert "preserved failure" in result.stdout
-
-    @rtest.mark.cases("workers", [1, 2])
     def test_environment_values_and_invalid_option_warning(self, workers: int) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

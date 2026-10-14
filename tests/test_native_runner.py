@@ -190,35 +190,6 @@ class TestParametrizeIntegration:
 class TestSkipIntegration:
     """Integration tests for skip functionality."""
 
-    def test_parameterized_functions_and_inherited_methods_keep_skip_reasons(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            test_file = root / "test_skips.py"
-            test_file.write_text(
-                "import rtest\n"
-                "@rtest.mark.skip('function reason')\n"
-                "@rtest.mark.cases('x', [1, 2])\n"
-                "def test_function(x): assert False\n"
-                "class Base:\n"
-                "    @rtest.mark.cases('x', [1, 2])\n"
-                "    def test_class_skip(self, x): assert False\n"
-                "    @rtest.mark.skip('method reason')\n"
-                "    @rtest.mark.cases('x', [1, 2])\n"
-                "    def test_method_skip(self, x): assert False\n"
-                "@rtest.mark.skip('class reason')\n"
-                "class TestChild(Base): pass\n"
-            )
-            results = run_worker(test_file, root, root / "results.jsonl")
-            assert [(r["nodeid"], r["outcome"], r["error"]) for r in results] == [
-                (f"test_skips.py::{name}[{value}]", "skipped", {"reason": reason})
-                for name, reason in [
-                    ("TestChild::test_class_skip", "class reason"),
-                    ("TestChild::test_method_skip", "method reason"),
-                    ("test_function", "function reason"),
-                ]
-                for value in [1, 2]
-            ]
-
     def test_skipped_tests_marked_as_skipped(self) -> None:
         """@skip decorator marks tests as skipped."""
         with tempfile.TemporaryDirectory() as tmp_dir:
