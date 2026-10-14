@@ -267,11 +267,7 @@ impl Collector for Module {
             .into_iter()
             .flat_map(|test| {
                 if let CasesExpansion::CannotExpand(reason) = &test.cases_expansion {
-                    let nodeid = if let Some(class_name) = &test.class_name {
-                        format!("{}::{}::{}", self.nodeid, class_name, test.name)
-                    } else {
-                        format!("{}::{}", self.nodeid, test.name)
-                    };
+                    let nodeid = test.base_nodeid(&self.nodeid);
                     let warning_str = format_cannot_expand_warning(&nodeid, reason);
                     all_warnings.push(CollectionWarning {
                         file_path: self.path.to_string_lossy().into_owned(),

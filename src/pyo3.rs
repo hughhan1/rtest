@@ -184,33 +184,27 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
             // Read pytest configuration for collection patterns
             let pytest_config = read_pytest_config(&rootpath);
-            let python_files = if pytest_config.python_files.is_empty() {
-                default_python_files()
-            } else {
-                pytest_config.python_files
-            };
-            let python_classes = if pytest_config.python_classes.is_empty() {
-                default_python_classes()
-            } else {
-                pytest_config.python_classes
-            };
-            let python_functions = if pytest_config.python_functions.is_empty() {
-                default_python_functions()
-            } else {
-                pytest_config.python_functions
-            };
-
-            // For execution, still use file-based collection (worker handles discovery)
-            let test_files = collect_test_files(&rootpath, &args.files, &python_files);
-
-            let config = NativeRunnerConfig {
+            let mut config = NativeRunnerConfig {
                 python_executable,
                 root_path: rootpath,
                 num_workers: worker_count,
-                python_files,
-                python_classes,
-                python_functions,
+                python_files: default_python_files(),
+                python_classes: default_python_classes(),
+                python_functions: default_python_functions(),
             };
+            for (configured, patterns) in [
+                (pytest_config.python_files, &mut config.python_files),
+                (pytest_config.python_classes, &mut config.python_classes),
+                (pytest_config.python_functions, &mut config.python_functions),
+            ] {
+                if !configured.is_empty() {
+                    *patterns = configured;
+                }
+            }
+
+            // For execution, still use file-based collection (worker handles discovery)
+            let test_files =
+                collect_test_files(&config.root_path, &args.files, &config.python_files);
 
             let exit_code = execute_native(&config, test_files);
             std::process::exit(exit_code);

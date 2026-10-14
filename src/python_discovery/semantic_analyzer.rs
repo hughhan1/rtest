@@ -260,7 +260,7 @@ impl SemanticTestDiscovery {
         let class_name = class_def.name.as_str();
 
         // Check if this class or any parent has __init__
-        if self.should_skip_class(info, module_resolver)? {
+        if self.should_skip_class(info, module_resolver, &mut HashSet::new())? {
             // Add warning about skipped class
             let warning = CollectionWarning {
                 file_path: self.current_file_path.clone(),
@@ -313,6 +313,7 @@ impl SemanticTestDiscovery {
         &mut self,
         info: &TestClassInfo,
         module_resolver: &mut ModuleResolver,
+        visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<bool> {
         // Check if this class has __init__
         if info.has_init {
@@ -321,7 +322,7 @@ impl SemanticTestDiscovery {
 
         // Check parent classes
         for base in &info.base_classes {
-            if self.base_class_has_init(base, module_resolver)? {
+            if self.base_class_has_init(base, module_resolver, visited)? {
                 return Ok(true);
             }
         }
@@ -331,16 +332,6 @@ impl SemanticTestDiscovery {
 
     /// Check if a base class has __init__ (recursively checking ancestors)
     fn base_class_has_init(
-        &mut self,
-        resolved: &ResolvedBaseClass,
-        module_resolver: &mut ModuleResolver,
-    ) -> CollectionResult<bool> {
-        let mut visited = HashSet::new();
-        self.base_class_has_init_impl(resolved, module_resolver, &mut visited)
-    }
-
-    /// Internal implementation of base_class_has_init with cycle detection
-    fn base_class_has_init_impl(
         &mut self,
         resolved: &ResolvedBaseClass,
         module_resolver: &mut ModuleResolver,
@@ -371,24 +362,12 @@ impl SemanticTestDiscovery {
             }
         };
 
-        // If this class has __init__, return true
-        if base_info.has_init {
-            visited.remove(&key);
-            return Ok(true);
-        }
-
-        // Otherwise, recursively check all parent classes
-        for parent in &base_info.base_classes {
-            if self.base_class_has_init_impl(parent, module_resolver, visited)? {
-                visited.remove(&key);
-                return Ok(true);
-            }
-        }
+        let has_init = self.should_skip_class(&base_info, module_resolver, visited)?;
 
         // Remove from visited after processing to allow sibling branches in diamond
         // inheritance patterns to revisit this class without false cycle detection
         visited.remove(&key);
-        Ok(false)
+        Ok(has_init)
     }
 
     /// Get test methods from a base class, including inherited methods
@@ -471,34 +450,32 @@ impl SemanticTestDiscovery {
             return Ok(());
         }
 
-        let parsed_module = match module_resolver.resolve_and_load(module_path) {
-            Ok(module) => Some(module),
-            // External or unresolvable modules are marked as attempted below.
-            Err(CollectionError::ImportError(_)) => None,
-            Err(e) => return Err(e),
-        };
+        match module_resolver.resolve_and_load(module_path) {
+            Ok(parsed_module) => {
+                // Build resolver for constants in this external module
+                let external_resolver = ConstantResolver::from_module(&parsed_module.module);
+                let imports = self.collect_imports(&parsed_module.module);
 
-        if let Some(parsed_module) = parsed_module {
-            // Build resolver for constants in this external module
-            let external_resolver = ConstantResolver::from_module(&parsed_module.module);
-            let imports = self.collect_imports(&parsed_module.module);
+                // Extract test class information without storing the module
+                for stmt in &parsed_module.module.body {
+                    if let Stmt::ClassDef(class_def) = stmt {
+                        let class_name = class_def.name.as_str();
 
-            // Extract test class information without storing the module
-            for stmt in &parsed_module.module.body {
-                if let Stmt::ClassDef(class_def) = stmt {
-                    let class_name = class_def.name.as_str();
+                        // Always collect class info for external modules, even if they don't match test patterns
+                        // They might be used as base classes
+                        let info =
+                            self.class_info(class_def, module_path, &imports, &external_resolver)?;
 
-                    // Always collect class info for external modules, even if they don't match test patterns
-                    // They might be used as base classes
-                    let info =
-                        self.class_info(class_def, module_path, &imports, &external_resolver)?;
-
-                    self.class_cache.insert(
-                        (module_path.to_vec(), class_name.to_string()),
-                        Rc::new(info),
-                    );
+                        self.class_cache.insert(
+                            (module_path.to_vec(), class_name.to_string()),
+                            Rc::new(info),
+                        );
+                    }
                 }
             }
+            // External or unresolvable modules are marked as attempted below.
+            Err(CollectionError::ImportError(_)) => {}
+            Err(e) => return Err(e),
         }
 
         // Mark module as loaded
@@ -604,10 +581,9 @@ impl SemanticTestDiscovery {
     /// Uses ruff's comprehensive stdlib detection to skip all standard library modules,
     /// since the module resolver can only resolve project-local modules.
     fn is_stdlib_module_to_skip(&self, module_path: &[String]) -> bool {
-        if module_path.is_empty() {
-            return false;
-        }
-        is_known_standard_library(11, &module_path[0])
+        module_path
+            .first()
+            .is_some_and(|name| is_known_standard_library(11, name))
     }
 
     /// Helper to get alias name with fallback to the original name

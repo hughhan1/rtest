@@ -11,10 +11,7 @@ pub fn determine_worker_count(
         None => 1,
     };
 
-    match max_processes {
-        Some(max) => desired.min(max),
-        None => desired,
-    }
+    desired.min(max_processes.unwrap_or(desired))
 }
 
 #[cfg(test)]

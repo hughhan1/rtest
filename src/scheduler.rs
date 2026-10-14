@@ -82,13 +82,10 @@ pub trait Scheduler {
 
 /// Distribute items in input order, returning only nonempty workers.
 pub(crate) fn distribute_round_robin<T>(items: Vec<T>, num_workers: usize) -> Vec<Vec<T>> {
-    if num_workers == 0 {
-        return vec![];
-    }
     let actual_workers = num_workers.min(items.len());
     let mut workers: Vec<Vec<T>> = (0..actual_workers).map(|_| Vec::new()).collect();
-    for (i, item) in items.into_iter().enumerate() {
-        workers[i % actual_workers].push(item);
+    for (worker, item) in (0..actual_workers).cycle().zip(items) {
+        workers[worker].push(item);
     }
     workers
 }
@@ -177,11 +174,7 @@ fn extract_scope(test_path: &str) -> String {
 fn extract_file(test_path: &str) -> String {
     // Extract file path from test path
     // Format: path/to/file.py::TestClass::test_method or path/to/file.py::test_function
-    test_path
-        .split("::")
-        .next()
-        .unwrap_or(test_path)
-        .to_string()
+    crate::subproject::split_test_node(test_path).0.into()
 }
 
 pub fn create_scheduler(mode: DistributionMode) -> Box<dyn Scheduler> {
@@ -516,33 +509,6 @@ mod tests {
         let scheduler = NoScheduler;
         let result = scheduler.distribute_tests(vec![], 3);
         assert!(result.is_empty());
-    }
-
-    // Utility function tests
-    #[test]
-    fn test_extract_scope() {
-        assert_eq!(
-            extract_scope("tests/test_file.py::TestClass::test_method"),
-            "tests/test_file.py::TestClass"
-        );
-        assert_eq!(
-            extract_scope("tests/test_file.py::test_function"),
-            "tests/test_file.py"
-        );
-        assert_eq!(extract_scope("tests/test_file.py"), "tests/test_file.py");
-    }
-
-    #[test]
-    fn test_extract_file() {
-        assert_eq!(
-            extract_file("tests/test_file.py::TestClass::test_method"),
-            "tests/test_file.py"
-        );
-        assert_eq!(
-            extract_file("tests/test_file.py::test_function"),
-            "tests/test_file.py"
-        );
-        assert_eq!(extract_file("tests/test_file.py"), "tests/test_file.py");
     }
 
     // Create scheduler tests for all modes

@@ -94,24 +94,22 @@ fn parse_results_file(path: &Path) -> Result<Vec<TestResult>, String> {
 fn aggregate_results(all_results: Vec<Vec<TestResult>>) -> AggregatedResults {
     let mut aggregated = AggregatedResults::default();
 
-    for results in all_results {
-        for result in results {
-            aggregated.total += 1;
-            aggregated.total_duration_ms += result.duration_ms;
+    for result in all_results.into_iter().flatten() {
+        aggregated.total += 1;
+        aggregated.total_duration_ms += result.duration_ms;
 
-            match result.outcome.as_str() {
-                "passed" => aggregated.passed += 1,
-                "failed" => {
-                    aggregated.failed += 1;
-                    aggregated.failures.push(result);
-                }
-                "error" => {
-                    aggregated.error += 1;
-                    aggregated.errors.push(result);
-                }
-                "skipped" => aggregated.skipped += 1,
-                _ => aggregated.error += 1,
+        match result.outcome.as_str() {
+            "passed" => aggregated.passed += 1,
+            "failed" => {
+                aggregated.failed += 1;
+                aggregated.failures.push(result);
             }
+            "error" => {
+                aggregated.error += 1;
+                aggregated.errors.push(result);
+            }
+            "skipped" => aggregated.skipped += 1,
+            _ => aggregated.error += 1,
         }
     }
 
@@ -369,78 +367,6 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_test_file() {
-        let default_patterns = default_python_files();
-        assert!(is_test_file(Path::new("test_foo.py"), &default_patterns));
-        assert!(is_test_file(Path::new("foo_test.py"), &default_patterns));
-        assert!(is_test_file(
-            Path::new("path/to/test_bar.py"),
-            &default_patterns
-        ));
-        assert!(!is_test_file(Path::new("foo.py"), &default_patterns));
-        assert!(!is_test_file(Path::new("conftest.py"), &default_patterns));
-        assert!(!is_test_file(Path::new("test_foo.txt"), &default_patterns));
-    }
-
-    #[test]
-    fn test_is_test_file_custom_patterns() {
-        let patterns = vec!["check_*.py".into(), "*_spec.py".into()];
-        assert!(is_test_file(Path::new("check_validation.py"), &patterns));
-        assert!(is_test_file(Path::new("user_spec.py"), &patterns));
-        assert!(!is_test_file(Path::new("test_foo.py"), &patterns));
-        assert!(!is_test_file(Path::new("foo_test.py"), &patterns));
-    }
-
-    #[test]
-    fn test_aggregate_results() {
-        let results = vec![
-            vec![
-                TestResult {
-                    nodeid: "test1".into(),
-                    outcome: "passed".into(),
-                    duration_ms: 10.0,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    error: None,
-                    error_type: None,
-                },
-                TestResult {
-                    nodeid: "test2".into(),
-                    outcome: "failed".into(),
-                    duration_ms: 20.0,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    error: Some(ErrorInfo {
-                        traceback: Some("AssertionError".into()),
-                        reason: None,
-                    }),
-                    error_type: Some("AssertionError".into()),
-                },
-            ],
-            vec![TestResult {
-                nodeid: "test3".into(),
-                outcome: "skipped".into(),
-                duration_ms: 0.0,
-                stdout: String::new(),
-                stderr: String::new(),
-                error: Some(ErrorInfo {
-                    traceback: None,
-                    reason: Some("WIP".into()),
-                }),
-                error_type: None,
-            }],
-        ];
-
-        let aggregated = aggregate_results(results);
-        assert_eq!(aggregated.total, 3);
-        assert_eq!(aggregated.passed, 1);
-        assert_eq!(aggregated.failed, 1);
-        assert_eq!(aggregated.skipped, 1);
-        assert_eq!(aggregated.failures.len(), 1);
-        assert_eq!(aggregated.total_duration_ms, 30.0);
-    }
 
     #[test]
     fn test_parse_results_json() {

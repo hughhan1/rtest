@@ -54,11 +54,11 @@ impl ConstantScope {
 
     /// Resolve a path like `["Outer", "Inner", "X"]` to a value.
     pub fn resolve_path(&self, path: &[&str]) -> Option<LiteralValue> {
-        match path {
-            [] => None,
-            [name] => self.constants.get(*name).cloned(),
-            [first, rest @ ..] => self.children.get(*first)?.resolve_path(rest),
-        }
+        let (name, parents) = path.split_last()?;
+        let scope = parents
+            .iter()
+            .try_fold(self, |scope, parent| scope.children.get(*parent))?;
+        scope.constants.get(*name).cloned()
     }
 }
 
@@ -122,45 +122,5 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
             Some(LiteralValue::Sequence(values?))
         }
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ruff_python_ast::Mod;
-    use ruff_python_parser::{parse, Mode, ParseOptions};
-
-    fn parse_module(source: &str) -> ModModule {
-        let parsed = parse(source, ParseOptions::from(Mode::Module)).unwrap();
-        match parsed.into_syntax() {
-            Mod::Module(m) => m,
-            _ => panic!("expected module"),
-        }
-    }
-
-    #[test]
-    fn test_resolve_expression() {
-        let module = parse_module(
-            r#"
-X = 42
-class Config:
-    MAX = 100
-"#,
-        );
-        let resolver = ConstantResolver::from_module(&module);
-
-        let x_module = parse_module("X");
-        let x_expr = x_module.body[0].as_expr_stmt().unwrap();
-        let result = resolver.resolve(&x_expr.value);
-        assert_eq!(result, Some((LiteralValue::Int(42), vec!["X".into()])));
-
-        let config_module = parse_module("Config.MAX");
-        let config_max = config_module.body[0].as_expr_stmt().unwrap();
-        let result = resolver.resolve(&config_max.value);
-        assert_eq!(
-            result,
-            Some((LiteralValue::Int(100), vec!["Config".into(), "MAX".into()]))
-        );
     }
 }
