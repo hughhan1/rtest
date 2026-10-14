@@ -27,9 +27,7 @@ pub fn execute_tests(
     run_cmd.args(initial_args);
 
     // Set environment variables
-    for (key, value) in env_vars {
-        run_cmd.env(key, value);
-    }
+    run_cmd.envs(env_vars.iter().map(|(key, value)| (key, value)));
 
     if let Some(dir) = working_dir {
         run_cmd.current_dir(dir);

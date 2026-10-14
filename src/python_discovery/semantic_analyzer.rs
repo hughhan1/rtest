@@ -2,7 +2,6 @@
 
 use ruff_python_ast::{Expr, Mod, ModModule, Stmt, StmtClassDef};
 use ruff_python_parser::{parse, Mode, ParseOptions};
-use ruff_python_semantic::{Module as SemanticModule, ModuleKind, ModuleSource, SemanticModel};
 use ruff_python_stdlib::sys::is_known_standard_library;
 use ruff_text_size::Ranged;
 use std::collections::{HashMap, HashSet};
@@ -104,23 +103,8 @@ impl SemanticTestDiscovery {
         // Build constant resolver for this module
         let resolver = ConstantResolver::from_module(&ast_module);
 
-        // Build semantic model
-        let semantic_module = SemanticModule {
-            kind: if path.file_name() == Some(std::ffi::OsStr::new("__init__.py")) {
-                ModuleKind::Package
-            } else {
-                ModuleKind::Module
-            },
-            source: ModuleSource::File(path),
-            python_ast: &ast_module.body,
-            name: None,
-        };
-
-        let typing_modules = vec![];
-        let semantic = SemanticModel::new(&typing_modules, path, semantic_module);
-
         // First pass: collect imports
-        let imports = self.collect_imports(&ast_module, &semantic);
+        let imports = self.collect_imports(&ast_module);
 
         // Second pass: collect test classes
         self.collect_test_classes(&ast_module, &module_path, &resolver)?;
@@ -131,7 +115,7 @@ impl SemanticTestDiscovery {
         // Collect module-level test functions
         for stmt in &ast_module.body {
             if let Stmt::FunctionDef(func) = stmt {
-                if self.is_test_function(func.name.as_str()) {
+                if self.config.is_test_function(func.name.as_str()) {
                     let cases_expansion =
                         parse_decorators_for_cases(&func.decorator_list, Some(&resolver));
                     all_tests.push(TestInfo {
@@ -148,38 +132,21 @@ impl SemanticTestDiscovery {
         // Collect test methods from classes
         for stmt in &ast_module.body {
             if let Stmt::ClassDef(class_def) = stmt {
-                if let Some(tests) = self.collect_class_tests(
+                all_tests.extend(self.collect_class_tests(
                     class_def,
                     &module_path,
                     &imports,
-                    &semantic,
                     module_resolver,
                     &resolver,
-                )? {
-                    all_tests.extend(tests);
-                }
+                )?);
             }
         }
 
         Ok((all_tests, std::mem::take(&mut self.warnings)))
     }
 
-    /// Helper to collect imports from a module without requiring a semantic model
-    fn collect_imports_from_module(&self, module: &ModModule) -> HashMap<String, ImportInfo> {
-        self.collect_imports_impl(module)
-    }
-
-    /// Collect imports from the module
-    fn collect_imports(
-        &self,
-        module: &ModModule,
-        _semantic: &SemanticModel,
-    ) -> HashMap<String, ImportInfo> {
-        self.collect_imports_impl(module)
-    }
-
-    /// Internal implementation of import collection
-    fn collect_imports_impl(&self, module: &ModModule) -> HashMap<String, ImportInfo> {
+    /// Collect imports from the module.
+    fn collect_imports(&self, module: &ModModule) -> HashMap<String, ImportInfo> {
         let mut imports = HashMap::new();
 
         for stmt in &module.body {
@@ -244,12 +211,12 @@ impl SemanticTestDiscovery {
             if let Stmt::ClassDef(class_def) = stmt {
                 let class_name = class_def.name.as_str();
 
-                if self.is_test_class(class_name) {
+                if self.config.is_test_class(class_name) {
                     let has_init = class_has_init(class_def);
                     let test_methods = self.collect_test_methods(class_def, resolver);
                     let class_specs =
                         parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
-                    let imports = self.collect_imports_from_module(module);
+                    let imports = self.collect_imports(module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
 
@@ -284,7 +251,7 @@ impl SemanticTestDiscovery {
         for stmt in &class_def.body {
             if let Stmt::FunctionDef(func) = stmt {
                 let method_name = func.name.as_str();
-                if self.is_test_function(method_name) {
+                if self.config.is_test_function(method_name) {
                     // Store only method-level specs (not combined with class)
                     let method_specs =
                         parse_decorators_to_specs(&func.decorator_list, Some(resolver));
@@ -311,21 +278,7 @@ impl SemanticTestDiscovery {
 
         if let Some(arguments) = &class_def.arguments {
             for base in arguments.args.iter() {
-                let resolved = self.resolve_base_class(
-                    base,
-                    current_module_path,
-                    imports,
-                    &SemanticModel::new(
-                        &[],
-                        Path::new(""),
-                        SemanticModule {
-                            kind: ModuleKind::Module,
-                            source: ModuleSource::File(Path::new("")),
-                            python_ast: &[],
-                            name: None,
-                        },
-                    ),
-                )?;
+                let resolved = self.resolve_base_class(base, current_module_path, imports)?;
 
                 if let Some(resolved) = resolved {
                     base_classes.push(resolved);
@@ -343,15 +296,14 @@ impl SemanticTestDiscovery {
         class_def: &StmtClassDef,
         current_module_path: &[String],
         imports: &HashMap<String, ImportInfo>,
-        semantic: &SemanticModel,
         module_resolver: &mut ModuleResolver,
         resolver: &ConstantResolver,
-    ) -> CollectionResult<Option<Vec<TestInfo>>> {
+    ) -> CollectionResult<Vec<TestInfo>> {
         let class_name = class_def.name.as_str();
 
         // Check if this class should be collected
-        if !self.is_test_class(class_name) {
-            return Ok(None);
+        if !self.config.is_test_class(class_name) {
+            return Ok(vec![]);
         }
 
         // Check if this class or any parent has __init__
@@ -369,25 +321,16 @@ impl SemanticTestDiscovery {
                 ),
             };
             self.warnings.push(warning);
-            return Ok(None);
+            return Ok(vec![]);
         }
 
         // Parse class-level decorators once
         let class_specs = parse_decorators_to_specs(&class_def.decorator_list, Some(resolver));
 
-        // Collect methods defined directly in this class (to filter inherited methods)
-        let own_method_names: std::collections::HashSet<String> = class_def
-            .body
+        let own_methods = self.collect_test_methods(class_def, resolver);
+        let own_method_names: HashSet<&str> = own_methods
             .iter()
-            .filter_map(|stmt| {
-                if let Stmt::FunctionDef(func) = stmt {
-                    let name = func.name.as_str();
-                    if self.is_test_function(name) {
-                        return Some(name.to_string());
-                    }
-                }
-                None
-            })
+            .map(|method| method.name.as_str())
             .collect();
 
         let mut all_tests = Vec::new();
@@ -395,39 +338,29 @@ impl SemanticTestDiscovery {
         // Collect inherited methods
         if let Some(arguments) = &class_def.arguments {
             for base_expr in arguments.args.iter() {
-                let resolved =
-                    self.resolve_base_class(base_expr, current_module_path, imports, semantic)?;
+                let resolved = self.resolve_base_class(base_expr, current_module_path, imports)?;
 
                 match resolved {
                     Some(resolved) => {
-                        // Skip inheritance analysis for known stdlib modules that we can't analyze
-                        if self.is_stdlib_module_to_skip(&resolved.module_path) {
-                            continue;
-                        }
-
                         // Get method specs from the base class (not yet combined with class decorators)
-                        if let Some(base_methods) =
-                            self.get_base_class_methods(&resolved, module_resolver)?
-                        {
-                            for method in base_methods {
-                                // Skip if this method is overridden in the child class
-                                if own_method_names.contains(&method.name) {
-                                    continue;
-                                }
-
-                                // Combine CHILD class specs with PARENT method specs
-                                // This is the key fix: inherited methods get the child's class decorators
-                                let cases_expansion =
-                                    combine_and_expand_specs(&class_specs, &method.method_specs);
-
-                                all_tests.push(TestInfo {
-                                    name: method.name.clone(),
-                                    line: method.line,
-                                    is_method: true,
-                                    class_name: Some(class_name.to_string()),
-                                    cases_expansion,
-                                });
+                        for method in self.get_base_class_methods(&resolved, module_resolver)? {
+                            // Skip if this method is overridden in the child class
+                            if own_method_names.contains(method.name.as_str()) {
+                                continue;
                             }
+
+                            // Combine CHILD class specs with PARENT method specs
+                            // This is the key fix: inherited methods get the child's class decorators
+                            let cases_expansion =
+                                combine_and_expand_specs(&class_specs, &method.method_specs);
+
+                            all_tests.push(TestInfo {
+                                name: method.name.clone(),
+                                line: method.line,
+                                is_method: true,
+                                class_name: Some(class_name.to_string()),
+                                cases_expansion,
+                            });
                         }
                     }
                     None => {
@@ -438,27 +371,18 @@ impl SemanticTestDiscovery {
             }
         }
 
-        // Collect methods defined in this class
-        for stmt in &class_def.body {
-            if let Stmt::FunctionDef(func) = stmt {
-                let method_name = func.name.as_str();
-                if self.is_test_function(method_name) {
-                    let method_specs =
-                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
-                    let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
-
-                    all_tests.push(TestInfo {
-                        name: method_name.to_string(),
-                        line: func.range().start().to_u32() as usize,
-                        is_method: true,
-                        class_name: Some(class_name.to_string()),
-                        cases_expansion,
-                    });
-                }
-            }
+        for method in own_methods {
+            let cases_expansion = combine_and_expand_specs(&class_specs, &method.method_specs);
+            all_tests.push(TestInfo {
+                name: method.name,
+                line: method.line,
+                is_method: true,
+                class_name: Some(class_name.to_string()),
+                cases_expansion,
+            });
         }
 
-        Ok(Some(all_tests))
+        Ok(all_tests)
     }
 
     /// Check if a class should be skipped (has __init__ or inherits from class with __init__)
@@ -477,30 +401,10 @@ impl SemanticTestDiscovery {
         // Check parent classes
         if let Some(arguments) = &class_def.arguments {
             for base_expr in arguments.args.iter() {
-                let resolved = self.resolve_base_class(
-                    base_expr,
-                    current_module_path,
-                    imports,
-                    &SemanticModel::new(
-                        &[],
-                        Path::new(""),
-                        SemanticModule {
-                            kind: ModuleKind::Module,
-                            source: ModuleSource::File(Path::new("")),
-                            python_ast: &[],
-                            name: None,
-                        },
-                    ),
-                )?;
+                let resolved = self.resolve_base_class(base_expr, current_module_path, imports)?;
 
                 match resolved {
                     Some(resolved) => {
-                        // Skip init check for known stdlib modules
-                        if self.is_stdlib_module_to_skip(&resolved.module_path) {
-                            // Assume stdlib modules like unittest.TestCase don't prevent collection
-                            continue;
-                        }
-
                         if self.base_class_has_init(&resolved, module_resolver)? {
                             return Ok(true);
                         }
@@ -539,11 +443,10 @@ impl SemanticTestDiscovery {
 
         // Check for cycles
         let key = (resolved.module_path.clone(), resolved.class_name.clone());
-        if visited.contains(&key) {
+        if !visited.insert(key.clone()) {
             // Cycle detected - assume no init to break the cycle
             return Ok(false);
         }
-        visited.insert(key.clone());
 
         if !resolved.is_local {
             // Load the external module if needed
@@ -584,7 +487,7 @@ impl SemanticTestDiscovery {
         &mut self,
         resolved: &ResolvedBaseClass,
         module_resolver: &mut ModuleResolver,
-    ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
+    ) -> CollectionResult<Vec<TestMethodInfo>> {
         let mut visited = HashSet::new();
         self.get_base_class_methods_impl(resolved, module_resolver, &mut visited)
     }
@@ -595,21 +498,20 @@ impl SemanticTestDiscovery {
         resolved: &ResolvedBaseClass,
         module_resolver: &mut ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
-    ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
+    ) -> CollectionResult<Vec<TestMethodInfo>> {
         if self.is_stdlib_module_to_skip(&resolved.module_path) {
-            return Ok(None);
+            return Ok(vec![]);
         }
 
         // Check for cycles
         let key = (resolved.module_path.clone(), resolved.class_name.clone());
-        if visited.contains(&key) {
+        if !visited.insert(key.clone()) {
             // Cycle detected - this is an error condition
             return Err(CollectionError::ParseError(format!(
                 "Circular inheritance detected in class hierarchy involving '{}'",
                 resolved.class_name
             )));
         }
-        visited.insert(key.clone());
 
         if !resolved.is_local {
             // Load the external module if needed
@@ -623,7 +525,7 @@ impl SemanticTestDiscovery {
                 // Remove from visited before early return to allow sibling branches
                 // to process this class without false cycle detection
                 visited.remove(&key);
-                return Ok(None);
+                return Ok(vec![]);
             }
         };
 
@@ -631,11 +533,11 @@ impl SemanticTestDiscovery {
 
         // First, recursively get methods from this class's base classes
         for base_class in &base_info.base_classes {
-            if let Some(parent_methods) =
-                self.get_base_class_methods_impl(base_class, module_resolver, visited)?
-            {
-                all_methods.extend(parent_methods);
-            }
+            all_methods.extend(self.get_base_class_methods_impl(
+                base_class,
+                module_resolver,
+                visited,
+            )?);
         }
 
         // Then add this class's own methods
@@ -645,7 +547,7 @@ impl SemanticTestDiscovery {
         // inheritance patterns to revisit this class without false cycle detection
         visited.remove(&key);
 
-        Ok(Some(all_methods))
+        Ok(all_methods)
     }
 
     /// Ensure a module is loaded and its test classes are cached
@@ -660,27 +562,14 @@ impl SemanticTestDiscovery {
             return Ok(());
         }
 
-        // Load the module and collect test classes
-        {
-            let parsed_module = match module_resolver.resolve_and_load(module_path) {
-                Ok(pm) => pm,
-                Err(CollectionError::ImportError(_)) => {
-                    // Module is external or unresolvable — mark as attempted so we don't retry
-                    self.class_cache.insert(
-                        cache_key,
-                        TestClassInfo {
-                            name: String::new(),
-                            has_init: false,
-                            test_methods: vec![],
-                            base_classes: vec![],
-                            class_specs: MethodCasesInfo::NotDecorated,
-                        },
-                    );
-                    return Ok(());
-                }
-                Err(e) => return Err(e),
-            };
+        let parsed_module = match module_resolver.resolve_and_load(module_path) {
+            Ok(module) => Some(module),
+            // External or unresolvable modules are marked as attempted below.
+            Err(CollectionError::ImportError(_)) => None,
+            Err(e) => return Err(e),
+        };
 
+        if let Some(parsed_module) = parsed_module {
             // Build resolver for constants in this external module
             let external_resolver = ConstantResolver::from_module(&parsed_module.module);
 
@@ -697,7 +586,7 @@ impl SemanticTestDiscovery {
                         &class_def.decorator_list,
                         Some(&external_resolver),
                     );
-                    let imports = self.collect_imports_from_module(&parsed_module.module);
+                    let imports = self.collect_imports(&parsed_module.module);
                     let base_classes =
                         self.collect_base_class_names(class_def, module_path, &imports)?;
 
@@ -736,74 +625,47 @@ impl SemanticTestDiscovery {
         base_expr: &Expr,
         current_module_path: &[String],
         imports: &HashMap<String, ImportInfo>,
-        _semantic: &SemanticModel,
     ) -> CollectionResult<Option<ResolvedBaseClass>> {
-        match base_expr {
+        let (import_info, class_name) = match base_expr {
             Expr::Name(name_expr) => {
                 let name = name_expr.id.as_str();
-                // Check if it's an imported class
-                if let Some(import_info) = imports.get(name) {
-                    // Handle relative imports by resolving them to absolute paths
-                    let module_path = if import_info.relative_level > 0 {
-                        // Resolve relative import to absolute path
-                        Self::resolve_relative_module_path(
-                            current_module_path,
-                            import_info.relative_level,
-                            &import_info.module_path,
-                        )?
-                    } else {
-                        import_info.module_path.clone()
-                    };
-
+                let Some(import_info) = imports.get(name) else {
                     return Ok(Some(ResolvedBaseClass {
-                        module_path,
-                        class_name: import_info.imported_name.clone(),
-                        is_local: false,
+                        module_path: current_module_path.to_vec(),
+                        class_name: name.to_string(),
+                        is_local: true,
                     }));
-                }
-
-                // Otherwise, it's a local class
-                Ok(Some(ResolvedBaseClass {
-                    module_path: current_module_path.to_vec(),
-                    class_name: name.to_string(),
-                    is_local: true,
-                }))
+                };
+                (import_info, import_info.imported_name.clone())
             }
             Expr::Attribute(attr_expr) => {
-                // Handle module.Class pattern
-                if let Expr::Name(module_name) = &*attr_expr.value {
-                    if let Some(import_info) = imports.get(module_name.id.as_str()) {
-                        // Handle relative imports
-                        let module_path = if import_info.relative_level > 0 {
-                            Self::resolve_relative_module_path(
-                                current_module_path,
-                                import_info.relative_level,
-                                &import_info.module_path,
-                            )?
-                        } else {
-                            import_info.module_path.clone()
-                        };
-
-                        return Ok(Some(ResolvedBaseClass {
-                            module_path,
-                            class_name: attr_expr.attr.to_string(),
-                            is_local: false,
-                        }));
-                    }
-                }
-                Ok(None)
+                let Expr::Name(module_name) = &*attr_expr.value else {
+                    return Ok(None);
+                };
+                let Some(import_info) = imports.get(module_name.id.as_str()) else {
+                    return Ok(None);
+                };
+                (import_info, attr_expr.attr.to_string())
             }
             Expr::Subscript(subscript_expr) => {
-                // Handle parameterized generics like GenericBase[T] by resolving the base type
-                self.resolve_base_class(
+                return self.resolve_base_class(
                     &subscript_expr.value,
                     current_module_path,
                     imports,
-                    _semantic,
-                )
+                );
             }
-            _ => Ok(None),
-        }
+            _ => return Ok(None),
+        };
+
+        Ok(Some(ResolvedBaseClass {
+            module_path: Self::resolve_relative_module_path(
+                current_module_path,
+                import_info.relative_level,
+                &import_info.module_path,
+            )?,
+            class_name,
+            is_local: false,
+        }))
     }
 
     /// Helper to resolve relative imports to absolute module paths
@@ -838,14 +700,6 @@ impl SemanticTestDiscovery {
         result.extend_from_slice(module_parts);
 
         Ok(result)
-    }
-
-    fn is_test_function(&self, name: &str) -> bool {
-        self.config.is_test_function(name)
-    }
-
-    fn is_test_class(&self, name: &str) -> bool {
-        self.config.is_test_class(name)
     }
 
     /// Check if a module should be skipped for inheritance analysis.

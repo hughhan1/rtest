@@ -33,7 +33,6 @@ struct CachedClassInfo {
 pub(crate) struct TestDiscoveryVisitor {
     config: TestDiscoveryConfig,
     tests: Vec<TestInfo>,
-    current_class: Option<String>,
     /// Maps class names to cached class info for inheritance resolution
     class_cache: HashMap<String, CachedClassInfo>,
 }
@@ -43,7 +42,6 @@ impl TestDiscoveryVisitor {
         Self {
             config: config.clone(),
             tests: Vec::new(),
-            current_class: None,
             class_cache: HashMap::new(),
         }
     }
@@ -70,31 +68,40 @@ impl TestDiscoveryVisitor {
         for stmt in &module.body {
             if let Stmt::ClassDef(class) = stmt {
                 let name = class.name.as_str();
-                if self.is_test_class(name) {
+                if self.config.is_test_class(name) {
                     let has_init = class_has_init(class);
 
-                    let mut methods = Vec::new();
-                    for stmt in &class.body {
-                        if let Stmt::FunctionDef(func) = stmt {
-                            let method_name = func.name.as_str();
-                            if self.is_test_function(method_name) {
-                                // Store only method-level specs (not combined with class)
-                                let method_specs =
-                                    parse_decorators_to_specs(&func.decorator_list, Some(resolver));
-                                methods.push(CachedMethodInfo {
-                                    name: method_name.to_string(),
-                                    line: func.range.start().to_u32() as usize,
-                                    method_specs,
-                                });
-                            }
-                        }
-                    }
+                    let methods = self.collect_test_methods(class, resolver);
 
                     self.class_cache
                         .insert(name.to_string(), CachedClassInfo { methods, has_init });
                 }
             }
         }
+    }
+
+    fn collect_test_methods(
+        &self,
+        class: &StmtClassDef,
+        resolver: &ConstantResolver,
+    ) -> Vec<CachedMethodInfo> {
+        let mut methods = Vec::new();
+        for stmt in &class.body {
+            if let Stmt::FunctionDef(func) = stmt {
+                let name = func.name.as_str();
+                if self.config.is_test_function(name) {
+                    methods.push(CachedMethodInfo {
+                        name: name.to_string(),
+                        line: func.range.start().to_u32() as usize,
+                        method_specs: parse_decorators_to_specs(
+                            &func.decorator_list,
+                            Some(resolver),
+                        ),
+                    });
+                }
+            }
+        }
+        methods
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt, resolver: &ConstantResolver) {
@@ -107,13 +114,13 @@ impl TestDiscoveryVisitor {
 
     fn visit_function(&mut self, func: &StmtFunctionDef, resolver: &ConstantResolver) {
         let name = func.name.as_str();
-        if self.is_test_function(name) {
+        if self.config.is_test_function(name) {
             let cases_expansion = parse_decorators_for_cases(&func.decorator_list, Some(resolver));
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
-                is_method: self.current_class.is_some(),
-                class_name: self.current_class.clone(),
+                is_method: false,
+                class_name: None,
                 cases_expansion,
             });
         }
@@ -121,7 +128,7 @@ impl TestDiscoveryVisitor {
 
     fn visit_class(&mut self, class: &StmtClassDef, resolver: &ConstantResolver) {
         let class_name = class.name.as_str();
-        if !self.is_test_class(class_name) {
+        if !self.config.is_test_class(class_name) {
             return;
         }
 
@@ -130,25 +137,13 @@ impl TestDiscoveryVisitor {
             return;
         }
 
-        let prev_class = self.current_class.clone();
-        self.current_class = Some(class_name.into());
-
         // Parse class-level decorators once
         let class_specs = parse_decorators_to_specs(&class.decorator_list, Some(resolver));
 
-        // Collect methods defined directly in this class (to filter inherited methods)
-        let own_method_names: HashSet<String> = class
-            .body
+        let own_methods = self.collect_test_methods(class, resolver);
+        let own_method_names: HashSet<&str> = own_methods
             .iter()
-            .filter_map(|stmt| {
-                if let Stmt::FunctionDef(func) = stmt {
-                    let name = func.name.as_str();
-                    if self.is_test_function(name) {
-                        return Some(name.to_string());
-                    }
-                }
-                None
-            })
+            .map(|method| method.name.as_str())
             .collect();
 
         // First, collect inherited methods from base classes
@@ -160,7 +155,7 @@ impl TestDiscoveryVisitor {
                     if let Some(parent_info) = self.class_cache.get(base_class_name) {
                         for parent_method in &parent_info.methods {
                             // Skip if this method is overridden in the child class
-                            if own_method_names.contains(&parent_method.name) {
+                            if own_method_names.contains(parent_method.name.as_str()) {
                                 continue;
                             }
 
@@ -182,27 +177,16 @@ impl TestDiscoveryVisitor {
             }
         }
 
-        // Then collect methods defined directly in this class
-        for stmt in &class.body {
-            if let Stmt::FunctionDef(func) = stmt {
-                let method_name = func.name.as_str();
-                if self.is_test_function(method_name) {
-                    let method_specs =
-                        parse_decorators_to_specs(&func.decorator_list, Some(resolver));
-                    let cases_expansion = combine_and_expand_specs(&class_specs, &method_specs);
-
-                    self.tests.push(TestInfo {
-                        name: method_name.into(),
-                        line: func.range.start().to_u32() as usize,
-                        is_method: true,
-                        class_name: Some(class_name.into()),
-                        cases_expansion,
-                    });
-                }
-            }
+        for method in own_methods {
+            let cases_expansion = combine_and_expand_specs(&class_specs, &method.method_specs);
+            self.tests.push(TestInfo {
+                name: method.name,
+                line: method.line,
+                is_method: true,
+                class_name: Some(class_name.into()),
+                cases_expansion,
+            });
         }
-
-        self.current_class = prev_class;
     }
 
     /// Check if a class should be skipped (has __init__ or inherits from class with __init__)
@@ -226,13 +210,5 @@ impl TestDiscoveryVisitor {
         }
 
         false
-    }
-
-    fn is_test_function(&self, name: &str) -> bool {
-        self.config.is_test_function(name)
-    }
-
-    fn is_test_class(&self, name: &str) -> bool {
-        self.config.is_test_class(name)
     }
 }

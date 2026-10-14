@@ -62,105 +62,53 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
         }
     };
 
-    if config.use_subprojects {
-        let test_groups = subproject::group_tests_by_subproject(config.rootpath, &test_nodes);
-
-        let mut worker_pool = WorkerPool::new();
-        let mut worker_id = 0;
-
-        for (subproject_root, tests) in test_groups {
-            let adjusted_tests = if subproject_root != config.rootpath {
-                subproject::make_test_paths_relative(&tests, config.rootpath, &subproject_root)
-            } else {
-                tests
-            };
-
-            let scheduler = create_scheduler(distribution_mode.clone());
-            let test_batches = scheduler.distribute_tests(adjusted_tests, config.worker_count);
-
-            for batch in test_batches {
-                if !batch.is_empty() {
-                    worker_pool.spawn_worker(WorkerTask {
-                        worker_id,
-                        program: config.program.to_string(),
-                        initial_args: config.initial_args.to_vec(),
-                        tests: batch,
-                        pytest_args: vec![],
-                        working_dir: Some(subproject_root.clone()),
-                        env_vars: config.env_vars.to_vec(),
-                    });
-                    worker_id += 1;
-                }
-            }
-        }
-
-        if worker_id == 0 {
-            log::info!("No test batches to execute.");
-            return 0;
-        }
-
-        let results = worker_pool.wait_for_all();
-
-        let mut overall_exit_code = 0;
-        for result in results {
-            println!("=== Worker {} ===", result.worker_id);
-            if !result.stdout.is_empty() {
-                print!("{}", result.stdout);
-            }
-            if !result.stderr.is_empty() {
-                eprint!("{}", result.stderr);
-            }
-
-            if result.exit_code != 0 {
-                overall_exit_code = result.exit_code;
-            }
-        }
-
-        overall_exit_code
+    let test_groups = if config.use_subprojects {
+        subproject::group_tests_by_subproject(config.rootpath, &test_nodes)
     } else {
-        let scheduler = create_scheduler(distribution_mode);
-        let test_batches = scheduler.distribute_tests(test_nodes, config.worker_count);
+        [(config.rootpath.to_path_buf(), test_nodes)].into()
+    };
+    let scheduler = create_scheduler(distribution_mode);
+    let mut worker_pool = WorkerPool::new();
+    let mut worker_id = 0;
 
-        if test_batches.is_empty() {
-            log::info!("No test batches to execute.");
-            return 0;
+    for (subproject_root, tests) in test_groups {
+        let adjusted_tests = if subproject_root != config.rootpath {
+            subproject::make_test_paths_relative(&tests, config.rootpath, &subproject_root)
+        } else {
+            tests
+        };
+
+        // Schedulers return only nonempty batches.
+        for tests in scheduler.distribute_tests(adjusted_tests, config.worker_count) {
+            worker_pool.spawn_worker(WorkerTask {
+                worker_id,
+                program: config.program.to_string(),
+                initial_args: config.initial_args.to_vec(),
+                tests,
+                pytest_args: vec![],
+                working_dir: Some(subproject_root.clone()),
+                env_vars: config.env_vars.to_vec(),
+            });
+            worker_id += 1;
         }
-
-        let mut worker_pool = WorkerPool::new();
-
-        for (worker_id, tests) in test_batches.into_iter().enumerate() {
-            if !tests.is_empty() {
-                worker_pool.spawn_worker(WorkerTask {
-                    worker_id,
-                    program: config.program.to_string(),
-                    initial_args: config.initial_args.to_vec(),
-                    tests,
-                    pytest_args: vec![],
-                    working_dir: Some(config.rootpath.to_path_buf()),
-                    env_vars: config.env_vars.to_vec(),
-                });
-            }
-        }
-
-        let results = worker_pool.wait_for_all();
-
-        let mut overall_exit_code = 0;
-        for result in results {
-            println!("=== Worker {} ===", result.worker_id);
-            if !result.stdout.is_empty() {
-                print!("{}", result.stdout);
-            }
-            if !result.stderr.is_empty() {
-                eprint!("{}", result.stderr);
-            }
-
-            if result.exit_code != 0 {
-                overall_exit_code = result.exit_code;
-            }
-        }
-
-        overall_exit_code
     }
+
+    if worker_id == 0 {
+        log::info!("No test batches to execute.");
+        return 0;
+    }
+
+    let mut overall_exit_code = 0;
+    for result in worker_pool.wait_for_all() {
+        println!("=== Worker {} ===", result.worker_id);
+        print!("{}", result.stdout);
+        eprint!("{}", result.stderr);
+        if result.exit_code != 0 {
+            overall_exit_code = result.exit_code;
+        }
+    }
+
+    overall_exit_code
 }
 
 #[cfg(test)]

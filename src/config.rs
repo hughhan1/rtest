@@ -54,28 +54,15 @@ pub fn read_pytest_config(root_path: &Path) -> PytestConfig {
         debug!("Found testpaths in pyproject.toml: {:?}", config.testpaths);
     }
 
-    if let Some(values) = read_string_array(ini_options, "python_files") {
-        config.python_files = values.map(String::from).collect();
-        debug!(
-            "Found python_files in pyproject.toml: {:?}",
-            config.python_files
-        );
-    }
-
-    if let Some(values) = read_string_array(ini_options, "python_classes") {
-        config.python_classes = values.map(String::from).collect();
-        debug!(
-            "Found python_classes in pyproject.toml: {:?}",
-            config.python_classes
-        );
-    }
-
-    if let Some(values) = read_string_array(ini_options, "python_functions") {
-        config.python_functions = values.map(String::from).collect();
-        debug!(
-            "Found python_functions in pyproject.toml: {:?}",
-            config.python_functions
-        );
+    for (name, patterns) in [
+        ("python_files", &mut config.python_files),
+        ("python_classes", &mut config.python_classes),
+        ("python_functions", &mut config.python_functions),
+    ] {
+        if let Some(values) = read_string_array(ini_options, name) {
+            *patterns = values.map(String::from).collect();
+            debug!("Found {name} in pyproject.toml: {patterns:?}");
+        }
     }
 
     config

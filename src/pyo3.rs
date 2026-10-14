@@ -40,32 +40,20 @@ pub struct PytestRunner {
 
 impl PytestRunner {
     pub fn from_current_python(py: Python) -> Self {
-        let python_path = py
-            .import("sys")
-            .and_then(|sys| sys.getattr("executable"))
-            .and_then(|exe| exe.extract::<String>())
-            .unwrap_or_else(|_| "python3".to_string());
-
         let initial_args = vec!["-m".to_string(), "pytest".to_string()];
 
         Self {
-            program: python_path,
+            program: get_python_executable(py),
             initial_args,
             env_vars: vec![],
         }
     }
 
     pub fn from_current_python_with_env(py: Python, env_vars: Vec<String>) -> Self {
-        let python_path = py
-            .import("sys")
-            .and_then(|sys| sys.getattr("executable"))
-            .and_then(|exe| exe.extract::<String>())
-            .unwrap_or_else(|_| "python3".to_string());
-
-        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
+        let mut runner = Self::from_current_python(py);
 
         // Parse environment variables from KEY=VALUE format
-        let parsed_env_vars: Vec<(String, String)> = env_vars
+        runner.env_vars = env_vars
             .iter()
             .filter_map(|env_str| {
                 if let Some((key, value)) = env_str.split_once('=') {
@@ -77,11 +65,7 @@ impl PytestRunner {
             })
             .collect();
 
-        Self {
-            program: python_path,
-            initial_args,
-            env_vars: parsed_env_vars,
-        }
+        runner
     }
 }
 
@@ -102,30 +86,22 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
     let runner = PytestRunner::from_current_python(py);
 
     // Determine root path: if the first argument is a path and not a pytest flag, use it
-    let (rootpath, filtered_args) = if let Some(first_arg) = pytest_args.first() {
-        if !first_arg.starts_with('-') && std::path::Path::new(first_arg).exists() {
+    let (rootpath, filtered_args) = match pytest_args.first() {
+        Some(first_arg)
+            if !first_arg.starts_with('-') && std::path::Path::new(first_arg).exists() =>
+        {
             // First argument is a path, use it as root and remove it from pytest args
             let path = PathBuf::from(first_arg);
             let remaining_args = pytest_args.into_iter().skip(1).collect();
             (path, remaining_args)
-        } else {
-            // First argument is not a path, use current directory
-            match get_current_dir() {
-                Ok(dir) => (dir, pytest_args),
-                Err(e) => {
-                    eprintln!("{e}");
-                    return 1;
-                }
-            }
         }
-    } else {
-        match get_current_dir() {
+        _ => match get_current_dir() {
             Ok(dir) => (dir, pytest_args),
             Err(e) => {
                 eprintln!("{e}");
                 return 1;
             }
-        }
+        },
     };
 
     let collection_result = collect_tests_rust(rootpath.clone(), &filtered_args);
@@ -155,6 +131,32 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         Some(&rootpath),
         &runner.env_vars,
     )
+}
+
+fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), &args.files) {
+        Ok((nodes, errors)) => (nodes, errors),
+        Err(e) => handle_collection_error(e),
+    };
+
+    display_collection_results(&test_nodes, &errors);
+
+    // Exit early if there are collection errors
+    if !errors.errors.is_empty() {
+        std::process::exit(exit_codes::TESTS_FAILED);
+    }
+
+    if test_nodes.is_empty() {
+        println!("No tests found.");
+        std::process::exit(exit_codes::OK);
+    }
+
+    // Exit after collection if --collect-only flag is set
+    if args.collect_only {
+        std::process::exit(exit_codes::OK);
+    }
+
+    test_nodes
 }
 
 #[pyfunction]
@@ -191,28 +193,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
     match args.runner {
         Runner::Native => {
-            // Use Rust-based collection for consistent output with pytest runner
-            let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
-                Ok((nodes, errors)) => (nodes, errors),
-                Err(e) => handle_collection_error(e),
-            };
-
-            display_collection_results(&test_nodes, &errors);
-
-            // Exit early if there are collection errors
-            if !errors.errors.is_empty() {
-                std::process::exit(exit_codes::TESTS_FAILED);
-            }
-
-            if test_nodes.is_empty() {
-                println!("No tests found.");
-                std::process::exit(exit_codes::OK);
-            }
-
-            // Exit after collection if --collect-only flag is set
-            if args.collect_only {
-                std::process::exit(exit_codes::OK);
-            }
+            collect_cli_tests(&rootpath, &args);
 
             // Read pytest configuration for collection patterns
             let pytest_config = read_pytest_config(&rootpath);
@@ -251,27 +232,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
             // Legacy pytest-based runner
             let runner = PytestRunner::from_current_python_with_env(py, args.env.clone());
 
-            let (test_nodes, errors) = match collect_tests_rust(rootpath.clone(), &args.files) {
-                Ok((nodes, errors)) => (nodes, errors),
-                Err(e) => handle_collection_error(e),
-            };
-
-            display_collection_results(&test_nodes, &errors);
-
-            // Exit early if there are collection errors to prevent test execution
-            if !errors.errors.is_empty() {
-                std::process::exit(exit_codes::TESTS_FAILED);
-            }
-
-            if test_nodes.is_empty() {
-                println!("No tests found.");
-                std::process::exit(exit_codes::OK);
-            }
-
-            // Exit after collection if --collect-only flag is set
-            if args.collect_only {
-                std::process::exit(exit_codes::OK);
-            }
+            let test_nodes = collect_cli_tests(&rootpath, &args);
 
             let exit_code = if worker_count == 1 || args.dist == "no" {
                 // Group tests by subproject

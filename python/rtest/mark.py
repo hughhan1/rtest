@@ -108,8 +108,9 @@ class Mark:
         )
 
         def decorator(func: F) -> F:
-            cases_list: list[ParametrizeSpec] = getattr(func, "__rtest_cases__", None) or []
-            if not getattr(func, "__rtest_cases__", None):
+            cases_list: list[ParametrizeSpec] | None = getattr(func, "__rtest_cases__", None)
+            if not cases_list:
+                cases_list = []
                 func.__rtest_cases__ = cases_list  # type: ignore[union-attr]
             cases_list.append(spec)
             return func
@@ -261,7 +262,7 @@ def _get_parametrize_specs(func: FunctionType) -> list[ParametrizeSpec]:
 
             # Handle ids
             ids_tuple: tuple[str, ...] | None = None
-            if ids_raw is not None and isinstance(ids_raw, (list, tuple)):
+            if isinstance(ids_raw, (list, tuple)):
                 ids_tuple = tuple(str(i) for i in ids_raw)
 
             specs.append(
@@ -292,9 +293,6 @@ def expand_parametrize(func: FunctionType) -> list[ExpandedCase]:
         - kwargs is the dict of arguments to pass to the function
     """
     specs = _get_parametrize_specs(func)
-
-    if not specs:
-        return [ExpandedCase("", {})]
 
     expanded_specs: list[list[ExpandedCase]] = [_expand_single_spec(spec) for spec in specs]
 

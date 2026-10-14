@@ -70,51 +70,22 @@ impl ModuleResolver {
             )));
         }
 
-        // Try each search path in order
-        for search_path in &self.search_paths {
-            if let Ok(file_path) = self.try_resolve_in_search_path(module_path, search_path) {
-                return Ok(file_path);
-            }
-        }
-
-        Err(CollectionError::ImportError(format!(
-            "Could not find module: {}",
-            module_name
-        )))
-    }
-
-    /// Try to resolve a module in a specific search path
-    fn try_resolve_in_search_path(
-        &self,
-        module_path: &[String],
-        search_path: &Path,
-    ) -> Result<PathBuf, ()> {
-        let possible_paths = self.get_possible_paths_in_root(module_path, search_path);
-
-        for path in &possible_paths {
-            if std::fs::metadata(path).is_ok() {
-                return Ok(path.clone());
-            }
-        }
-
-        Err(())
+        self.search_paths
+            .iter()
+            .flat_map(|root| self.get_possible_paths_in_root(module_path, root))
+            .find(|path| std::fs::metadata(path).is_ok())
+            .ok_or_else(|| {
+                CollectionError::ImportError(format!("Could not find module: {}", module_name))
+            })
     }
 
     /// Get all possible file paths for a module in a specific root directory
     fn get_possible_paths_in_root(&self, module_path: &[String], root: &Path) -> Vec<PathBuf> {
-        if module_path.is_empty() {
-            return Vec::new();
-        }
-
         let mut paths = Vec::new();
         let mut base_dir = root.to_path_buf();
 
         // Build the base directory path from all but the last component
-        if module_path.len() > 1 {
-            for part in &module_path[..module_path.len() - 1] {
-                base_dir.push(part);
-            }
-        }
+        base_dir.extend(&module_path[..module_path.len() - 1]);
 
         let module_name = &module_path[module_path.len() - 1];
 

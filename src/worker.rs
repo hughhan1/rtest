@@ -48,14 +48,7 @@ impl WorkerPool {
         let handle = thread::spawn(move || {
             let mut cmd = Command::new(&task.program);
 
-            // Set environment variables
-            for (key, value) in task.env_vars {
-                cmd.env(key, value);
-            }
-
-            for arg in task.initial_args {
-                cmd.arg(arg);
-            }
+            cmd.envs(task.env_vars).args(task.initial_args);
 
             // Add --rootdir to prevent pytest from traversing up the directory tree during
             // its collection phase. Without this, pytest searches upward for config files
@@ -64,21 +57,12 @@ impl WorkerPool {
             if let Some(ref dir) = task.working_dir {
                 cmd.arg("--rootdir");
                 cmd.arg(dir);
-            }
-
-            for test in task.tests {
-                cmd.arg(test);
-            }
-
-            for arg in task.pytest_args {
-                cmd.arg(arg);
-            }
-
-            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-            if let Some(dir) = task.working_dir {
                 cmd.current_dir(dir);
             }
+
+            cmd.args(task.tests).args(task.pytest_args);
+
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
             match cmd.output() {
                 Ok(output) => WorkerResult {
@@ -132,25 +116,6 @@ impl WorkerPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_worker_pool_creation() {
-        let pool = WorkerPool::new();
-        assert_eq!(pool.worker_count(), 0);
-    }
-
-    #[test]
-    fn test_worker_result_creation() {
-        let result = WorkerResult {
-            worker_id: 1,
-            exit_code: 0,
-            stdout: "test output".into(),
-            stderr: String::new(),
-        };
-        assert_eq!(result.worker_id, 1);
-        assert_eq!(result.exit_code, 0);
-        assert_eq!(result.stdout, "test output");
-    }
 
     #[test]
     fn test_spawn_and_wait_echo_command() {

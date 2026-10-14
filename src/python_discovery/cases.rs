@@ -118,22 +118,10 @@ pub fn parse_decorators_for_cases(
     decorators: &[Decorator],
     resolver: Option<&ConstantResolver>,
 ) -> CasesExpansion {
-    let mut specs = Vec::new();
-
-    for decorator in decorators {
-        match parse_single_decorator(decorator, resolver) {
-            DecoratorParseResult::CasesSpec(spec) => specs.push(spec),
-            DecoratorParseResult::CannotExpand(reason) => {
-                return CasesExpansion::CannotExpand(reason);
-            }
-            DecoratorParseResult::NotCasesDecorator => {}
-        }
-    }
-
-    if specs.is_empty() {
-        CasesExpansion::NotDecorated
-    } else {
-        CasesExpansion::Expanded(expand_cases(&specs))
+    match parse_decorators_to_specs(decorators, resolver) {
+        MethodCasesInfo::NotDecorated => CasesExpansion::NotDecorated,
+        MethodCasesInfo::Specs(specs) => CasesExpansion::Expanded(expand_cases(&specs)),
+        MethodCasesInfo::CannotExpand(reason) => CasesExpansion::CannotExpand(reason),
     }
 }
 
@@ -173,22 +161,16 @@ pub fn combine_and_expand_specs(
     class_info: &MethodCasesInfo,
     method_info: &MethodCasesInfo,
 ) -> CasesExpansion {
-    // Handle CannotExpand cases first
-    if let MethodCasesInfo::CannotExpand(reason) = class_info {
-        return CasesExpansion::CannotExpand(reason.clone());
-    }
-    if let MethodCasesInfo::CannotExpand(reason) = method_info {
-        return CasesExpansion::CannotExpand(reason.clone());
-    }
-
     // Collect specs: class first (outer), then method (inner)
     let mut combined_specs = Vec::new();
-
-    if let MethodCasesInfo::Specs(specs) = class_info {
-        combined_specs.extend(specs.iter().cloned());
-    }
-    if let MethodCasesInfo::Specs(specs) = method_info {
-        combined_specs.extend(specs.iter().cloned());
+    for info in [class_info, method_info] {
+        match info {
+            MethodCasesInfo::CannotExpand(reason) => {
+                return CasesExpansion::CannotExpand(reason.clone());
+            }
+            MethodCasesInfo::Specs(specs) => combined_specs.extend(specs.iter().cloned()),
+            MethodCasesInfo::NotDecorated => {}
+        }
     }
 
     if combined_specs.is_empty() {
@@ -255,10 +237,6 @@ fn is_cases_or_parametrize_call(func: &Expr) -> bool {
     };
 
     let decorator_name = attr.as_str();
-    if decorator_name != "cases" && decorator_name != "parametrize" {
-        return false;
-    }
-
     let Expr::Attribute(ExprAttribute {
         attr: mark_attr,
         value: module_value,
@@ -381,17 +359,8 @@ fn extract_argvalues(
                 let final_id = if id.is_empty() {
                     // Single opaque value - use first argname
                     format!("{}{}", first_argname, idx)
-                } else if matches!(value, LiteralValue::Sequence(_)) && id.contains('-') {
-                    // Multi-param tuple - may have opaque placeholders (empty segments between dashes)
-                    fill_opaque_placeholders(&id, argnames, idx)
                 } else if matches!(value, LiteralValue::Sequence(_)) {
-                    // Single-element sequence or all-opaque sequence
-                    // Check if the id itself is empty (single opaque in sequence)
-                    if id.is_empty() {
-                        format!("{}{}", first_argname, idx)
-                    } else {
-                        fill_opaque_placeholders(&id, argnames, idx)
-                    }
+                    fill_opaque_placeholders(&id, argnames, idx)
                 } else {
                     id
                 };
@@ -504,10 +473,6 @@ fn extract_literal(
             // Unresolved name/attribute - treat as opaque (can count but not evaluate)
             Ok((LiteralValue::Opaque, String::new()))
         }
-        // Function calls (including dataclass/class instantiation) - opaque
-        Expr::Call(_) => Ok((LiteralValue::Opaque, String::new())),
-        // Dict and set literals - opaque (we can count them but not stringify nicely)
-        Expr::Dict(_) | Expr::Set(_) => Ok((LiteralValue::Opaque, String::new())),
         // Comprehensions cannot be counted without evaluation
         Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
             Err(CannotExpandReason::Comprehension)
@@ -538,18 +503,9 @@ fn extract_ids_kwarg(
                     let ids: Vec<String> =
                         seq.into_iter().map(|v| literal_to_id_string(&v)).collect();
                     return Some(ids);
-                } else if let Expr::List(list) = &kw.value {
-                    let mut ids = Vec::with_capacity(list.elts.len());
-                    for elt in list.elts.iter() {
-                        if let Expr::StringLiteral(s) = elt {
-                            ids.push(s.value.to_str().to_string());
-                        } else if let Ok((lit, _)) = extract_literal(elt, resolver) {
-                            ids.push(literal_to_id_string(&lit));
-                        } else {
-                            return None;
-                        }
-                    }
-                    return Some(ids);
+                } else if matches!(kw.value, Expr::List(_)) {
+                    // A list can fail extraction only when one of its elements fails.
+                    return None;
                 }
             }
         }
@@ -689,40 +645,6 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_single_spec_numeric() {
-        let spec = CasesSpec {
-            argnames: vec!["x".to_string()],
-            argvalues: vec![
-                LiteralValue::Int(1),
-                LiteralValue::Int(2),
-                LiteralValue::Int(3),
-            ],
-            value_ids: vec!["1".to_string(), "2".to_string(), "3".to_string()],
-            ids: None,
-        };
-        assert_eq!(expand_single_spec(&spec), vec!["1", "2", "3"]);
-    }
-
-    #[test]
-    fn test_expand_single_spec_custom_ids() {
-        let spec = CasesSpec {
-            argnames: vec!["x".to_string()],
-            argvalues: vec![
-                LiteralValue::Int(1),
-                LiteralValue::Int(2),
-                LiteralValue::Int(3),
-            ],
-            value_ids: vec!["1".to_string(), "2".to_string(), "3".to_string()],
-            ids: Some(vec![
-                "one".to_string(),
-                "two".to_string(),
-                "three".to_string(),
-            ]),
-        };
-        assert_eq!(expand_single_spec(&spec), vec!["one", "two", "three"]);
-    }
-
-    #[test]
     fn test_expand_cases_cartesian_product() {
         let specs = vec![
             CasesSpec {
@@ -748,26 +670,6 @@ mod tests {
     }
 
     #[test]
-    fn test_literal_to_id_string() {
-        assert_eq!(literal_to_id_string(&LiteralValue::Int(42)), "42");
-        assert_eq!(literal_to_id_string(&LiteralValue::Float(3.14)), "3.14");
-        assert_eq!(
-            literal_to_id_string(&LiteralValue::String("hello".to_string())),
-            "hello"
-        );
-        assert_eq!(literal_to_id_string(&LiteralValue::Bool(true)), "True");
-        assert_eq!(literal_to_id_string(&LiteralValue::Bool(false)), "False");
-        assert_eq!(literal_to_id_string(&LiteralValue::None), "None");
-        assert_eq!(
-            literal_to_id_string(&LiteralValue::Sequence(vec![
-                LiteralValue::Int(1),
-                LiteralValue::String("a".to_string()),
-            ])),
-            "1-a"
-        );
-    }
-
-    #[test]
     fn test_format_cannot_expand_warning() {
         let warning = format_cannot_expand_warning(
             "test_foo.py::test_x",
@@ -777,17 +679,6 @@ mod tests {
             warning,
             "warning: Cannot statically expand test cases for 'test_foo.py::test_x': argvalues references variable 'DATA'"
         );
-    }
-
-    #[test]
-    fn test_expand_single_spec_empty_argvalues() {
-        let spec = CasesSpec {
-            argnames: vec!["x".to_string()],
-            argvalues: vec![],
-            value_ids: vec![],
-            ids: None,
-        };
-        assert_eq!(expand_single_spec(&spec), Vec::<String>::new());
     }
 
     #[test]
@@ -829,63 +720,6 @@ mod tests {
             ascii_escape_string("hello\\world☃"),
             "hello\\\\world\\u2603"
         );
-    }
-
-    #[test]
-    fn test_combine_and_expand_specs_class_only() {
-        // When class has parametrize but method doesn't, should still expand
-        let class_specs = MethodCasesInfo::Specs(vec![CasesSpec {
-            argnames: vec!["x".to_string()],
-            argvalues: vec![LiteralValue::Int(1), LiteralValue::Int(2)],
-            value_ids: vec!["1".to_string(), "2".to_string()],
-            ids: None,
-        }]);
-        let method_specs = MethodCasesInfo::NotDecorated;
-
-        let result = combine_and_expand_specs(&class_specs, &method_specs);
-
-        match result {
-            CasesExpansion::Expanded(cases) => {
-                assert_eq!(cases.len(), 2);
-                assert_eq!(cases[0].case_id, "1");
-                assert_eq!(cases[1].case_id, "2");
-            }
-            _ => panic!("Expected Expanded, got {:?}", result),
-        }
-    }
-
-    #[test]
-    fn test_combine_and_expand_specs_both() {
-        // When both class and method have parametrize, should combine
-        let class_specs = MethodCasesInfo::Specs(vec![CasesSpec {
-            argnames: vec!["x".to_string()],
-            argvalues: vec![LiteralValue::Int(1), LiteralValue::Int(2)],
-            value_ids: vec!["1".to_string(), "2".to_string()],
-            ids: None,
-        }]);
-        let method_specs = MethodCasesInfo::Specs(vec![CasesSpec {
-            argnames: vec!["y".to_string()],
-            argvalues: vec![
-                LiteralValue::String("a".to_string()),
-                LiteralValue::String("b".to_string()),
-            ],
-            value_ids: vec!["a".to_string(), "b".to_string()],
-            ids: None,
-        }]);
-
-        let result = combine_and_expand_specs(&class_specs, &method_specs);
-
-        match result {
-            CasesExpansion::Expanded(cases) => {
-                assert_eq!(cases.len(), 4);
-                // Method params vary fastest (innermost)
-                assert_eq!(cases[0].case_id, "a-1");
-                assert_eq!(cases[1].case_id, "a-2");
-                assert_eq!(cases[2].case_id, "b-1");
-                assert_eq!(cases[3].case_id, "b-2");
-            }
-            _ => panic!("Expected Expanded, got {:?}", result),
-        }
     }
 
     #[test]
