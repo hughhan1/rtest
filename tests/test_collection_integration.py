@@ -1719,7 +1719,7 @@ class TestCollectionIntegration(unittest.TestCase):
     def test_literal_case_ids_and_duplicates(self) -> None:
         values = ["same", "same", "\x00", "\n", "\t", "\r", "☃", "𝄞", "\\", 2**80, True, None]
         files = {
-            "test_ids.py": (f"import rtest\n@rtest.mark.cases('value', {values!r})\ndef test_value(value): pass\n"),
+            "test_ids.py": (f"import rtest\n@rtest.mark.cases('value', {values!a})\ndef test_value(value): pass\n"),
         }
         with create_test_project(files) as project_path:
             result = run_collection(project_path)
