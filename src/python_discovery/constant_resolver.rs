@@ -112,3 +112,52 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruff_python_parser::{parse_expression, parse_module};
+
+    #[test]
+    fn test_resolve_nested_and_spilled_names() {
+        // Exercise bare names, inline names, and paths beyond Ruff's eight-segment inline capacity.
+        for depth in [0, 3, 10] {
+            let mut source = String::new();
+            for level in 0..depth {
+                source.push_str(&format!("{}class C{level}:\n", "    ".repeat(level)));
+            }
+            source.push_str(&format!("{}VALUE = 42\n", "    ".repeat(depth)));
+            let module = parse_module(&source).expect("valid module").into_syntax();
+            let resolver = ConstantResolver::from_module(&module);
+            let mut path: Vec<String> = (0..depth).map(|level| format!("C{level}")).collect();
+            path.push("VALUE".into());
+            let expression = parse_expression(&path.join("."))
+                .expect("valid attribute expression")
+                .into_expr();
+
+            assert_eq!(
+                resolver.resolve(&expression),
+                Some((LiteralValue::Int(42), path))
+            );
+        }
+    }
+
+    #[test]
+    fn test_unresolved_or_dynamic_names() {
+        let module = parse_module("class Config:\n    MAX = 100\n")
+            .expect("valid module")
+            .into_syntax();
+        let resolver = ConstantResolver::from_module(&module);
+        for source in [
+            "MISSING",
+            "Config.MISSING",
+            "factory().MAX",
+            "Config[0].MAX",
+        ] {
+            let expression = parse_expression(source)
+                .expect("valid expression")
+                .into_expr();
+            assert_eq!(resolver.resolve(&expression), None, "{source}");
+        }
+    }
+}
