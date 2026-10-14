@@ -3,7 +3,8 @@
 //! This module builds a scope tree from a Python module's AST to resolve
 //! constant expressions like `X`, `Color.RED`, or `Outer.Inner.VALUE`.
 
-use ruff_python_ast::{Expr, ExprAttribute, ExprList, ExprName, ExprTuple, ModModule, Stmt};
+use ruff_python_ast::name::UnqualifiedName;
+use ruff_python_ast::{Expr, ExprList, ExprTuple, ModModule, Stmt};
 use std::collections::HashMap;
 
 use super::cases::LiteralValue;
@@ -76,23 +77,15 @@ impl ConstantResolver {
     /// Returns `Some((value, source_path))` where `source_path` is the
     /// dotted path used for ID generation (e.g., `["Color", "RED"]`).
     pub fn resolve(&self, expr: &Expr) -> Option<(LiteralValue, Vec<String>)> {
-        let path = expr_to_path(expr)?;
-        let path_refs: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
-        let value = self.root.resolve_path(&path_refs)?;
+        let name = UnqualifiedName::from_expr(expr)?;
+        let value = self.root.resolve_path(name.segments())?;
+        // Allocate the ID path only after resolving the borrowed name successfully.
+        let path = name
+            .segments()
+            .iter()
+            .map(|segment| (*segment).into())
+            .collect();
         Some((value, path))
-    }
-}
-
-/// Convert an attribute chain to a path: `a.b.c` -> `["a", "b", "c"]`.
-fn expr_to_path(expr: &Expr) -> Option<Vec<String>> {
-    match expr {
-        Expr::Name(ExprName { id, .. }) => Some(vec![id.to_string()]),
-        Expr::Attribute(ExprAttribute { value, attr, .. }) => {
-            let mut path = expr_to_path(value)?;
-            path.push(attr.to_string());
-            Some(path)
-        }
-        _ => None,
     }
 }
 
@@ -117,5 +110,54 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
             Some(LiteralValue::Sequence(values?))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruff_python_parser::{parse_expression, parse_module};
+
+    #[test]
+    fn test_resolve_nested_and_spilled_names() {
+        // Exercise bare names, inline names, and paths beyond Ruff's eight-segment inline capacity.
+        for depth in [0, 3, 10] {
+            let mut source = String::new();
+            for level in 0..depth {
+                source.push_str(&format!("{}class C{level}:\n", "    ".repeat(level)));
+            }
+            source.push_str(&format!("{}VALUE = 42\n", "    ".repeat(depth)));
+            let module = parse_module(&source).expect("valid module").into_syntax();
+            let resolver = ConstantResolver::from_module(&module);
+            let mut path: Vec<String> = (0..depth).map(|level| format!("C{level}")).collect();
+            path.push("VALUE".into());
+            let expression = parse_expression(&path.join("."))
+                .expect("valid attribute expression")
+                .into_expr();
+
+            assert_eq!(
+                resolver.resolve(&expression),
+                Some((LiteralValue::Int(42), path))
+            );
+        }
+    }
+
+    #[test]
+    fn test_unresolved_or_dynamic_names() {
+        let module = parse_module("class Config:\n    MAX = 100\n")
+            .expect("valid module")
+            .into_syntax();
+        let resolver = ConstantResolver::from_module(&module);
+        for source in [
+            "MISSING",
+            "Config.MISSING",
+            "factory().MAX",
+            "Config[0].MAX",
+        ] {
+            let expression = parse_expression(source)
+                .expect("valid expression")
+                .into_expr();
+            assert_eq!(resolver.resolve(&expression), None, "{source}");
+        }
     }
 }
