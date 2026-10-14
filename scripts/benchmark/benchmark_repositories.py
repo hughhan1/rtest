@@ -869,10 +869,10 @@ class HyperfineRunner:
 
                 # Check if this result matches pytest or rtest
                 # hyperfine stores our --command-name in the result
-                if "pytest" in command_name.lower() and "rtest" not in command_name.lower():
-                    pytest_data = result
-                elif "rtest" in command_name.lower():
+                if "rtest" in command_name.lower():
                     rtest_data = result
+                elif "pytest" in command_name.lower():
+                    pytest_data = result
 
             # If we couldn't match by command content, fall back to order
             # (hyperfine preserves order of --command-name args)

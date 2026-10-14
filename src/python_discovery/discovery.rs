@@ -25,6 +25,16 @@ pub struct TestInfo {
     pub cases_expansion: CasesExpansion,
 }
 
+impl TestInfo {
+    pub(crate) fn base_nodeid(&self, module_nodeid: &str) -> String {
+        if let Some(class_name) = &self.class_name {
+            format!("{}::{}::{}", module_nodeid, class_name, self.name)
+        } else {
+            format!("{}::{}", module_nodeid, self.name)
+        }
+    }
+}
+
 /// Configuration for test discovery
 #[derive(Debug, Clone)]
 pub struct TestDiscoveryConfig {
@@ -154,11 +164,7 @@ pub fn test_info_to_functions(
     module_path: &Path,
     module_nodeid: &str,
 ) -> Vec<Function> {
-    let base_nodeid = if let Some(class_name) = &test.class_name {
-        format!("{}::{}::{}", module_nodeid, class_name, test.name)
-    } else {
-        format!("{}::{}", module_nodeid, test.name)
-    };
+    let base_nodeid = test.base_nodeid(module_nodeid);
 
     match &test.cases_expansion {
         CasesExpansion::NotDecorated | CasesExpansion::CannotExpand(_) => {

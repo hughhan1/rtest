@@ -3,12 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// Splits a test node ID into file path and test parts
-fn split_test_node(node: &str) -> (&str, Option<&str>) {
-    match node.split_once("::") {
-        Some((path, test)) => (path, Some(test)),
-        None => (node, None),
-    }
+/// Split a node ID into its file path and suffix, preserving the `::` separator.
+pub(crate) fn split_test_node(node: &str) -> (&str, &str) {
+    node.split_at(node.find("::").unwrap_or(node.len()))
 }
 
 /// Groups test nodes by their subproject
@@ -74,18 +71,11 @@ pub fn make_test_paths_relative(
     test_nodes
         .iter()
         .map(|node| {
-            let (file_path, test_part) = split_test_node(node);
+            let (file_path, suffix) = split_test_node(node);
 
             let absolute_path = old_base.join(file_path);
             match absolute_path.strip_prefix(new_base) {
-                Ok(relative_path) => {
-                    let mut new_node = relative_path.to_string_lossy().into_owned();
-                    if let Some(test) = test_part {
-                        new_node.push_str("::");
-                        new_node.push_str(test);
-                    }
-                    new_node
-                }
+                Ok(relative_path) => format!("{}{suffix}", relative_path.display()),
                 Err(_) => node.clone(),
             }
         })
