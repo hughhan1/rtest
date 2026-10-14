@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::thread;
 use tempfile::TempDir;
 use walkdir::WalkDir;
@@ -204,11 +204,8 @@ fn run_worker(
     // Use -- to separate options from positional file arguments
     cmd.arg("--").args(files);
 
-    cmd.current_dir(root)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
     let output = cmd
+        .current_dir(root)
         .output()
         .map_err(|e| format!("Worker {} failed to start: {}", worker_id, e))?;
 

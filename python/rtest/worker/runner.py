@@ -15,6 +15,8 @@ from pathlib import Path
 from types import FunctionType, MappingProxyType, ModuleType
 from typing import Callable, Literal
 
+from rtest.mark import ExpandedCase, get_case_nodeid_suffix
+
 
 @dataclass
 class TestResult:
@@ -112,6 +114,20 @@ def _is_skipped(obj: object) -> tuple[bool, str]:
     return False, ""
 
 
+def _parametrize_test_case(test_case: TestCase, cases: list[ExpandedCase]) -> list[TestCase]:
+    return [
+        TestCase(
+            nodeid=f"{test_case.nodeid}{get_case_nodeid_suffix(case_id)}",
+            func=test_case.func,
+            kwargs=kwargs,
+            skip=test_case.skip,
+            skip_reason=test_case.skip_reason,
+            test_class=test_case.test_class,
+        )
+        for case_id, kwargs in cases
+    ]
+
+
 def _discover_tests_in_module(
     module: ModuleType,
     file_path: Path,
@@ -120,7 +136,7 @@ def _discover_tests_in_module(
     python_functions: list[str],
 ) -> list[TestCase]:
     """Discover all test cases in a module."""
-    from rtest.mark import expand_parametrize, get_case_nodeid_suffix
+    from rtest.mark import expand_parametrize
 
     rel_path = _relative_path(file_path, root).replace("\\", "/")
 
@@ -131,18 +147,17 @@ def _discover_tests_in_module(
             func_obj: FunctionType = obj  # type: ignore[assignment]
             func_skip, func_skip_reason = _is_skipped(func_obj)
 
-            for case_id, kwargs in expand_parametrize(func_obj):
-                suffix = get_case_nodeid_suffix(case_id)
-                nodeid = f"{rel_path}::{name}{suffix}"
-                test_cases.append(
+            test_cases.extend(
+                _parametrize_test_case(
                     TestCase(
-                        nodeid=nodeid,
+                        nodeid=f"{rel_path}::{name}",
                         func=func_obj,
-                        kwargs=kwargs,
                         skip=func_skip,
                         skip_reason=func_skip_reason,
-                    )
+                    ),
+                    expand_parametrize(func_obj),
                 )
+            )
 
         elif _is_test_class(name, obj, python_classes):
             # obj is a class at this point
@@ -168,19 +183,18 @@ def _discover_tests_in_module(
                     skip = method_skip or class_skip
                     skip_reason = method_skip_reason if method_skip else class_skip_reason
 
-                    for case_id, kwargs in expand_parametrize(method_func):
-                        suffix = get_case_nodeid_suffix(case_id)
-                        nodeid = f"{rel_path}::{name}::{method_name}{suffix}"
-                        test_cases.append(
+                    test_cases.extend(
+                        _parametrize_test_case(
                             TestCase(
-                                nodeid=nodeid,
+                                nodeid=f"{rel_path}::{name}::{method_name}",
                                 func=method_func,
-                                kwargs=kwargs,
                                 skip=skip,
                                 skip_reason=skip_reason,
                                 test_class=class_obj,
-                            )
+                            ),
+                            expand_parametrize(method_func),
                         )
+                    )
 
     return test_cases
 
@@ -269,13 +283,9 @@ def run_tests(
     if python_functions is None:
         python_functions = ["test*"]
 
-    root_str = str(root.resolve())
-    if root_str not in sys.path:
-        sys.path.insert(0, root_str)
-
-    # Add all test directories to sys.path for sibling imports
+    # Add the root, then test directories, preserving sibling-import precedence.
     test_dirs = {str(f.parent.resolve()) for f in test_files}
-    for test_dir in sorted(test_dirs):
+    for test_dir in [str(root.resolve()), *sorted(test_dirs)]:
         if test_dir not in sys.path:
             sys.path.insert(0, test_dir)
 

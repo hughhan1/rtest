@@ -1533,6 +1533,42 @@ class TestCollectionIntegration(unittest.TestCase):
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 3 items", result.output)
 
+    def test_cases_with_annotated_constants(self) -> None:
+        with create_test_project(
+            {
+                "test_constants.py": textwrap.dedent("""
+                    import rtest
+                    VALUES: list[int] = [1, 2]
+                    UNSET: int
+                    LEFT = RIGHT = [3]
+                    class Settings:
+                        VALUE: int = 4
+                    @rtest.mark.cases("x", VALUES)
+                    def test_values(x): pass
+                    @rtest.mark.cases("x", [Settings.VALUE])
+                    def test_nested(x): pass
+                    @rtest.mark.cases("x", UNSET)
+                    def test_unset(x): pass
+                    @rtest.mark.cases("x", LEFT)
+                    def test_chained(x): pass
+                """)
+            }
+        ) as project_path:
+            result = run_collection(project_path)
+            self.assertEqual(result.returncode, 0, result.output)
+            self.assertEqual(
+                {node for node in extract_test_lines(result.output_lines) if node.startswith("test_constants.py::")},
+                {
+                    "test_constants.py::test_values[VALUES[1]]",
+                    "test_constants.py::test_values[VALUES[2]]",
+                    "test_constants.py::test_nested[Settings.VALUE]",
+                    "test_constants.py::test_unset",
+                    "test_constants.py::test_chained",
+                },
+            )
+            self.assertIn("argvalues references variable 'UNSET'", result.output)
+            self.assertIn("argvalues references variable 'LEFT'", result.output)
+
     def test_cases_with_module_constants(self) -> None:
         """Test that @cases with module-level constants generates correct test IDs."""
         files = {

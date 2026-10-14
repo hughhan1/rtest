@@ -25,27 +25,22 @@ impl ConstantScope {
         let mut scope = Self::default();
 
         for stmt in stmts {
-            match stmt {
-                Stmt::Assign(assign) => {
-                    if let [Expr::Name(name)] = assign.targets.as_slice() {
-                        if let Some(value) = try_extract_literal(&assign.value) {
-                            scope.constants.insert(name.id.to_string(), value);
-                        }
-                    }
+            let (target, value) = match stmt {
+                Stmt::Assign(assign) if assign.targets.len() == 1 => {
+                    (&assign.targets[0], Some(assign.value.as_ref()))
                 }
-                Stmt::AnnAssign(ann) => {
-                    if let (Expr::Name(name), Some(value_expr)) = (ann.target.as_ref(), &ann.value)
-                    {
-                        if let Some(value) = try_extract_literal(value_expr) {
-                            scope.constants.insert(name.id.to_string(), value);
-                        }
-                    }
-                }
+                Stmt::AnnAssign(ann) => (ann.target.as_ref(), ann.value.as_deref()),
                 Stmt::ClassDef(class_def) => {
                     let child = Self::from_statements(&class_def.body);
                     scope.children.insert(class_def.name.to_string(), child);
+                    continue;
                 }
-                _ => {}
+                _ => continue,
+            };
+            if let (Expr::Name(name), Some(value_expr)) = (target, value) {
+                if let Some(value) = try_extract_literal(value_expr) {
+                    scope.constants.insert(name.id.to_string(), value);
+                }
             }
         }
 
