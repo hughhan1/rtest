@@ -64,6 +64,7 @@ pub struct SemanticTestDiscovery {
     config: TestDiscoveryConfig,
     /// Cache of test classes by module path and class name
     class_cache: HashMap<(Vec<String>, String), Rc<TestClassInfo>>,
+    loaded_modules: HashSet<Vec<String>>,
     /// Warnings collected during discovery
     warnings: Vec<CollectionWarning>,
     /// Current file path for warning generation
@@ -75,6 +76,7 @@ impl SemanticTestDiscovery {
         Self {
             config,
             class_cache: HashMap::new(),
+            loaded_modules: HashSet::new(),
             warnings: Vec::new(),
             current_file_path: String::new(),
         }
@@ -286,7 +288,7 @@ impl SemanticTestDiscovery {
         // Collect inherited methods
         for base in &info.base_classes {
             inherited_methods.extend(
-                self.get_base_class_methods(base, module_resolver)?
+                self.get_base_class_methods(base, module_resolver, &mut HashSet::new())?
                     .into_iter()
                     .filter(|method| !own_method_names.contains(method.name.as_str())),
             );
@@ -348,21 +350,10 @@ impl SemanticTestDiscovery {
             return Ok(false);
         }
 
-        if !resolved.is_local {
-            // Load the external module if needed
-            self.ensure_module_loaded(&resolved.module_path, module_resolver)?;
-        }
-
-        // Get the base class info
-        let base_info = match self.class_cache.get(&key) {
-            Some(info) => Rc::clone(info),
-            None => {
-                visited.remove(&key);
-                return Ok(false);
-            }
+        let has_init = match self.load_base_class(resolved, module_resolver)? {
+            Some(info) => self.should_skip_class(&info, module_resolver, visited)?,
+            None => false,
         };
-
-        let has_init = self.should_skip_class(&base_info, module_resolver, visited)?;
 
         // Remove from visited after processing to allow sibling branches in diamond
         // inheritance patterns to revisit this class without false cycle detection
@@ -370,18 +361,22 @@ impl SemanticTestDiscovery {
         Ok(has_init)
     }
 
-    /// Get test methods from a base class, including inherited methods
-    fn get_base_class_methods(
+    fn load_base_class(
         &mut self,
         resolved: &ResolvedBaseClass,
         module_resolver: &mut ModuleResolver,
-    ) -> CollectionResult<Vec<TestMethodInfo>> {
-        let mut visited = HashSet::new();
-        self.get_base_class_methods_impl(resolved, module_resolver, &mut visited)
+    ) -> CollectionResult<Option<Rc<TestClassInfo>>> {
+        if !resolved.is_local {
+            self.ensure_module_loaded(&resolved.module_path, module_resolver)?;
+        }
+        Ok(self
+            .class_cache
+            .get(&(resolved.module_path.clone(), resolved.class_name.clone()))
+            .cloned())
     }
 
-    /// Internal implementation of get_base_class_methods with cycle detection
-    fn get_base_class_methods_impl(
+    /// Get inherited test methods, detecting cycles along the current ancestry path.
+    fn get_base_class_methods(
         &mut self,
         resolved: &ResolvedBaseClass,
         module_resolver: &mut ModuleResolver,
@@ -401,35 +396,18 @@ impl SemanticTestDiscovery {
             )));
         }
 
-        if !resolved.is_local {
-            // Load the external module if needed
-            self.ensure_module_loaded(&resolved.module_path, module_resolver)?;
-        }
-
-        // Get the base class info
-        let base_info = match self.class_cache.get(&key) {
-            Some(info) => Rc::clone(info),
-            None => {
-                // Remove from visited before early return to allow sibling branches
-                // to process this class without false cycle detection
-                visited.remove(&key);
-                return Ok(vec![]);
-            }
-        };
-
         let mut all_methods = Vec::new();
-
-        // First, recursively get methods from this class's base classes
-        for base_class in &base_info.base_classes {
-            all_methods.extend(self.get_base_class_methods_impl(
-                base_class,
-                module_resolver,
-                visited,
-            )?);
+        if let Some(base_info) = self.load_base_class(resolved, module_resolver)? {
+            // First collect inherited methods, then this class's own methods.
+            for base_class in &base_info.base_classes {
+                all_methods.extend(self.get_base_class_methods(
+                    base_class,
+                    module_resolver,
+                    visited,
+                )?);
+            }
+            all_methods.extend(base_info.test_methods.clone());
         }
-
-        // Then add this class's own methods
-        all_methods.extend(base_info.test_methods.clone());
 
         // Remove from visited after processing to allow sibling branches in diamond
         // inheritance patterns to revisit this class without false cycle detection
@@ -445,8 +423,7 @@ impl SemanticTestDiscovery {
         module_resolver: &mut ModuleResolver,
     ) -> CollectionResult<()> {
         // Check if we've already loaded this module
-        let cache_key = (module_path.to_vec(), String::new());
-        if self.class_cache.contains_key(&cache_key) {
+        if self.loaded_modules.contains(module_path) {
             return Ok(());
         }
 
@@ -479,16 +456,7 @@ impl SemanticTestDiscovery {
         }
 
         // Mark module as loaded
-        self.class_cache.insert(
-            cache_key,
-            Rc::new(TestClassInfo {
-                name: String::new(),
-                has_init: false,
-                test_methods: vec![],
-                base_classes: vec![],
-                class_specs: MethodCasesInfo::NotDecorated,
-            }),
-        );
+        self.loaded_modules.insert(module_path.to_vec());
 
         Ok(())
     }

@@ -3,6 +3,29 @@
 use std::path::Path;
 use std::process::Command;
 
+pub(crate) fn pytest_command(
+    program: &str,
+    initial_args: &[String],
+    test_nodes: &[String],
+    pytest_args: &[String],
+    working_dir: Option<&Path>,
+    env_vars: &[(String, String)],
+) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(initial_args)
+        .envs(env_vars.iter().map(|(key, value)| (key, value)));
+
+    // Keep pytest from searching parent directories for configuration, including
+    // protected system directories on Windows.
+    if let Some(dir) = working_dir {
+        command.current_dir(dir).arg("--rootdir").arg(dir);
+    }
+
+    command.args(test_nodes).args(pytest_args);
+    command
+}
+
 /// Executes pytest with the given program, initial arguments, collected test nodes, and additional pytest arguments.
 ///
 /// # Arguments
@@ -23,22 +46,16 @@ pub fn execute_tests(
     working_dir: Option<&Path>,
     env_vars: &[(String, String)],
 ) -> i32 {
-    let mut run_cmd = Command::new(program);
-    run_cmd.args(initial_args);
-
-    // Set environment variables
-    run_cmd.envs(env_vars.iter().map(|(key, value)| (key, value)));
-
-    if let Some(dir) = working_dir {
-        run_cmd.current_dir(dir);
-        run_cmd.arg("--rootdir");
-        run_cmd.arg(dir);
-    }
-
-    run_cmd.args(test_nodes);
-    run_cmd.args(pytest_args);
-
-    let run_status = match run_cmd.status() {
+    let run_status = match pytest_command(
+        program,
+        initial_args,
+        &test_nodes,
+        &pytest_args,
+        working_dir,
+        env_vars,
+    )
+    .status()
+    {
         Ok(status) => status,
         Err(e) => {
             log::error!("Failed to execute pytest command: {e}");

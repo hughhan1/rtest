@@ -139,12 +139,13 @@ fn path_to_module_path(file_path: &Path, root_path: &Path) -> Vec<String> {
 
             // Strip .py extension from the last component
             if Some(component) == last_component {
-                if let Some(without_ext) = name_str.strip_suffix(".py") {
-                    if without_ext != "__init__" {
-                        parts.push(without_ext.to_string());
-                    }
-                } else {
-                    parts.push(name_str.to_string());
+                if name_str != "__init__.py" {
+                    parts.push(
+                        name_str
+                            .strip_suffix(".py")
+                            .unwrap_or(&name_str)
+                            .to_string(),
+                    );
                 }
             } else {
                 parts.push(name_str.to_string());
