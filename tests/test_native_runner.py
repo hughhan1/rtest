@@ -60,6 +60,31 @@ def run_worker(test_file: Path, root: Path, output_file: Path) -> list[WorkerRes
 class TestParametrizeIntegration:
     """Integration tests for parametrize functionality."""
 
+    def test_partial_and_extra_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            test_file = root / "test_ids.py"
+            test_file.write_text(
+                "import rtest\n"
+                "@rtest.mark.cases('x', [1, 1, 2], ids=['1'])\n"
+                "def test_partial(x): assert x > 0\n"
+                "@rtest.mark.cases('x', [1], ids=['used', 'unused'])\n"
+                "def test_extra(x): assert x == 1\n"
+                "@rtest.mark.cases('x', [3], ids=[])\n"
+                "def test_empty_ids(x): assert x == 3\n"
+                "@rtest.mark.cases('x', [], ids=['unused'])\n"
+                "def test_no_values(x): assert False\n"
+            )
+            results = run_worker(test_file, root, root / "results.jsonl")
+            assert [result["nodeid"] for result in results] == [
+                "test_ids.py::test_empty_ids[3]",
+                "test_ids.py::test_extra[used]",
+                "test_ids.py::test_partial[1]",
+                "test_ids.py::test_partial[1_1]",
+                "test_ids.py::test_partial[2]",
+            ]
+            assert all(result["outcome"] == "passed" for result in results)
+
     def test_single_param_generates_correct_nodeids(self) -> None:
         """Single @parametrize generates correct number of test cases."""
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -184,13 +184,8 @@ def _expand_single_spec(spec: ParametrizeSpec) -> list[ExpandedCase]:
     argvalues = spec.argvalues
     num_args = len(argnames)
 
-    raw_ids: list[str] = []
-    for i, value in enumerate(argvalues):
-        if spec.ids is not None and i < len(spec.ids):
-            raw_ids.append(spec.ids[i])
-        else:
-            # Generate value-based ID
-            raw_ids.append(_value_to_id_string(value))
+    raw_ids = list(spec.ids or ())[: len(argvalues)]
+    raw_ids.extend(_value_to_id_string(value) for value in argvalues[len(raw_ids) :])
 
     unique_ids = _deduplicate_ids(raw_ids)
 
@@ -216,16 +211,9 @@ def _expand_single_spec(spec: ParametrizeSpec) -> list[ExpandedCase]:
 
 
 def _extract_pytest_marker_args(mark_args: tuple[object, ...]) -> PytestMarkerArgs:
-    """Extract argnames and argvalues from pytest marker args.
-
-    Returns:
-        PytestMarkerArgs with defaults for missing values.
-    """
-    if len(mark_args) >= 2:
-        return PytestMarkerArgs(mark_args[0], mark_args[1])
-    elif len(mark_args) == 1:
-        return PytestMarkerArgs(mark_args[0], [])
-    return PytestMarkerArgs("", [])
+    """Extract argnames and argvalues, with defaults for missing marker arguments."""
+    args_iter = iter(mark_args)
+    return PytestMarkerArgs(next(args_iter, ""), next(args_iter, []))
 
 
 def _get_parametrize_specs(func: FunctionType) -> list[ParametrizeSpec]:

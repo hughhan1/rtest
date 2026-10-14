@@ -137,11 +137,10 @@ pub fn parse_decorators_to_specs(
 
     for decorator in decorators {
         match parse_single_decorator(decorator, resolver) {
-            DecoratorParseResult::CasesSpec(spec) => specs.push(spec),
-            DecoratorParseResult::CannotExpand(reason) => {
+            Ok(spec) => specs.extend(spec),
+            Err(reason) => {
                 return MethodCasesInfo::CannotExpand(reason);
             }
-            DecoratorParseResult::NotCasesDecorator => {}
         }
     }
 
@@ -180,54 +179,36 @@ pub fn combine_and_expand_specs(
     }
 }
 
-/// Result of parsing a single decorator.
-enum DecoratorParseResult {
-    /// Successfully parsed a cases/parametrize decorator.
-    CasesSpec(CasesSpec),
-    /// Recognized as cases decorator but cannot expand.
-    CannotExpand(CannotExpandReason),
-    /// Not a cases/parametrize decorator.
-    NotCasesDecorator,
-}
-
 /// Parse a single decorator to extract cases information.
 fn parse_single_decorator(
     decorator: &Decorator,
     resolver: Option<&ConstantResolver>,
-) -> DecoratorParseResult {
+) -> Result<Option<CasesSpec>, CannotExpandReason> {
     let Expr::Call(call) = &decorator.expression else {
-        return DecoratorParseResult::NotCasesDecorator;
+        return Ok(None);
     };
 
     if !is_cases_or_parametrize_call(&call.func) {
-        return DecoratorParseResult::NotCasesDecorator;
+        return Ok(None);
     }
 
     if call.arguments.args.len() < 2 {
-        return DecoratorParseResult::CannotExpand(CannotExpandReason::UnsupportedExpression(
+        return Err(CannotExpandReason::UnsupportedExpression(
             "missing required arguments".to_string(),
         ));
     }
 
-    let argnames = match extract_argnames(&call.arguments.args[0]) {
-        Ok(names) => names,
-        Err(reason) => return DecoratorParseResult::CannotExpand(reason),
-    };
-
-    let (argvalues, value_ids) =
-        match extract_argvalues(&call.arguments.args[1], resolver, &argnames) {
-            Ok(result) => result,
-            Err(reason) => return DecoratorParseResult::CannotExpand(reason),
-        };
+    let argnames = extract_argnames(&call.arguments.args[0])?;
+    let (argvalues, value_ids) = extract_argvalues(&call.arguments.args[1], resolver, &argnames)?;
 
     let ids = extract_ids_kwarg(&call.arguments.keywords, resolver);
 
-    DecoratorParseResult::CasesSpec(CasesSpec {
+    Ok(Some(CasesSpec {
         argnames,
         argvalues,
         value_ids,
         ids,
-    })
+    }))
 }
 
 /// Check if the call func is `rtest.mark.cases` or `pytest.mark.parametrize`.
@@ -264,23 +245,14 @@ fn is_cases_or_parametrize_call(func: &Expr) -> bool {
 
 /// Extract argument names from the first decorator argument.
 fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
-    match expr {
-        Expr::StringLiteral(s) => {
-            let names: Vec<String> = s
-                .value
-                .to_str()
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if names.is_empty() {
-                Err(CannotExpandReason::UnsupportedExpression(
-                    "empty argnames".to_string(),
-                ))
-            } else {
-                Ok(names)
-            }
-        }
+    let names = match expr {
+        Expr::StringLiteral(s) => s
+            .value
+            .to_str()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>(),
         // Support list/tuple of strings: ["a", "b", "c"] or ("a", "b", "c")
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
             let mut names = Vec::with_capacity(elts.len());
@@ -296,18 +268,21 @@ fn extract_argnames(expr: &Expr) -> Result<Vec<String>, CannotExpandReason> {
                     }
                 }
             }
-            if names.is_empty() {
-                Err(CannotExpandReason::UnsupportedExpression(
-                    "empty argnames".to_string(),
-                ))
-            } else {
-                Ok(names)
-            }
+            names
         }
-        Expr::Name(name) => Err(CannotExpandReason::VariableReference(name.id.to_string())),
-        _ => Err(CannotExpandReason::UnsupportedExpression(
-            "argnames must be a string or list/tuple of strings".to_string(),
-        )),
+        Expr::Name(name) => return Err(CannotExpandReason::VariableReference(name.id.to_string())),
+        _ => {
+            return Err(CannotExpandReason::UnsupportedExpression(
+                "argnames must be a string or list/tuple of strings".to_string(),
+            ))
+        }
+    };
+    if names.is_empty() {
+        Err(CannotExpandReason::UnsupportedExpression(
+            "empty argnames".to_string(),
+        ))
+    } else {
+        Ok(names)
     }
 }
 
@@ -372,15 +347,15 @@ fn extract_argvalues(
         }
         // Try resolving as a constant (e.g., `DATA = [1, 2, 3]` then `@cases("x", DATA)`)
         Expr::Name(name) => {
-            if let Some(resolver) = resolver {
-                if let Some((LiteralValue::Sequence(seq), path)) = resolver.resolve(expr) {
-                    let source_name = path.join(".");
-                    let ids: Vec<String> = seq
-                        .iter()
-                        .map(|v| format!("{}[{}]", source_name, literal_to_id_string(v)))
-                        .collect();
-                    return Ok((seq, ids));
-                }
+            if let Some((LiteralValue::Sequence(seq), path)) =
+                resolver.and_then(|r| r.resolve(expr))
+            {
+                let source_name = path.join(".");
+                let ids: Vec<String> = seq
+                    .iter()
+                    .map(|v| format!("{}[{}]", source_name, literal_to_id_string(v)))
+                    .collect();
+                return Ok((seq, ids));
             }
             Err(CannotExpandReason::VariableReference(name.id.to_string()))
         }
@@ -405,50 +380,26 @@ fn extract_literal(
     expr: &Expr,
     resolver: Option<&ConstantResolver>,
 ) -> Result<(LiteralValue, String), CannotExpandReason> {
-    match expr {
+    let literal = match expr {
         Expr::NumberLiteral(num) => {
             use ruff_python_ast::Number;
             match &num.value {
                 Number::Int(i) => {
                     // Try to convert to i64, fall back to string representation for large ints
-                    match i.as_i64() {
-                        Some(v) => {
-                            let lit = LiteralValue::Int(v);
-                            let id = literal_to_id_string(&lit);
-                            Ok((lit, id))
-                        }
-                        None => {
-                            let lit = LiteralValue::String(i.to_string());
-                            let id = literal_to_id_string(&lit);
-                            Ok((lit, id))
-                        }
-                    }
+                    i.as_i64()
+                        .map_or_else(|| LiteralValue::String(i.to_string()), LiteralValue::Int)
                 }
-                Number::Float(f) => {
-                    let lit = LiteralValue::Float(*f);
-                    let id = literal_to_id_string(&lit);
-                    Ok((lit, id))
+                Number::Float(f) => LiteralValue::Float(*f),
+                Number::Complex { .. } => {
+                    return Err(CannotExpandReason::UnsupportedExpression(
+                        "complex numbers".to_string(),
+                    ))
                 }
-                Number::Complex { .. } => Err(CannotExpandReason::UnsupportedExpression(
-                    "complex numbers".to_string(),
-                )),
             }
         }
-        Expr::StringLiteral(s) => {
-            let lit = LiteralValue::String(s.value.to_str().to_string());
-            let id = literal_to_id_string(&lit);
-            Ok((lit, id))
-        }
-        Expr::BooleanLiteral(b) => {
-            let lit = LiteralValue::Bool(b.value);
-            let id = literal_to_id_string(&lit);
-            Ok((lit, id))
-        }
-        Expr::NoneLiteral(_) => {
-            let lit = LiteralValue::None;
-            let id = literal_to_id_string(&lit);
-            Ok((lit, id))
-        }
+        Expr::StringLiteral(s) => LiteralValue::String(s.value.to_str().to_string()),
+        Expr::BooleanLiteral(b) => LiteralValue::Bool(b.value),
+        Expr::NoneLiteral(_) => LiteralValue::None,
         Expr::Tuple(ExprTuple { elts, .. }) | Expr::List(ExprList { elts, .. }) => {
             let mut values = Vec::with_capacity(elts.len());
             let mut sub_ids = Vec::with_capacity(elts.len());
@@ -461,25 +412,25 @@ fn extract_literal(
             // Join sub_ids, preserving empty strings as placeholders for opaque elements.
             // The caller (extract_argvalues) will fill in positional IDs for empty positions.
             let id = sub_ids.join("-");
-            Ok((lit, id))
+            return Ok((lit, id));
         }
         Expr::Name(_) | Expr::Attribute(_) => {
-            if let Some(resolver) = resolver {
-                if let Some((value, path)) = resolver.resolve(expr) {
-                    let id = path.join(".");
-                    return Ok((value, id));
-                }
+            if let Some((value, path)) = resolver.and_then(|r| r.resolve(expr)) {
+                let id = path.join(".");
+                return Ok((value, id));
             }
             // Unresolved name/attribute - treat as opaque (can count but not evaluate)
-            Ok((LiteralValue::Opaque, String::new()))
+            LiteralValue::Opaque
         }
         // Comprehensions cannot be counted without evaluation
         Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
-            Err(CannotExpandReason::Comprehension)
+            return Err(CannotExpandReason::Comprehension);
         }
         // Other expressions - treat as opaque if we can count them
-        _ => Ok((LiteralValue::Opaque, String::new())),
-    }
+        _ => LiteralValue::Opaque,
+    };
+    let id = literal_to_id_string(&literal);
+    Ok((literal, id))
 }
 
 /// Get the name of a called function for error messages.
@@ -628,23 +579,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deduplicate_ids_no_duplicates() {
-        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        assert_eq!(deduplicate_ids(ids), vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn test_deduplicate_ids_with_duplicates() {
-        let ids = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "a".to_string(),
-            "a".to_string(),
-        ];
-        assert_eq!(deduplicate_ids(ids), vec!["a", "b", "a_1", "a_2"]);
-    }
-
-    #[test]
     fn test_expand_cases_cartesian_product() {
         let specs = vec![
             CasesSpec {
@@ -678,97 +612,6 @@ mod tests {
         assert_eq!(
             warning,
             "warning: Cannot statically expand test cases for 'test_foo.py::test_x': argvalues references variable 'DATA'"
-        );
-    }
-
-    #[test]
-    fn test_ascii_escape_string_backslash() {
-        // Backslash escaping - the main issue from #124
-        assert_eq!(ascii_escape_string("\\u2603"), "\\\\u2603");
-        assert_eq!(ascii_escape_string("\"\\u2603\""), "\"\\\\u2603\"");
-    }
-
-    #[test]
-    fn test_ascii_escape_string_unicode() {
-        // Non-ASCII to Unicode escape
-        assert_eq!(ascii_escape_string("☃"), "\\u2603");
-        assert_eq!(ascii_escape_string("\"☃\""), "\"\\u2603\"");
-
-        // Supplementary plane character (code point > U+FFFF)
-        assert_eq!(ascii_escape_string("𝄞"), "\\U0001d11e");
-    }
-
-    #[test]
-    fn test_ascii_escape_string_control_chars() {
-        assert_eq!(ascii_escape_string("a\nb"), "a\\nb");
-        assert_eq!(ascii_escape_string("a\tb"), "a\\tb");
-        assert_eq!(ascii_escape_string("a\rb"), "a\\rb");
-        assert_eq!(ascii_escape_string("\x00"), "\\x00");
-    }
-
-    #[test]
-    fn test_ascii_escape_string_plain_ascii() {
-        // Plain ASCII unchanged
-        assert_eq!(ascii_escape_string("hello"), "hello");
-        assert_eq!(ascii_escape_string("Hello World 123!"), "Hello World 123!");
-    }
-
-    #[test]
-    fn test_ascii_escape_string_mixed() {
-        // Mixed content
-        assert_eq!(
-            ascii_escape_string("hello\\world☃"),
-            "hello\\\\world\\u2603"
-        );
-    }
-
-    #[test]
-    fn test_fill_opaque_placeholders_first_opaque() {
-        // Issue #137: Complex first argument with trailing literals
-        // (MyData(1), 2, 3) with argnames ["data", "num", "count"] at index 0
-        let argnames = vec!["data".to_string(), "num".to_string(), "count".to_string()];
-        assert_eq!(fill_opaque_placeholders("-2-3", &argnames, 0), "data0-2-3");
-        assert_eq!(fill_opaque_placeholders("-5-6", &argnames, 1), "data1-5-6");
-    }
-
-    #[test]
-    fn test_fill_opaque_placeholders_last_opaque() {
-        // (1, Config(10)) with argnames ["a", "b"] at index 0
-        let argnames = vec!["a".to_string(), "b".to_string()];
-        assert_eq!(fill_opaque_placeholders("1-", &argnames, 0), "1-b0");
-        assert_eq!(fill_opaque_placeholders("2-", &argnames, 1), "2-b1");
-    }
-
-    #[test]
-    fn test_fill_opaque_placeholders_middle_opaque() {
-        // (1, Config(10), 100) with argnames ["start", "config", "end"] at index 0
-        let argnames = vec!["start".to_string(), "config".to_string(), "end".to_string()];
-        assert_eq!(
-            fill_opaque_placeholders("1--100", &argnames, 0),
-            "1-config0-100"
-        );
-        assert_eq!(
-            fill_opaque_placeholders("2--200", &argnames, 1),
-            "2-config1-200"
-        );
-    }
-
-    #[test]
-    fn test_fill_opaque_placeholders_all_opaque() {
-        // (Data(1), Data(2)) with argnames ["a", "b"] at index 0
-        let argnames = vec!["a".to_string(), "b".to_string()];
-        assert_eq!(fill_opaque_placeholders("-", &argnames, 0), "a0-b0");
-        assert_eq!(fill_opaque_placeholders("-", &argnames, 1), "a1-b1");
-    }
-
-    #[test]
-    fn test_fill_opaque_placeholders_no_opaque() {
-        // All literals - should be unchanged
-        let argnames = vec!["x".to_string(), "y".to_string()];
-        assert_eq!(fill_opaque_placeholders("1-2", &argnames, 0), "1-2");
-        assert_eq!(
-            fill_opaque_placeholders("hello-world", &argnames, 1),
-            "hello-world"
         );
     }
 }

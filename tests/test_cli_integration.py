@@ -5,6 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import rtest
 from rtest.exit_code import ExitCodeValues
 
 
@@ -114,3 +115,41 @@ class TestNativeRunnerEndToEnd:
             )
             assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "ModuleNotFoundError" in result.stdout
+
+
+class TestPytestEnvironment:
+    """Environment options reach both sequential and parallel pytest processes."""
+
+    @rtest.mark.cases("workers", [1, 2])
+    def test_environment_values_and_invalid_option_warning(self, workers: int) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            (tmp_path / "test_env.py").write_text(
+                "import os\n"
+                "def test_value(): assert os.environ['RTEST_VALUE'] == 'a=b'\n"
+                "def test_empty(): assert os.environ['RTEST_EMPTY'] == ''\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "rtest",
+                    "--runner",
+                    "pytest",
+                    "-n",
+                    str(workers),
+                    "--env",
+                    "RTEST_VALUE=old",
+                    "--env",
+                    "RTEST_VALUE=a=b",
+                    "--env",
+                    "RTEST_EMPTY=",
+                    "--env",
+                    "INVALID_NO_EQUALS",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=tmp_path,
+            )
+            assert result.returncode == ExitCodeValues.OK, result.stdout + result.stderr
+            assert result.stderr.count("Warning: Invalid environment variable format: INVALID_NO_EQUALS") == 1

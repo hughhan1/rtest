@@ -1,31 +1,17 @@
 //! AST visitor for discovering tests in Python code.
 
 use crate::python_discovery::{
-    cases::{
-        combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs,
-        MethodCasesInfo,
-    },
+    cases::{combine_and_expand_specs, parse_decorators_for_cases, parse_decorators_to_specs},
     constant_resolver::ConstantResolver,
-    discovery::{class_has_init, TestDiscoveryConfig, TestInfo},
+    discovery::{class_has_init, collect_test_methods, TestDiscoveryConfig, TestInfo},
+    semantic_analyzer::TestMethodInfo,
 };
 use ruff_python_ast::{Expr, ModModule, Stmt, StmtClassDef, StmtFunctionDef};
 use std::collections::{HashMap, HashSet};
 
-/// Cached information about a test method for inheritance resolution.
-///
-/// Stores method-level specs (not expanded) so they can be combined with
-/// child class decorators during inheritance.
-#[derive(Clone)]
-struct CachedMethodInfo {
-    name: String,
-    line: usize,
-    /// Method-level decorator specs (not yet combined with class decorators)
-    method_specs: MethodCasesInfo,
-}
-
 /// Cached information about a test class.
 struct CachedClassInfo {
-    methods: Vec<CachedMethodInfo>,
+    methods: Vec<TestMethodInfo>,
     has_init: bool,
 }
 
@@ -71,37 +57,13 @@ impl TestDiscoveryVisitor {
                 if self.config.is_test_class(name) {
                     let has_init = class_has_init(class);
 
-                    let methods = self.collect_test_methods(class, resolver);
+                    let methods = collect_test_methods(class, &self.config, resolver);
 
                     self.class_cache
                         .insert(name.to_string(), CachedClassInfo { methods, has_init });
                 }
             }
         }
-    }
-
-    fn collect_test_methods(
-        &self,
-        class: &StmtClassDef,
-        resolver: &ConstantResolver,
-    ) -> Vec<CachedMethodInfo> {
-        let mut methods = Vec::new();
-        for stmt in &class.body {
-            if let Stmt::FunctionDef(func) = stmt {
-                let name = func.name.as_str();
-                if self.config.is_test_function(name) {
-                    methods.push(CachedMethodInfo {
-                        name: name.to_string(),
-                        line: func.range.start().to_u32() as usize,
-                        method_specs: parse_decorators_to_specs(
-                            &func.decorator_list,
-                            Some(resolver),
-                        ),
-                    });
-                }
-            }
-        }
-        methods
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt, resolver: &ConstantResolver) {
@@ -140,44 +102,20 @@ impl TestDiscoveryVisitor {
         // Parse class-level decorators once
         let class_specs = parse_decorators_to_specs(&class.decorator_list, Some(resolver));
 
-        let own_methods = self.collect_test_methods(class, resolver);
+        let own_methods = collect_test_methods(class, &self.config, resolver);
         let own_method_names: HashSet<&str> = own_methods
             .iter()
             .map(|method| method.name.as_str())
             .collect();
 
-        // First, collect inherited methods from base classes
-        if let Some(arguments) = &class.arguments {
-            for base_expr in arguments.args.iter() {
-                if let Expr::Name(base_name) = base_expr {
-                    let base_class_name = base_name.id.as_str();
+        let inherited_methods: Vec<_> = self
+            .base_classes(class)
+            .flat_map(|parent| &parent.methods)
+            .filter(|method| !own_method_names.contains(method.name.as_str()))
+            .cloned()
+            .collect();
 
-                    if let Some(parent_info) = self.class_cache.get(base_class_name) {
-                        for parent_method in &parent_info.methods {
-                            // Skip if this method is overridden in the child class
-                            if own_method_names.contains(parent_method.name.as_str()) {
-                                continue;
-                            }
-
-                            // Combine CHILD class specs with PARENT method specs
-                            // This is the key fix: inherited methods get the child's class decorators
-                            let cases_expansion =
-                                combine_and_expand_specs(&class_specs, &parent_method.method_specs);
-
-                            self.tests.push(TestInfo {
-                                name: parent_method.name.clone(),
-                                line: parent_method.line,
-                                is_method: true,
-                                class_name: Some(class_name.into()),
-                                cases_expansion,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        for method in own_methods {
+        for method in inherited_methods.into_iter().chain(own_methods) {
             let cases_expansion = combine_and_expand_specs(&class_specs, &method.method_specs);
             self.tests.push(TestInfo {
                 name: method.name,
@@ -191,24 +129,20 @@ impl TestDiscoveryVisitor {
 
     /// Check if a class should be skipped (has __init__ or inherits from class with __init__)
     fn should_skip_class(&self, class: &StmtClassDef) -> bool {
-        if class_has_init(class) {
-            return true;
-        }
+        class_has_init(class) || self.base_classes(class).any(|parent| parent.has_init)
+    }
 
-        // Check parent classes for __init__
-        if let Some(arguments) = &class.arguments {
-            for base_expr in arguments.args.iter() {
-                if let Expr::Name(base_name) = base_expr {
-                    let base_class_name = base_name.id.as_str();
-                    if let Some(parent_info) = self.class_cache.get(base_class_name) {
-                        if parent_info.has_init {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        false
+    fn base_classes<'a>(
+        &'a self,
+        class: &'a StmtClassDef,
+    ) -> impl Iterator<Item = &'a CachedClassInfo> {
+        class
+            .arguments
+            .iter()
+            .flat_map(|args| args.args.iter())
+            .filter_map(|base| match base {
+                Expr::Name(name) => self.class_cache.get(name.id.as_str()),
+                _ => None,
+            })
     }
 }

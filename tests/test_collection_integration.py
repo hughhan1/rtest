@@ -12,6 +12,7 @@ from test_helpers import (
     assert_patterns_not_found,
     assert_tests_found,
     create_test_project,
+    extract_test_lines,
     get_collected_count,
     run_collection,
 )
@@ -1714,6 +1715,35 @@ class TestCollectionIntegration(unittest.TestCase):
 
             assert_tests_found(result.output_lines, expected_patterns)
             self.assertIn("collected 3 items", result.output)
+
+    def test_literal_case_ids_and_duplicates(self) -> None:
+        values = ["same", "same", "\x00", "\n", "\t", "\r", "☃", "𝄞", "\\", 2**80, True, None]
+        files = {
+            "test_ids.py": (f"import rtest\n@rtest.mark.cases('value', {values!r})\ndef test_value(value): pass\n"),
+        }
+        with create_test_project(files) as project_path:
+            result = run_collection(project_path)
+            self.assertEqual(result.returncode, 0, result.output)
+            self.assertEqual(
+                extract_test_lines(result.output_lines),
+                [
+                    f"test_ids.py::test_value[{case_id}]"
+                    for case_id in [
+                        "same",
+                        "same_1",
+                        "\\x00",
+                        "\\n",
+                        "\\t",
+                        "\\r",
+                        "\\u2603",
+                        "\\U0001d11e",
+                        "\\\\",
+                        str(2**80),
+                        "True",
+                        "None",
+                    ]
+                ],
+            )
 
     def test_parametrize_unicode_escape_ids(self) -> None:
         """Test that unicode escape sequences in parametrize generate correct IDs (issue #124)."""

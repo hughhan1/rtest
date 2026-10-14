@@ -62,25 +62,25 @@ pub enum NumProcesses {
 
 impl Args {
     pub fn get_num_processes(&self) -> Result<Option<NumProcesses>, String> {
-        match &self.numprocesses {
-            None => Ok(None),
-            Some(s) => match s.as_str() {
-                "auto" => Ok(Some(NumProcesses::Auto)),
-                "logical" => Ok(Some(NumProcesses::Logical)),
-                _ => match s.parse::<usize>() {
-                    Ok(n) => Ok(Some(NumProcesses::Count(n))),
-                    Err(_) => Err(format!("Invalid number: {s}")),
-                },
-            },
-        }
+        self.numprocesses
+            .as_deref()
+            .map(|s| match s {
+                "auto" => Ok(NumProcesses::Auto),
+                "logical" => Ok(NumProcesses::Logical),
+                _ => s
+                    .parse()
+                    .map(NumProcesses::Count)
+                    .map_err(|_| format!("Invalid number: {s}")),
+            })
+            .transpose()
     }
 
     pub fn validate_dist(&self) -> Result<(), String> {
         // Use the FromStr implementation which has proper error handling
-        match self.dist.parse::<crate::scheduler::DistributionMode>() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        self.dist
+            .parse::<crate::scheduler::DistributionMode>()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 

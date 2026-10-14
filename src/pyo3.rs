@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use crate::cli::{exit_codes, Args, Runner};
 use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
+use crate::runner::{parse_env_vars, PytestRunner};
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
     default_python_functions, determine_worker_count, display_collection_results, execute_native,
@@ -32,12 +33,6 @@ fn handle_collection_error(e: CollectionError) -> ! {
     }
 }
 
-pub struct PytestRunner {
-    pub program: String,
-    pub initial_args: Vec<String>,
-    pub env_vars: Vec<(String, String)>,
-}
-
 impl PytestRunner {
     pub fn from_current_python(py: Python) -> Self {
         let initial_args = vec!["-m".to_string(), "pytest".to_string()];
@@ -53,17 +48,9 @@ impl PytestRunner {
         let mut runner = Self::from_current_python(py);
 
         // Parse environment variables from KEY=VALUE format
-        runner.env_vars = env_vars
-            .iter()
-            .filter_map(|env_str| {
-                if let Some((key, value)) = env_str.split_once('=') {
-                    Some((key.to_string(), value.to_string()))
-                } else {
-                    eprintln!("Warning: Invalid environment variable format: {}", env_str);
-                    None
-                }
-            })
-            .collect();
+        runner.env_vars = parse_env_vars(&env_vars, |env_str| {
+            eprintln!("Warning: Invalid environment variable format: {}", env_str);
+        });
 
         runner
     }
