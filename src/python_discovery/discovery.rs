@@ -88,7 +88,11 @@ pub(crate) fn collect_test_methods(
                 Some(TestMethodInfo {
                     name: func.name.to_string(),
                     line: func.range.start().to_u32() as usize,
-                    method_specs: parse_decorators_to_specs(&func.decorator_list, Some(resolver)),
+                    method_specs: parse_decorators_to_specs(
+                        &func.decorator_list,
+                        Some(resolver),
+                        Some(class.name.as_str()),
+                    ),
                 })
             }
             _ => None,

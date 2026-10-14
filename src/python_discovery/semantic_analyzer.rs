@@ -101,7 +101,8 @@ impl SemanticTestDiscovery {
         let ast_module = parsed.into_syntax();
 
         // Build constant resolver for this module
-        let resolver = ConstantResolver::from_module(&ast_module);
+        let resolver =
+            ConstantResolver::from_module_with_imports(&ast_module, &module_path, module_resolver);
 
         // First pass: collect imports
         let imports = self.collect_imports(&ast_module);
@@ -117,7 +118,7 @@ impl SemanticTestDiscovery {
             if let Stmt::FunctionDef(func) = stmt {
                 if self.config.is_test_function(func.name.as_str()) {
                     let cases_expansion =
-                        parse_decorators_for_cases(&func.decorator_list, Some(&resolver));
+                        parse_decorators_for_cases(&func.decorator_list, Some(&resolver), None);
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
                         line: func.range().start().to_u32() as usize,
@@ -231,7 +232,11 @@ impl SemanticTestDiscovery {
             name: class_def.name.to_string(),
             has_init: class_has_init(class_def),
             test_methods: collect_test_methods(class_def, &self.config, resolver),
-            class_specs: parse_decorators_to_specs(&class_def.decorator_list, Some(resolver)),
+            class_specs: parse_decorators_to_specs(
+                &class_def.decorator_list,
+                Some(resolver),
+                Some(class_def.name.as_str()),
+            ),
             base_classes: self.collect_base_class_names(class_def, module_path, imports)?,
         })
     }
@@ -427,10 +432,15 @@ impl SemanticTestDiscovery {
             return Ok(());
         }
 
+        let mut constant_loader = module_resolver.with_search_paths();
         match module_resolver.resolve_and_load(module_path) {
             Ok(parsed_module) => {
                 // Build resolver for constants in this external module
-                let external_resolver = ConstantResolver::from_module(&parsed_module.module);
+                let external_resolver = ConstantResolver::from_module_with_imports(
+                    &parsed_module.module,
+                    module_path,
+                    &mut constant_loader,
+                );
                 let imports = self.collect_imports(&parsed_module.module);
 
                 // Extract test class information without storing the module

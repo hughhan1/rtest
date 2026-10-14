@@ -77,7 +77,8 @@ impl TestDiscoveryVisitor {
     fn visit_function(&mut self, func: &StmtFunctionDef, resolver: &ConstantResolver) {
         let name = func.name.as_str();
         if self.config.is_test_function(name) {
-            let cases_expansion = parse_decorators_for_cases(&func.decorator_list, Some(resolver));
+            let cases_expansion =
+                parse_decorators_for_cases(&func.decorator_list, Some(resolver), None);
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
@@ -100,7 +101,8 @@ impl TestDiscoveryVisitor {
         }
 
         // Parse class-level decorators once
-        let class_specs = parse_decorators_to_specs(&class.decorator_list, Some(resolver));
+        let class_specs =
+            parse_decorators_to_specs(&class.decorator_list, Some(resolver), Some(class_name));
 
         let own_methods = collect_test_methods(class, &self.config, resolver);
         let own_method_names: HashSet<&str> = own_methods
