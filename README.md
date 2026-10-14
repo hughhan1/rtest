@@ -11,72 +11,15 @@ A Python test runner built with Rust, featuring high-performance test collection
 
 ## Performance
 
-`rtest` replaces pytest's import-heavy collection with static AST analysis, so it never needs to import test modules to
-discover tests. On smaller open-source projects this yields a 5-25x speedup; on large monorepos the advantage is far
-more dramatic (100-200x+) because import overhead scales with codebase size.
+`rtest` discovers tests through static AST analysis without importing test modules. CI measures collection on fixed
+Click, Flask, and Pydantic source revisions using a release build, 3 warmups, and 20 measured runs.
 
-### Test Collection (`--collect-only`)
+The [benchmark job](https://github.com/hughhan1/rtest/actions/workflows/ci.yml) publishes timings, collected test IDs,
+and raw Hyperfine reports. See [the benchmark guide](scripts/benchmark/README.md) to reproduce a run.
 
-Benchmarks performed using [hyperfine](https://github.com/sharkdp/hyperfine) with the following command:
-
-```bash
-hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
-  --command-name pytest --command-name rtest \
-  ".venv/bin/pytest --collect-only -q tests" \
-  ".venv/bin/rtest --collect-only tests"
-```
-
-| Repository | pytest | rtest | Speedup |
-|------------|--------|-------|---------|
-| **[Valon](https://github.com/valon-technologies/) monorepo** | **245 s ± 25 s** | **899 ms ± 25 ms** | **273x** |
-| [flask](https://github.com/pallets/flask) | 226 ms ± 5 ms | 34 ms ± 11 ms | **6.57x** |
-| [click](https://github.com/pallets/click) | 221 ms ± 10 ms | 38 ms ± 7 ms | **5.77x** |
-| [httpx](https://github.com/encode/httpx) | 344 ms ± 12 ms | 33 ms ± 4 ms | **10.6x** |
-| [pydantic](https://github.com/pydantic/pydantic) | 1.60 s ± 21 ms | 82 ms ± 13 ms | **19.5x** |
-| [fastapi](https://github.com/tiangolo/fastapi) | 1.59 s ± 20 ms | 62 ms ± 5 ms | **25.6x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 156 ms ± 5 ms | 29 ms ± 5 ms | **5.32x** |
-| [boltons](https://github.com/mahmoud/boltons) | 234 ms ± 7 ms | 35 ms ± 3 ms | **6.77x** |
-
-### Test Execution (`--runner native`)
-
-For repositories that don't rely on pytest fixtures or conftest.py, the native runner can execute tests directly:
-
-```bash
-hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
-  --command-name pytest --command-name rtest \
-  ".venv/bin/pytest tests" \
-  ".venv/bin/rtest --runner native tests"
-```
-
-| Repository | pytest | rtest | Speedup |
-|------------|--------|-------|---------|
-| [flask](https://github.com/pallets/flask) | 764 ms ± 15 ms | 205 ms ± 5 ms | **3.73x** |
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.90 s ± 194 ms | 1.34 s ± 185 ms | **6.64x** |
-
-> **Note**: Native runner execution benchmarks are limited to repositories that use simple test patterns (unittest.TestCase,
-> plain assertions) without pytest fixtures. Most real-world projects use fixtures and conftest.py, which require the
-> native runner's [fixtures support](https://github.com/hughhan1/rtest/issues/105) (in development).
-
-### Test Execution (`--runner pytest -n 4`)
-
-For repositories that use pytest fixtures and conftest.py, rtest can use pytest as the execution backend while still
-benefiting from fast Rust-based collection:
-
-```bash
-hyperfine --warmup 3 --min-runs 20 --max-runs 20 \
-  --command-name pytest --command-name rtest \
-  ".venv/bin/pytest -n 4 tests" \
-  ".venv/bin/rtest --runner pytest -n 4 tests"
-```
-
-| Repository | pytest | rtest | Speedup |
-|------------|--------|-------|---------|
-| [more-itertools](https://github.com/more-itertools/more-itertools) | 8.96 s ± 218 ms | 1.48 s ± 240 ms | **6.05x** |
-
-> **Note**: Earlier versions had limited `--runner pytest` benchmarks due to
-> [test ID generation differences](https://github.com/hughhan1/rtest/issues/124) between rtest and pytest for certain
-> parametrized values (e.g., escaped unicode strings, backslash escaping). This has been fixed. Some edge cases in
-> parametrized ID generation may still exist for complex or dynamic expressions.
+Static discovery and pytest's import-based collection perform different work and can discover different tests.
+The benchmark reports collection time only; it does not claim equivalent test coverage, execution speedups,
+or performance regressions across different CI machines.
 
 ## Quick Start
 

@@ -125,45 +125,11 @@ jobs:
     - name: Run clippy
       run: cargo clippy -p rtest --lib -- -D warnings
 
-  # Check if benchmarks should run (skip for docs-only changes)
-  benchmark-check:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Check for benchmark-relevant changes
-      id: check
-      run: |
-        if [ "${{ github.event_name }}" = "push" ]; then
-          # Always run on push to main
-          echo "should_run=true" >> $GITHUB_OUTPUT
-        else
-          # For PRs, check if relevant files changed
-          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
-
-          # Check if any relevant files changed
-          if echo "$CHANGED_FILES" | grep -qE '^(src/|python/|Cargo\.|pyproject\.toml|scripts/benchmark/)'; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "Benchmark-relevant files changed"
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-            echo "No benchmark-relevant files changed, skipping benchmarks"
-          fi
-        fi
-
-  # Setup job that builds wheel once for all benchmark jobs
-  benchmark-setup:
-    needs: benchmark-check
-    if: needs.benchmark-check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      hyperfine_runs: ${{ steps.set-config.outputs.hyperfine_runs }}
-      hyperfine_warmup: ${{ steps.set-config.outputs.hyperfine_warmup }}
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
     - uses: actions/checkout@v4
       with:
@@ -177,201 +143,30 @@ jobs:
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache Rust dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-benchmark-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install maturin
-      run: pip install maturin[patchelf]
-
-    - name: Build rtest wheel
-      run: maturin build --release --out dist/
-
-    - name: Upload wheel artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: rtest-wheel
-        path: dist/*.whl
-        retention-days: 1
-
-    - name: Set matrix from JSON file
-      id: set-matrix
-      run: |
-        matrix=$(cat scripts/benchmark/matrix.json)
-        echo "matrix=$matrix" >> $GITHUB_OUTPUT
-        echo "Repository matrix: $matrix"
-
-    - name: Set benchmark configuration
-      id: set-config
-      run: |
-        # Use fewer runs for PRs (faster feedback), more for main (precise baseline)
-        if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-          echo "hyperfine_runs=20" >> $GITHUB_OUTPUT
-          echo "hyperfine_warmup=3" >> $GITHUB_OUTPUT
-        else
-          echo "hyperfine_runs=5" >> $GITHUB_OUTPUT
-          echo "hyperfine_warmup=1" >> $GITHUB_OUTPUT
-        fi
-
-  # Parallel benchmark jobs
-  benchmark:
-    needs: benchmark-setup
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.benchmark-setup.outputs.matrix) }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.14'
-
     - name: Install uv
       uses: astral-sh/setup-uv@v3
 
     - name: Install hyperfine
-      uses: taiki-e/install-action@hyperfine
-
-    - name: Download rtest wheel
-      uses: actions/download-artifact@v4
+      uses: taiki-e/install-action@v2
       with:
-        name: rtest-wheel
-        path: dist/
+        tool: hyperfine@1.20.0
 
-    - name: Install dependencies
-      run: uv sync --dev
-
-    - name: Run benchmark for ${{ matrix.repository }}
-      env:
-        HYPERFINE_MIN_RUNS: ${{ needs.benchmark-setup.outputs.hyperfine_runs }}
-        HYPERFINE_MAX_RUNS: ${{ needs.benchmark-setup.outputs.hyperfine_runs }}
-        HYPERFINE_WARMUP: ${{ needs.benchmark-setup.outputs.hyperfine_warmup }}
+    - name: Build release rtest
       run: |
-        # Find the wheel file
-        WHEEL_PATH=$(ls dist/*.whl | head -1)
-        uv run python scripts/benchmark/benchmark_repositories.py \
-          --source "wheel:$WHEEL_PATH" \
-          --repositories ${{ matrix.repository }}
+        uv sync --locked --no-install-project
+        uv run --no-sync maturin develop --release
 
-    - name: Upload results
+    - name: Benchmark static collection
+      run: uv run --no-sync python scripts/benchmark/benchmark_repositories.py
+
+    - name: Publish benchmark summary
+      run: cat dist/benchmarks/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload benchmark reports
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: benchmark-results-${{ matrix.repository }}
-        path: /tmp/rtest_benchmark_results_*/
+        name: benchmark-results
+        path: dist/benchmarks/
+        if-no-files-found: error
         retention-days: 7
-
-  # Aggregate results and compare
-  benchmark-summary:
-    needs: [benchmark-setup, benchmark]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    outputs:
-      has_regressions: ${{ steps.compare.outputs.has_regressions }}
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.14'
-
-    - name: Download all results
-      uses: actions/download-artifact@v4
-      with:
-        pattern: benchmark-results-*
-        path: all-results
-
-    - name: Aggregate results
-      id: aggregate
-      run: |
-        # Aggregate all JSON files into a single array
-        python3 scripts/benchmark/aggregate_results.py all-results/ aggregated-results.json | tee aggregate-output.txt
-
-        # Save to step summary
-        echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        cat aggregate-output.txt >> $GITHUB_STEP_SUMMARY
-
-    # Upload baseline when on main branch
-    - name: Upload baseline artifact
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/upload-artifact@v4
-      with:
-        name: benchmark-baseline-main
-        path: aggregated-results.json
-        retention-days: 90
-
-    # Download and compare with baseline when on PR
-    - name: Download baseline for comparison
-      id: download-baseline
-      if: github.event_name == 'pull_request'
-      uses: dawidd6/action-download-artifact@v6
-      with:
-        workflow: ci.yml
-        branch: main
-        name: benchmark-baseline-main
-        path: baseline
-        if_no_artifact_found: warn
-      continue-on-error: true
-
-    - name: Compare with baseline
-      id: compare
-      if: github.event_name == 'pull_request'
-      run: |
-        if [ -f baseline/aggregated-results.json ]; then
-          # Run comparison and capture output (disable errexit to capture exit code)
-          set +e
-          python3 scripts/benchmark/compare_results.py \
-            baseline/aggregated-results.json \
-            aggregated-results.json \
-            --output-file comparison-report.md \
-            --exit-code-on-regression > comparison-output.txt 2>&1
-          exit_code=$?
-          set -e
-
-          # Save report
-          cat comparison-output.txt | tee -a $GITHUB_STEP_SUMMARY
-
-          if [ $exit_code -ne 0 ]; then
-            echo "has_regressions=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_regressions=false" >> $GITHUB_OUTPUT
-          fi
-        else
-          echo "No baseline found for comparison" | tee -a $GITHUB_STEP_SUMMARY
-          echo "has_regressions=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Post PR comment with results
-      if: github.event_name == 'pull_request' && always()
-      uses: peter-evans/create-or-update-comment@v4
-      with:
-        issue-number: ${{ github.event.pull_request.number }}
-        body-path: comparison-report.md
-      continue-on-error: true
-
-  # Gate on benchmark regressions
-  benchmark-gate:
-    needs: [benchmark-check, benchmark-summary]
-    if: always() && needs.benchmark-check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
-    steps:
-    - name: Check for regressions
-      run: |
-        if [ "${{ needs.benchmark-summary.outputs.has_regressions }}" = "true" ]; then
-          echo "::warning::Performance regressions detected! Please review the benchmark results."
-          # Uncomment the next line to fail CI on regressions
-          # exit 1
-        else
-          echo "No performance regressions detected."
-        fi
