@@ -3,7 +3,8 @@
 //! This module extracts test case information from decorator AST nodes and expands
 //! parametrized tests into individual test cases during collection.
 
-use ruff_python_ast::{Decorator, Expr, ExprAttribute, ExprList, ExprName, ExprTuple, Keyword};
+use ruff_python_ast::name::UnqualifiedName;
+use ruff_python_ast::{Decorator, Expr, ExprList, ExprTuple, Keyword};
 
 use super::constant_resolver::ConstantResolver;
 
@@ -213,34 +214,13 @@ fn parse_single_decorator(
 
 /// Check if the call func is `rtest.mark.cases` or `pytest.mark.parametrize`.
 fn is_cases_or_parametrize_call(func: &Expr) -> bool {
-    let Expr::Attribute(ExprAttribute { attr, value, .. }) = func else {
+    let Some(name) = UnqualifiedName::from_expr(func) else {
         return false;
     };
-
-    let decorator_name = attr.as_str();
-    let Expr::Attribute(ExprAttribute {
-        attr: mark_attr,
-        value: module_value,
-        ..
-    }) = value.as_ref()
-    else {
-        return false;
-    };
-
-    if mark_attr.as_str() != "mark" {
-        return false;
-    }
-
-    let Expr::Name(ExprName {
-        id: module_name, ..
-    }) = module_value.as_ref()
-    else {
-        return false;
-    };
-
-    let module = module_name.as_str();
-    (module == "rtest" && decorator_name == "cases")
-        || (module == "pytest" && decorator_name == "parametrize")
+    matches!(
+        name.segments(),
+        ["rtest", "mark", "cases"] | ["pytest", "mark", "parametrize"]
+    )
 }
 
 /// Extract argument names from the first decorator argument.
@@ -577,6 +557,30 @@ fn deduplicate_ids(ids: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decorator_names() {
+        for (source, expected) in [
+            ("rtest.mark.cases", true),
+            ("pytest.mark.parametrize", true),
+            ("pytest.mark.cases", false),
+            ("rtest.mark.parametrize", false),
+            ("other.mark.parametrize", false),
+            ("pkg.pytest.mark.parametrize", false),
+            ("pytest.parametrize", false),
+            ("parametrize", false),
+            ("factory().mark.parametrize", false),
+        ] {
+            let expression = ruff_python_parser::parse_expression(source)
+                .expect("valid expression")
+                .into_expr();
+            assert_eq!(
+                is_cases_or_parametrize_call(&expression),
+                expected,
+                "{source}"
+            );
+        }
+    }
 
     #[test]
     fn test_expand_cases_cartesian_product() {
