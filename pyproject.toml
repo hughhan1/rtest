@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "maturin>=1.0,<2.0",
-    "maturin[patchelf]>=1.0,<2.0; sys_platform != 'win32'"
+    "maturin>=1.15.0,<2.0",
+    "maturin[patchelf]>=1.15.0,<2.0; sys_platform != 'win32'"
 ]
 build-backend = "maturin"
 
@@ -41,13 +41,13 @@ rtest = "rtest.__main__:main"
 
 [project.optional-dependencies]
 pytest = [
-    "pytest==8.3.5",
+    "pytest==9.1.1",
 ]
 dev = [
-    "pytest==8.3.5",
-    "ruff==0.14.10",
+    "pytest==9.1.1",
+    "ruff==0.17.0",
     "ty==0.0.8",
-    "vulture==2.14",
+    "vulture==2.16",
 ]
 
 [tool.ruff]
@@ -79,9 +79,9 @@ module-name = "rtest._rtest"
 
 [dependency-groups]
 dev = [
-    "maturin>=1.9.0",
-    "pytest==8.3.5",
+    "maturin>=1.15.0,<2.0",
+    "pytest==9.1.1",
     "ty==0.0.8",
-    "ruff==0.14.10",
-    "vulture==2.14",
+    "ruff==0.17.0",
+    "vulture==2.16",
 ]

@@ -31,6 +31,8 @@ pip install rtest
 
 _Requires Python 3.10+_
 
+Building from source requires Rust 1.97+ and the initialized Ruff submodule (`git submodule update --init`).
+
 ### Basic Usage
 
 ```bash
