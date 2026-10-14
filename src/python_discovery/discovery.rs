@@ -90,7 +90,7 @@ pub(crate) fn collect_test_methods(
                     line: func.range.start().to_u32() as usize,
                     method_specs: parse_decorators_to_specs(
                         &func.decorator_list,
-                        Some(resolver),
+                        resolver,
                         Some(class.name.as_str()),
                     ),
                 })

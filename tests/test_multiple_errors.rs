@@ -1,7 +1,7 @@
 //! Test that multiple syntax errors are collected and reported
 
 use indoc::indoc;
-use rtest::collection_integration::{collect_tests_rust, display_collection_results};
+use rtest::collection_integration::collect_tests_rust;
 use rtest::CollectionError;
 use std::fs;
 use tempfile::TempDir;
@@ -76,12 +76,4 @@ fn test_collection_multiple_syntax_errors() {
             "All errors should be parse errors"
         );
     }
-
-    println!("\n--- Test output ---");
-    display_collection_results(
-        &test_nodes,
-        &errors,
-        &rtest::cli::CannotExpandReport::Stdout,
-    );
-    println!("--- End test output ---\n");
 }
