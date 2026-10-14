@@ -2,7 +2,7 @@
 
 import re
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -34,7 +34,7 @@ class CollectionResult:
 
 
 @contextmanager
-def create_test_project(files: dict[str, str]) -> Iterator[Path]:
+def create_test_project(files: dict[str, str]) -> Generator[Path]:
     """Create a temporary project with the specified test files.
 
     Args:

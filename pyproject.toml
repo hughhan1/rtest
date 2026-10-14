@@ -46,7 +46,7 @@ pytest = [
 dev = [
     "pytest==9.1.1",
     "ruff==0.17.0",
-    "ty==0.0.8",
+    "ty==0.0.87",
     "vulture==2.16",
 ]
 
@@ -81,7 +81,7 @@ module-name = "rtest._rtest"
 dev = [
     "maturin>=1.15.0,<2.0",
     "pytest==9.1.1",
-    "ty==0.0.8",
+    "ty==0.0.87",
     "ruff==0.17.0",
     "vulture==2.16",
 ]

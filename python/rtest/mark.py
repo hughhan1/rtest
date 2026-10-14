@@ -21,9 +21,10 @@ Example usage:
 
 import itertools
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
 from types import FunctionType, MappingProxyType
-from typing import Callable, NamedTuple, Sequence, TypeVar
+from typing import Callable, NamedTuple, Sequence, TypeVar, cast
 
 # TypeVar for decorators that preserve function signatures
 # The bound includes "type" to support decorating classes as well as functions
@@ -111,7 +112,7 @@ class Mark:
             cases_list: list[ParametrizeSpec] | None = getattr(func, "__rtest_cases__", None)
             if not cases_list:
                 cases_list = []
-                func.__rtest_cases__ = cases_list  # type: ignore[union-attr]
+                setattr(func, "__rtest_cases__", cases_list)
             cases_list.append(spec)
             return func
 
@@ -138,8 +139,8 @@ class Mark:
         """
 
         def decorator(func_or_class: F) -> F:
-            func_or_class.__rtest_skip__ = True  # type: ignore[union-attr]
-            func_or_class.__rtest_skip_reason__ = reason  # type: ignore[union-attr]
+            setattr(func_or_class, "__rtest_skip__", True)
+            setattr(func_or_class, "__rtest_skip_reason__", reason)
             return func_or_class
 
         return decorator
@@ -242,8 +243,7 @@ def _get_parametrize_specs(func: FunctionType) -> list[ParametrizeSpec]:
             if isinstance(argnames_raw, str):
                 parsed_argnames = tuple(name.strip() for name in argnames_raw.split(","))
             else:
-                # Assume it's a sequence of strings - need type ignore for iteration on object
-                parsed_argnames = tuple(str(n) for n in argnames_raw)  # type: ignore[attr-defined]
+                parsed_argnames = tuple(str(n) for n in cast(Iterable[object], argnames_raw))
 
             # Convert argvalues to tuple
             argvalues_seq: Sequence[object] = argvalues_raw if isinstance(argvalues_raw, (list, tuple)) else []

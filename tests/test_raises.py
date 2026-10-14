@@ -77,11 +77,11 @@ class TestRaisesExceptionTypes:
 class TestRaisesValidation:
     def test_rejects_non_exception_type(self) -> None:
         with rtest.raises(TypeError, match="is not a valid exception type"):
-            raises(str)  # type: ignore[arg-type]
+            raises(str)  # ty: ignore[invalid-argument-type]
 
     def test_rejects_non_type(self) -> None:
         with rtest.raises(TypeError, match="is not a valid exception type"):
-            raises(42)  # type: ignore[arg-type]
+            raises(42)  # ty: ignore[invalid-argument-type]
 
     def test_rejects_empty_tuple(self) -> None:
         with rtest.raises(ValueError, match="must not be empty"):
@@ -89,4 +89,4 @@ class TestRaisesValidation:
 
     def test_rejects_invalid_type_in_tuple(self) -> None:
         with rtest.raises(TypeError, match="is not a valid exception type"):
-            raises((ValueError, str))  # type: ignore[arg-type]
+            raises((ValueError, str))  # ty: ignore[invalid-argument-type]
