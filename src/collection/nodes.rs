@@ -5,8 +5,7 @@ use super::error::{CollectionError, CollectionResult, CollectionWarning};
 use super::types::{CollectionBranch, CollectionNode};
 use super::utils::glob_match_any;
 use crate::python_discovery::{
-    discover_tests_with_inheritance, format_cannot_expand_warning, CasesExpansion,
-    TestDiscoveryConfig,
+    format_cannot_expand_warning, CasesExpansion, DiscoveryCache, TestDiscoveryConfig,
 };
 use std::path::{Path, PathBuf};
 
@@ -125,10 +124,11 @@ impl CollectionBranch {
     pub(crate) fn collect(
         &self,
         session: &Session,
+        discovery: &mut DiscoveryCache,
     ) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)> {
         match self {
             Self::Directory(path) => Self::collect_directory(path, session),
-            Self::Module(path) => self.collect_module(path, session),
+            Self::Module(path) => self.collect_module(path, session, discovery),
         }
     }
 
@@ -165,6 +165,7 @@ impl CollectionBranch {
         &self,
         path: &Path,
         session: &Session,
+        discovery: &mut DiscoveryCache,
     ) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)> {
         let nodeid = self.nodeid(session);
         // Read the Python file
@@ -180,7 +181,7 @@ impl CollectionBranch {
         let root_path = &session.rootpath;
 
         let (tests, discovery_warnings) =
-            discover_tests_with_inheritance(path, &source, &discovery_config, root_path)?;
+            discovery.discover_tests(path, &source, &discovery_config, root_path)?;
 
         let mut all_warnings: Vec<CollectionWarning> = discovery_warnings;
 
@@ -194,6 +195,7 @@ impl CollectionBranch {
                         file_path: path.to_string_lossy().into_owned(),
                         line: 0,
                         message: warning_str,
+                        cannot_expand_nodeid: Some(nodeid),
                     });
                 }
                 test.nodeids(&nodeid)

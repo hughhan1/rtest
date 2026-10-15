@@ -6,7 +6,7 @@
 use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::{Decorator, Expr, ExprList, ExprTuple, Keyword};
 
-use super::constant_resolver::ConstantResolver;
+use super::constant_resolver::{try_extract_literal, ConstantResolver, ResolvedConstant};
 
 /// A literal value that can be statically extracted from AST.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +30,7 @@ pub enum LiteralValue {
 pub struct CasesSpec {
     /// Final case IDs, including any explicit overrides.
     pub ids: Vec<String>,
-    /// pytest 7.3 suffixes duplicate IDs as `{id}0`, `{id}1` (no underscore).
+    /// Pytest duplicate suffixes depend on its version and need runtime fallback.
     pub pytest_unique_ids: bool,
 }
 
@@ -120,13 +120,17 @@ pub fn parse_decorators_to_specs(
     resolver: &ConstantResolver,
     enclosing_class: Option<&str>,
 ) -> MethodCasesInfo {
-    let mut specs = Vec::new();
-    for decorator in decorators {
-        if let Some(spec) = parse_single_decorator(decorator, resolver, enclosing_class)? {
-            specs.push(spec);
-        }
+    if resolver.has_runtime_parameters() {
+        return Err(CannotExpandReason::UnsupportedExpression(
+            "runtime fixtures, markers, or pytest_generate_tests".into(),
+        ));
     }
-    Ok(specs)
+    decorators
+        .iter()
+        .filter_map(|decorator| {
+            parse_single_decorator(decorator, resolver, enclosing_class).transpose()
+        })
+        .collect()
 }
 
 /// Combine class-level and method-level specs, then expand.
@@ -158,43 +162,63 @@ fn parse_single_decorator(
         return Ok(None);
     };
 
-    if call.arguments.args.len() < 2 {
+    let [argnames, values, ..] = call.arguments.args.as_ref() else {
         return Err(CannotExpandReason::UnsupportedExpression(
             "missing required arguments".to_string(),
         ));
-    }
-
-    let parameters = extract_argnames(&call.arguments.args[0])?;
-
-    let value_ids = extract_argvalues(
-        &call.arguments.args[1],
-        resolver,
-        enclosing_class,
-        &parameters,
-        id_style,
-    )?;
-
-    let ids = match extract_ids_kwarg(
-        &call.arguments.keywords,
-        resolver,
-        enclosing_class,
-        id_style,
-    ) {
-        Ok(ids) => ids,
-        Err(reason) => match id_style {
-            ParamIdStyle::RuntimeValue => return Err(reason),
-            ParamIdStyle::SourcePath => None,
-        },
     };
 
-    let ids = match ids {
-        Some(ids) => ids
-            .iter()
-            .take(value_ids.len())
-            .cloned()
-            .chain((ids.len()..value_ids.len()).map(|i| i.to_string()))
-            .collect(),
-        None => value_ids,
+    let parameters = extract_argnames(argnames)?;
+
+    let ids = match (
+        id_style,
+        extract_ids_kwarg(&call.arguments.keywords, resolver, enclosing_class),
+    ) {
+        (ParamIdStyle::RuntimeValue, Ok(Some(ids))) => {
+            let count = sequence_elts(values)
+                .filter(|values| {
+                    values.iter().all(|value| {
+                        !value.is_starred_expr()
+                            && parameters.accepts_row_size(
+                                sequence_elts(value)
+                                    .filter(|row| !row.iter().any(Expr::is_starred_expr))
+                                    .map(<[Expr]>::len),
+                            )
+                    })
+                })
+                .map(<[Expr]>::len)
+                .or_else(
+                    || match resolver.resolve_in_class(enclosing_class, values)?.value {
+                        LiteralValue::Sequence(values) => values
+                            .iter()
+                            .all(|value| {
+                                parameters.accepts_row_size(match value {
+                                    LiteralValue::Sequence(row) => Some(row.len()),
+                                    _ => None,
+                                })
+                            })
+                            .then_some(values.len()),
+                        _ => None,
+                    },
+                );
+            if count != Some(ids.len()) {
+                return Err(CannotExpandReason::UnsupportedExpression(
+                    "ids length must match a static case sequence".into(),
+                ));
+            }
+            ids
+        }
+        (ParamIdStyle::RuntimeValue, Err(reason)) => return Err(reason),
+        (_, supplied) => {
+            let defaults =
+                extract_argvalues(values, resolver, enclosing_class, &parameters, id_style)?;
+            let ids = supplied.ok().flatten().unwrap_or_default();
+            let (count, supplied_count) = (defaults.len(), ids.len());
+            ids.into_iter()
+                .chain(defaults.into_iter().skip(supplied_count))
+                .take(count)
+                .collect()
+        }
     };
     Ok(Some(CasesSpec {
         ids,
@@ -212,21 +236,19 @@ fn decorator_id_style(func: &Expr, resolver: &ConstantResolver) -> Option<ParamI
     }
 }
 
-/// Parsed argument layout. Both variants contain at least one name.
-enum CaseParameters {
-    Scalar(String),
-    Row { first: String, rest: Vec<String> },
+/// Nonempty argument names and whether each case unpacks a row.
+struct CaseParameters {
+    names: Vec<String>,
+    unpack_rows: bool,
 }
 
 impl CaseParameters {
     fn name(&self, index: usize) -> &str {
-        match (self, index) {
-            (Self::Scalar(name), 0) | (Self::Row { first: name, .. }, 0) => name,
-            (Self::Row { rest, .. }, index) => {
-                rest.get(index - 1).map(String::as_str).unwrap_or("arg")
-            }
-            _ => "arg",
-        }
+        self.names.get(index).map(String::as_str).unwrap_or("arg")
+    }
+
+    fn accepts_row_size(&self, size: Option<usize>) -> bool {
+        !self.unpack_rows || size == Some(self.names.len())
     }
 }
 
@@ -245,19 +267,18 @@ fn extract_argnames(expr: &Expr) -> Result<CaseParameters, CannotExpandReason> {
         }
         // Support list/tuple of strings: ["a", "b", "c"] or ("a", "b", "c")
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
-            let mut names = Vec::with_capacity(elts.len());
-            for elt in elts {
-                match elt {
-                    Expr::StringLiteral(s) => {
-                        names.push(s.value.to_str().to_string());
-                    }
-                    _ => {
-                        return Err(CannotExpandReason::UnsupportedExpression(
-                            "argnames list must contain only strings".to_string(),
-                        ))
-                    }
-                }
-            }
+            let names = elts
+                .iter()
+                .map(|elt| {
+                    elt.as_string_literal_expr()
+                        .map(|s| s.value.to_str().to_string())
+                        .ok_or_else(|| {
+                            CannotExpandReason::UnsupportedExpression(
+                                "argnames list must contain only strings".into(),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             (names, true)
         }
         Expr::Name(name) => return Err(CannotExpandReason::VariableReference(name.id.to_string())),
@@ -267,15 +288,14 @@ fn extract_argnames(expr: &Expr) -> Result<CaseParameters, CannotExpandReason> {
             ))
         }
     };
-    let mut names = names.into_iter();
-    let first = names
-        .next()
-        .ok_or_else(|| CannotExpandReason::UnsupportedExpression("empty argnames".into()))?;
-    let rest: Vec<_> = names.collect();
-    Ok(if unpack_rows || !rest.is_empty() {
-        CaseParameters::Row { first, rest }
-    } else {
-        CaseParameters::Scalar(first)
+    if names.is_empty() {
+        return Err(CannotExpandReason::UnsupportedExpression(
+            "empty argnames".into(),
+        ));
+    }
+    Ok(CaseParameters {
+        unpack_rows: unpack_rows || names.len() > 1,
+        names,
     })
 }
 
@@ -324,12 +344,6 @@ fn extract_argvalues(
     argnames: &CaseParameters,
     id_style: ParamIdStyle,
 ) -> Result<Vec<String>, CannotExpandReason> {
-    if contains_starred(expr) {
-        return Err(CannotExpandReason::UnsupportedExpression(
-            "starred unpack in argvalues".to_string(),
-        ));
-    }
-
     match expr {
         Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => elts
             .iter()
@@ -344,24 +358,27 @@ fn extract_argvalues(
             .collect(),
         // A named sequence keeps source-path IDs for cases and value IDs for parametrize.
         Expr::Name(name) => {
-            if let Some(resolved) = resolver.resolve_in_class(enclosing_class, expr) {
-                if let LiteralValue::Sequence(seq) = resolved.value {
-                    return Ok(match id_style {
-                        ParamIdStyle::SourcePath => {
-                            let source_name = resolved.source_path.join(".");
-                            seq.iter()
-                                .map(|v| format!("{}[{}]", source_name, literal_to_id_string(v)))
-                                .collect()
-                        }
-                        ParamIdStyle::RuntimeValue => seq
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, v)| id_for_resolved_case_value(v, argnames, idx))
-                            .collect(),
-                    });
+            let Some(ResolvedConstant {
+                value: LiteralValue::Sequence(values),
+                source_path,
+            }) = resolver.resolve_in_class(enclosing_class, expr)
+            else {
+                return Err(CannotExpandReason::VariableReference(name.id.to_string()));
+            };
+            Ok(match id_style {
+                ParamIdStyle::SourcePath => {
+                    let source_name = source_path.join(".");
+                    values
+                        .iter()
+                        .map(|v| format!("{}[{}]", source_name, literal_to_id_string(v)))
+                        .collect()
                 }
-            }
-            Err(CannotExpandReason::VariableReference(name.id.to_string()))
+                ParamIdStyle::RuntimeValue => values
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, v)| id_for_resolved_case_value(v, argnames, idx))
+                    .collect(),
+            })
         }
         Expr::Call(call) => {
             let func_name = get_call_name(&call.func);
@@ -386,35 +403,16 @@ fn extract_pytest_case(
 ) -> Result<String, CannotExpandReason> {
     // Sequence-form argnames unpack rows even for one argument. String "x"
     // keeps a list/tuple row as the value; both forms share the component logic.
-    if matches!(argnames, CaseParameters::Row { .. }) {
-        if let Some(components) = sequence_elts(elt) {
-            let mut parts = Vec::with_capacity(components.len());
-            for (i, component) in components.iter().enumerate() {
-                let (_, id) = extract_literal(
-                    component,
-                    resolver,
-                    enclosing_class,
-                    ParamIdStyle::RuntimeValue,
-                )?;
-                parts.push(id.render(argnames, idx, i));
-            }
-            return Ok(parts.join("-"));
-        }
-    }
-
-    let (_, id) = extract_literal(elt, resolver, enclosing_class, ParamIdStyle::RuntimeValue)?;
+    let (_, id) = match sequence_elts(elt).filter(|_| argnames.unpack_rows) {
+        Some(components) => extract_literal_sequence(
+            components,
+            resolver,
+            enclosing_class,
+            ParamIdStyle::RuntimeValue,
+        )?,
+        None => extract_literal(elt, resolver, enclosing_class, ParamIdStyle::RuntimeValue)?,
+    };
     Ok(id.render(argnames, idx, 0))
-}
-
-fn contains_starred(expr: &Expr) -> bool {
-    match expr {
-        Expr::Starred(_) => true,
-        Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. }) => {
-            elts.iter().any(contains_starred)
-        }
-        Expr::Call(call) => call.arguments.args.iter().any(contains_starred),
-        _ => false,
-    }
 }
 
 fn eval_literal_binop(
@@ -457,9 +455,7 @@ fn id_for_resolved_case_value(
     idx: usize,
 ) -> String {
     let parts = match value {
-        LiteralValue::Sequence(parts) if matches!(argnames, CaseParameters::Row { .. }) => {
-            parts.as_slice()
-        }
+        LiteralValue::Sequence(parts) if argnames.unpack_rows => parts.as_slice(),
         _ => std::slice::from_ref(value),
     };
     parts
@@ -485,38 +481,14 @@ fn extract_literal(
     id_style: ParamIdStyle,
 ) -> Result<(LiteralValue, CaseId), CannotExpandReason> {
     let literal = match expr {
-        Expr::NumberLiteral(num) => {
-            use ruff_python_ast::Number;
-            match &num.value {
-                Number::Int(i) => i
-                    .as_i64()
-                    .map_or_else(|| LiteralValue::String(i.to_string()), LiteralValue::Int),
-                Number::Float(f) => LiteralValue::Float(*f),
-                Number::Complex { .. } => {
-                    return Err(CannotExpandReason::UnsupportedExpression(
-                        "complex numbers".to_string(),
-                    ))
-                }
-            }
-        }
-        Expr::StringLiteral(s) => LiteralValue::String(s.value.to_str().to_string()),
-        Expr::BytesLiteral(bytes) => {
-            // pytest STRING_TYPES includes bytes; IDs use ascii_escaped(decode).
-            LiteralValue::String(bytes.value.bytes().map(char::from).collect())
-        }
-        Expr::BooleanLiteral(b) => LiteralValue::Bool(b.value),
-        Expr::UnaryOp(unary) => {
-            use ruff_python_ast::UnaryOp;
-            if !matches!(unary.op, UnaryOp::USub) {
-                return Ok((LiteralValue::Opaque, CaseId::Positional));
-            }
-            let (inner, _) = extract_literal(&unary.operand, resolver, enclosing_class, id_style)?;
-            match inner {
-                LiteralValue::Int(i) => LiteralValue::Int(-i),
-                LiteralValue::Float(f) => LiteralValue::Float(-f),
-                _ => LiteralValue::Opaque,
-            }
-        }
+        Expr::NumberLiteral(_)
+        | Expr::StringLiteral(_)
+        | Expr::BytesLiteral(_)
+        | Expr::BooleanLiteral(_)
+        | Expr::UnaryOp(_)
+        | Expr::NoneLiteral(_) => try_extract_literal(expr).ok_or_else(|| {
+            CannotExpandReason::UnsupportedExpression("non-literal scalar".into())
+        })?,
         Expr::BinOp(binop) => {
             let (left, _) = extract_literal(&binop.left, resolver, enclosing_class, id_style)?;
             let (right, _) = extract_literal(&binop.right, resolver, enclosing_class, id_style)?;
@@ -541,22 +513,12 @@ fn extract_literal(
                 "starred unpack".to_string(),
             ))
         }
-        Expr::NoneLiteral(_) => LiteralValue::None,
         Expr::Tuple(ExprTuple { elts, .. }) | Expr::List(ExprList { elts, .. }) => {
             if id_style == ParamIdStyle::RuntimeValue {
                 // Nested list/tuple as a parameter value is opaque to pytest (`argnameN`).
                 return Ok((LiteralValue::Opaque, CaseId::Positional));
             }
-            let mut values = Vec::with_capacity(elts.len());
-            let mut sub_ids = Vec::with_capacity(elts.len());
-            for elt in elts.iter() {
-                let (v, id) = extract_literal(elt, resolver, enclosing_class, id_style)?;
-                values.push(v);
-                sub_ids.push(id);
-            }
-            let lit = LiteralValue::Sequence(values);
-            let id = CaseId::Parts(sub_ids);
-            return Ok((lit, id));
+            return extract_literal_sequence(elts, resolver, enclosing_class, id_style);
         }
         Expr::Name(_) | Expr::Attribute(_) => {
             if let Some(resolved) = resolver.resolve_in_class(enclosing_class, expr) {
@@ -570,7 +532,9 @@ fn extract_literal(
             // Unresolved name/attribute - treat as opaque (can count but not evaluate)
             LiteralValue::Opaque
         }
-        Expr::Call(call) if is_pytest_param(&call.func) => {
+        Expr::Call(call)
+            if resolver.imported_expression_name(&call.func).as_deref() == Some("pytest.param") =>
+        {
             return extract_pytest_param(call, resolver, enclosing_class, id_style);
         }
         Expr::Call(call) if id_style == ParamIdStyle::RuntimeValue => {
@@ -585,14 +549,6 @@ fn extract_literal(
     };
     let id = CaseId::from_literal(&literal);
     Ok((literal, id))
-}
-
-fn is_pytest_param(func: &Expr) -> bool {
-    match func {
-        Expr::Name(name) => name.id.as_str() == "param",
-        Expr::Attribute(attr) => attr.attr.as_str() == "param",
-        _ => false,
-    }
 }
 
 fn extract_pytest_param(
@@ -615,28 +571,32 @@ fn extract_pytest_param(
                 "pytest.param id= is not a static string".into(),
             ));
         };
-        return Ok((LiteralValue::String(id.clone()), CaseId::Value(id)));
+        return Ok((
+            LiteralValue::String(id.clone()),
+            CaseId::Value(ascii_escape_string(&id)),
+        ));
     }
-    if call.arguments.args.is_empty() {
-        return Ok((LiteralValue::Opaque, CaseId::Positional));
+    match call.arguments.args.as_ref() {
+        [] => Ok((LiteralValue::Opaque, CaseId::Positional)),
+        [arg] => extract_literal(arg, resolver, enclosing_class, id_style),
+        args => extract_literal_sequence(args, resolver, enclosing_class, id_style),
     }
-    if call.arguments.args.len() == 1 {
-        return extract_literal(&call.arguments.args[0], resolver, enclosing_class, id_style);
-    }
-    let mut values = Vec::with_capacity(call.arguments.args.len());
-    let mut ids = Vec::with_capacity(call.arguments.args.len());
-    for arg in &call.arguments.args {
-        let (value, id) = extract_literal(arg, resolver, enclosing_class, id_style)?;
-        values.push(value);
-        ids.push(id);
-    }
+}
+
+fn extract_literal_sequence(
+    expressions: &[Expr],
+    resolver: &ConstantResolver,
+    enclosing_class: Option<&str>,
+    id_style: ParamIdStyle,
+) -> Result<(LiteralValue, CaseId), CannotExpandReason> {
+    let (values, ids) = expressions
+        .iter()
+        .map(|expr| extract_literal(expr, resolver, enclosing_class, id_style))
+        .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
     Ok((LiteralValue::Sequence(values), CaseId::Parts(ids)))
 }
 
-fn id_for_resolved(
-    resolved: &super::constant_resolver::ResolvedConstant,
-    id_style: ParamIdStyle,
-) -> CaseId {
+fn id_for_resolved(resolved: &ResolvedConstant, id_style: ParamIdStyle) -> CaseId {
     match id_style {
         ParamIdStyle::SourcePath => CaseId::Value(resolved.source_path.join(".")),
         ParamIdStyle::RuntimeValue => CaseId::from_literal(&resolved.value),
@@ -645,11 +605,9 @@ fn id_for_resolved(
 
 /// Get the name of a called function for error messages.
 fn get_call_name(func: &Expr) -> String {
-    match func {
-        Expr::Name(name) => name.id.to_string(),
-        Expr::Attribute(attr) => attr.attr.to_string(),
-        _ => "unknown".to_string(),
-    }
+    UnqualifiedName::from_expr(func)
+        .and_then(|name| name.segments().last().map(|segment| (*segment).to_string()))
+        .unwrap_or_else(|| "unknown".into())
 }
 
 /// Extract the `ids` keyword argument if present.
@@ -657,31 +615,33 @@ fn extract_ids_kwarg(
     keywords: &[Keyword],
     resolver: &ConstantResolver,
     enclosing_class: Option<&str>,
-    id_style: ParamIdStyle,
 ) -> Result<Option<Vec<String>>, CannotExpandReason> {
     let Some(kw) = keywords.iter().find(|kw| kw.arg.as_deref() == Some("ids")) else {
         return Ok(None);
     };
-    let ids = if let Ok((LiteralValue::Sequence(seq), _)) =
-        extract_literal(&kw.value, resolver, enclosing_class, id_style)
-    {
-        Some(seq.iter().map(literal_to_id_string).collect())
-    } else {
-        sequence_elts(&kw.value).and_then(|elements| {
-            elements
-                .iter()
-                .map(|elt| match elt {
-                    Expr::StringLiteral(s) => Some(s.value.to_str().to_string()),
-                    _ => extract_literal(elt, resolver, enclosing_class, id_style)
-                        .ok()
-                        .map(|(value, _)| literal_to_id_string(&value)),
-                })
-                .collect()
-        })
+    if matches!(kw.value, Expr::NoneLiteral(_)) {
+        return Ok(None);
+    }
+    let invalid = || {
+        CannotExpandReason::UnsupportedExpression(
+            "ids= requires a static sequence of non-null scalar IDs".into(),
+        )
     };
-    ids.map(Some).ok_or_else(|| {
-        CannotExpandReason::UnsupportedExpression("ids= is not a static list of strings".into())
-    })
+    let value = try_extract_literal(&kw.value).or_else(|| {
+        resolver
+            .resolve_in_class(enclosing_class, &kw.value)
+            .map(|resolved| resolved.value)
+    });
+    let Some(LiteralValue::Sequence(ids)) = value else {
+        return Err(invalid());
+    };
+    ids.iter()
+        .map(|id| match id {
+            LiteralValue::None | LiteralValue::Sequence(_) | LiteralValue::Opaque => Err(invalid()),
+            _ => Ok(literal_to_id_string(id)),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 /// Convert a literal value to its string representation for use as a case ID.
@@ -770,49 +730,15 @@ fn expand_cases<'a>(specs: impl DoubleEndedIterator<Item = &'a CasesSpec>) -> Ca
             .flat_map(|existing| spec.ids.iter().map(move |id| format!("{existing}-{id}")))
             .collect();
     }
-    let unique = if pytest_unique_ids {
-        deduplicate_ids_pytest(ids)
-    } else {
-        deduplicate_ids(ids)
-    };
-    CasesExpansion::Expanded(unique)
-}
-
-/// pytest 7.3: every copy of a duplicated ID gets a trailing counter, including the first (`id0`, `id1`).
-fn deduplicate_ids_pytest(ids: Vec<String>) -> Vec<String> {
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for id in &ids {
-        *counts.entry(id.clone()).or_insert(0) += 1;
+    if pytest_unique_ids
+        && (ids.is_empty()
+            || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len())
+    {
+        return CasesExpansion::CannotExpand(CannotExpandReason::UnsupportedExpression(
+            "empty or duplicate pytest cases require runtime collection".into(),
+        ));
     }
-    let mut suffixes: std::collections::HashMap<String, usize> = counts
-        .iter()
-        .filter(|(_, count)| **count > 1)
-        .map(|(id, _)| (id.clone(), 0))
-        .collect();
-    ids.into_iter()
-        .map(|id| {
-            if let Some(n) = suffixes.get_mut(&id) {
-                let separator = if id.ends_with(|c: char| c.is_ascii_digit()) {
-                    "_"
-                } else {
-                    ""
-                };
-                let unique = loop {
-                    let candidate = format!("{id}{separator}{n}");
-                    *n += 1;
-                    if counts.get(&candidate).copied().unwrap_or(0) == 0 {
-                        break candidate;
-                    }
-                };
-                // Match pytest's evolving ID list: release replaced IDs and reserve new ones.
-                *counts.entry(id).or_default() -= 1;
-                *counts.entry(unique.clone()).or_default() += 1;
-                unique
-            } else {
-                id
-            }
-        })
-        .collect()
+    CasesExpansion::Expanded(deduplicate_ids(ids))
 }
 
 /// Deduplicate IDs by adding `_1`, `_2` suffixes for duplicates.

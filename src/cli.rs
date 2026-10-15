@@ -1,5 +1,7 @@
 use crate::scheduler::DistributionMode;
 use clap::{Parser, ValueEnum};
+#[cfg(feature = "extension-module")]
+use std::io::{self, Write};
 use std::num::NonZeroUsize;
 
 /// Exit codes for the CLI.
@@ -46,6 +48,10 @@ pub struct Args {
     #[arg(long)]
     pub collect_only: bool,
 
+    /// Where to write pytest fallback nodeids: stdout, stderr, none, or a file path
+    #[arg(long, default_value = "stdout")]
+    pub cannot_expand_report: String,
+
     /// Test runner backend
     #[arg(long, value_enum, default_value = "pytest")]
     pub runner: Runner,
@@ -53,6 +59,19 @@ pub struct Args {
     /// Test files or directories to run
     #[arg(help = "Test files or directories to run")]
     pub files: Vec<String>,
+}
+
+#[cfg(feature = "extension-module")]
+impl Args {
+    /// Open before collection so a failed/empty run cannot leave a stale report.
+    pub(crate) fn report_writer(&self) -> io::Result<Box<dyn Write>> {
+        match self.cannot_expand_report.as_str() {
+            "stdout" => Ok(Box::new(io::stdout())),
+            "stderr" => Ok(Box::new(io::stderr())),
+            "none" => Ok(Box::new(io::sink())),
+            path => Ok(Box::new(std::fs::File::create(path)?)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

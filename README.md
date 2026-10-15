@@ -130,6 +130,36 @@ warning: Cannot statically expand test cases for 'test.py::test_comprehension': 
 In these cases, test execution is still functionally equivalent - pytest automatically runs all parametrized variants
 when given the base function name.
 
+### Hybrid Collection with pytest
+
+Collectors that need exact pytest nodeids (for example, CI workqueues) should collect unsupported **files** with
+pytest instead of scheduling rtest's unexpanded base names:
+
+```bash
+rtest --collect-only --cannot-expand-report rtest-cannot-expand.txt tests/
+```
+
+The report contains one `rtest-cannot-expand: <base-nodeid>` record per test requiring runtime collection. Discard
+rtest's results for every file in the report, collect those files with `pytest --collect-only`, and combine the results.
+Always reject nonzero collector exits; partial output is not a complete test list.
+
+`--cannot-expand-report` accepts `stdout` (the default), `stderr`, `none`, or a file path. File reports are truncated
+before collection, including runs that later find no tests or fail collection. Report open/write failures fail the command.
+Human-readable warnings remain available regardless of the report destination.
+
+Runtime fallback includes constructor/helper calls, callable or partial IDs, empty parameter tables, duplicate pytest
+IDs, global `pytestmark` assignments, and detected parametrized fixtures or `pytest_generate_tests` hooks. Fixture
+detection includes local classes, loaded base-class modules, and ancestor `conftest.py` files within the collection root.
+Conftest analysis is cached for each collection run. Duplicate suffixes differ
+between pytest versions, so delegating them to the installed pytest supports both pytest 7.3 and newer versions
+without guessing. Explicit unique `pytest.param(..., id="name")` or complete static `ids=[...]` lists allow opaque
+values such as dates and dataclasses to remain statically collectable.
+
+This is a fallback protocol, not full emulation of pytest's plugin system. Custom decorator wrappers and fixture/plugin
+registration hidden behind arbitrary imports still need caller-side routing to pytest. Compared with constructor
+heuristics, conservative fallback may send more files through pytest; compare complete nodeid lists and timings before
+changing a large repository's collector.
+
 ### Path Separator Handling
 
 `rtest` uses platform-specific path separators in test nodeids, while `pytest` normalizes all paths to use forward

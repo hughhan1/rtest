@@ -42,6 +42,8 @@ pub struct CollectionWarning {
     pub file_path: String,
     pub line: usize,
     pub message: String,
+    /// Structured fallback target; never recovered by parsing the human message.
+    pub cannot_expand_nodeid: Option<String>,
 }
 
 impl fmt::Display for CollectionWarning {

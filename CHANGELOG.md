@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Restore `--cannot-expand-report` for hybrid pytest collectors, with structured fallback records and fresh reports even on empty or failed collections.
+- Route detected fixture parametrization, global markers, generation hooks, empty tables, and version-sensitive duplicate IDs through pytest fallback instead of emitting incomplete or incompatible nodeids; cache ancestor conftest analysis per collection run.
+- Allow complete explicit IDs to describe opaque values without evaluating constructor/helper calls; share scalar parsing and inheritance traversal to reduce collection decisions.
+
 ### Changed
 - **Breaking (Rust API):** The `python_discovery::module_resolver` and `python_discovery::semantic_analyzer` modules and their re-exported helper types are now internal. Use `python_discovery::discover_tests_with_inheritance` for import-aware discovery or `collect_tests_rust` for collection. Imported ASTs are released after metadata extraction instead of being cached by the resolver.
 
@@ -23,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace `println`/`eprintln` with structured log macros in runner and executor
 
 ### Docs
-- Expand README with Valon monorepo benchmarks (236x collection speedup) and documented known limitations
+- Document collection benchmarks and known limitations in README
 
 ## [0.0.45] - 2026-01-03
 

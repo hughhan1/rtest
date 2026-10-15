@@ -71,7 +71,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         },
     };
 
-    let test_nodes = match collect_and_display(&rootpath, &filtered_args) {
+    let test_nodes = match collect_and_display(&rootpath, &filtered_args, &mut std::io::sink()) {
         ControlFlow::Continue(nodes) => nodes,
         ControlFlow::Break(code) => return code,
     };
@@ -89,6 +89,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
 fn collect_and_display(
     rootpath: &std::path::Path,
     paths: &[String],
+    report: &mut dyn std::io::Write,
 ) -> ControlFlow<i32, Vec<String>> {
     let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), paths) {
         Ok((nodes, errors)) => (nodes, errors),
@@ -96,6 +97,10 @@ fn collect_and_display(
     };
 
     display_collection_results(&test_nodes, &errors);
+    if let Err(error) = errors.write_cannot_expand_report(report) {
+        eprintln!("ERROR: cannot write cannot-expand report: {error}");
+        return ControlFlow::Break(exit_codes::TESTS_FAILED);
+    }
 
     // Exit early if there are collection errors
     if !errors.errors.is_empty() {
@@ -111,7 +116,11 @@ fn collect_and_display(
 }
 
 fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
-    let test_nodes = match collect_and_display(rootpath, &args.files) {
+    let mut report = args.report_writer().unwrap_or_else(|error| {
+        eprintln!("ERROR: cannot open cannot-expand report: {error}");
+        std::process::exit(exit_codes::TESTS_FAILED);
+    });
+    let test_nodes = match collect_and_display(rootpath, &args.files, &mut report) {
         ControlFlow::Continue(nodes) => nodes,
         ControlFlow::Break(code) => std::process::exit(code),
     };

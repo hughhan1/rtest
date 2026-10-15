@@ -1,7 +1,9 @@
 //! Test discovery types and main entry point.
 
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
-use crate::python_discovery::cases::{parse_decorators_to_specs, CasesExpansion};
+use crate::python_discovery::cases::{
+    parse_decorators_to_specs, CannotExpandReason, CasesExpansion,
+};
 use crate::python_discovery::constant_resolver::ConstantResolver;
 use crate::python_discovery::module_resolver::ModuleResolver;
 use crate::python_discovery::pattern;
@@ -9,7 +11,8 @@ use crate::python_discovery::semantic_analyzer::{SemanticTestDiscovery, TestMeth
 use crate::python_discovery::visitor::TestDiscoveryVisitor;
 use ruff_python_ast::{Stmt, StmtClassDef};
 use ruff_python_parser::parse_module;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Information about a discovered test
 #[derive(Debug, Clone)]
@@ -38,6 +41,13 @@ impl TestInfo {
                 cases.iter().map(|id| format!("{base}[{id}]")).collect()
             }
         }
+    }
+}
+
+pub(crate) fn require_pytest_collection(tests: &mut [TestInfo], reason: &str) {
+    for test in tests {
+        test.cases_expansion =
+            CasesExpansion::CannotExpand(CannotExpandReason::UnsupportedExpression(reason.into()));
     }
 }
 
@@ -128,11 +138,62 @@ pub fn discover_tests_with_inheritance(
     config: &TestDiscoveryConfig,
     root_path: &Path,
 ) -> CollectionResult<(Vec<TestInfo>, Vec<CollectionWarning>)> {
-    let module_path = path_to_module_path(path, root_path);
-    let module_resolver = ModuleResolver::new(root_path);
-    let mut discovery = SemanticTestDiscovery::new(config.clone());
+    DiscoveryCache::default().discover_tests(path, source, config, root_path)
+}
 
-    discovery.discover_tests(path, source, module_path, &module_resolver)
+/// Cache only within a collection run so later runs observe changed conftests.
+#[derive(Default)]
+pub(crate) struct DiscoveryCache {
+    conftests: HashMap<PathBuf, bool>,
+}
+
+impl DiscoveryCache {
+    pub(crate) fn discover_tests(
+        &mut self,
+        path: &Path,
+        source: &str,
+        config: &TestDiscoveryConfig,
+        root_path: &Path,
+    ) -> CollectionResult<(Vec<TestInfo>, Vec<CollectionWarning>)> {
+        let module_path = path_to_module_path(path, root_path);
+        let module_resolver = ModuleResolver::new(root_path);
+        let mut discovery = SemanticTestDiscovery::new(config.clone());
+
+        let (mut tests, warnings) =
+            discovery.discover_tests(path, source, module_path, &module_resolver)?;
+        for directory in path
+            .ancestors()
+            .skip(1)
+            .take_while(|directory| directory.starts_with(root_path))
+        {
+            if self.requires_runtime(directory)? {
+                require_pytest_collection(&mut tests, "runtime parametrization in conftest.py");
+                break;
+            }
+        }
+        Ok((tests, warnings))
+    }
+
+    fn requires_runtime(&mut self, directory: &Path) -> CollectionResult<bool> {
+        if let Some(&runtime) = self.conftests.get(directory) {
+            return Ok(runtime);
+        }
+        let conftest = directory.join("conftest.py");
+        let runtime = if conftest.is_file() {
+            let source = std::fs::read_to_string(&conftest)?;
+            let parsed = parse_module(&source).map_err(|error| {
+                CollectionError::ParseError(format!(
+                    "Failed to parse {}: {error}",
+                    conftest.display()
+                ))
+            })?;
+            ConstantResolver::from_module(&parsed.into_syntax()).has_runtime_parameters()
+        } else {
+            false
+        };
+        self.conftests.insert(directory.to_path_buf(), runtime);
+        Ok(runtime)
+    }
 }
 
 /// Convert a file path to a module path
