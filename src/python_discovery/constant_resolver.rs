@@ -105,7 +105,7 @@ pub struct ConstantResolver {
     current_path: Vec<String>,
     modules: RefCell<HashMap<Vec<String>, Rc<LoadedModule>>>,
     /// Present when imported modules may be loaded on demand.
-    loader: Option<RefCell<ModuleResolver>>,
+    loader: Option<ModuleResolver>,
 }
 
 impl ConstantScope {
@@ -317,7 +317,7 @@ impl ConstantResolver {
         let resolver = Self {
             modules: RefCell::new(HashMap::from([(current_path.clone(), Rc::new(loaded))])),
             current_path,
-            loader: loader.map(RefCell::new),
+            loader,
         };
         resolver.resolve_pending_assignments();
         resolver
@@ -360,16 +360,13 @@ impl ConstantResolver {
         let Some(loader) = &self.loader else {
             return;
         };
-        let loaded = {
-            let mut loader = loader.borrow_mut();
-            match loader.resolve_and_load(module_path) {
-                Ok(parsed) => LoadedModule::from_module(
-                    &parsed.module,
-                    module_path,
-                    parsed.path.ends_with("__init__.py"),
-                ),
-                Err(_) => return,
-            }
+        let loaded = match loader.resolve_and_load(module_path) {
+            Ok(parsed) => LoadedModule::from_module(
+                &parsed.module,
+                module_path,
+                parsed.path.ends_with("__init__.py"),
+            ),
+            Err(_) => return,
         };
         self.modules
             .borrow_mut()

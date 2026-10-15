@@ -89,7 +89,7 @@ impl SemanticTestDiscovery {
         path: &Path,
         source: &str,
         module_path: Vec<String>,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
     ) -> CollectionResult<(Vec<TestInfo>, Vec<CollectionWarning>)> {
         // Store current file path for warning generation
         self.current_file_path = path.to_string_lossy().into_owned();
@@ -105,7 +105,7 @@ impl SemanticTestDiscovery {
         let resolver = ConstantResolver::from_module_with_imports(
             &ast_module,
             &module_path,
-            module_resolver.with_search_paths(),
+            module_resolver.clone(),
             path,
         );
 
@@ -265,7 +265,7 @@ impl SemanticTestDiscovery {
         &mut self,
         class_def: &StmtClassDef,
         info: &TestClassInfo,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
     ) -> CollectionResult<Vec<TestInfo>> {
         let class_name = class_def.name.as_str();
 
@@ -320,7 +320,7 @@ impl SemanticTestDiscovery {
     fn should_skip_class(
         &mut self,
         info: &TestClassInfo,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<bool> {
         // Check if this class has __init__
@@ -342,7 +342,7 @@ impl SemanticTestDiscovery {
     fn base_class_has_init(
         &mut self,
         resolved: &ResolvedBaseClass,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<bool> {
         if self.is_stdlib_module_to_skip(&resolved.module_path) {
@@ -370,7 +370,7 @@ impl SemanticTestDiscovery {
     fn load_base_class(
         &mut self,
         resolved: &ResolvedBaseClass,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
     ) -> CollectionResult<Option<Rc<TestClassInfo>>> {
         if !resolved.is_local {
             self.ensure_module_loaded(&resolved.module_path, module_resolver)?;
@@ -385,7 +385,7 @@ impl SemanticTestDiscovery {
     fn get_base_class_methods(
         &mut self,
         resolved: &ResolvedBaseClass,
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
     ) -> CollectionResult<Vec<TestMethodInfo>> {
         if self.is_stdlib_module_to_skip(&resolved.module_path) {
@@ -426,21 +426,20 @@ impl SemanticTestDiscovery {
     fn ensure_module_loaded(
         &mut self,
         module_path: &[String],
-        module_resolver: &mut ModuleResolver,
+        module_resolver: &ModuleResolver,
     ) -> CollectionResult<()> {
         // Check if we've already loaded this module
         if self.loaded_modules.contains(module_path) {
             return Ok(());
         }
 
-        let constant_loader = module_resolver.with_search_paths();
         match module_resolver.resolve_and_load(module_path) {
             Ok(parsed_module) => {
                 // Build resolver for constants in this external module
                 let external_resolver = ConstantResolver::from_module_with_imports(
                     &parsed_module.module,
                     module_path,
-                    constant_loader,
+                    module_resolver.clone(),
                     &parsed_module.path,
                 );
                 let imports = self.collect_imports(&parsed_module.module);
