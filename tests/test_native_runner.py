@@ -60,6 +60,36 @@ def run_worker(test_file: Path, root: Path, output_file: Path) -> list[WorkerRes
 class TestParametrizeIntegration:
     """Integration tests for parametrize functionality."""
 
+    def test_empty_and_hyphenated_ids_remain_real_id_components(self) -> None:
+        from test_helpers import extract_test_lines, run_collection
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            test_file = root / "test_ids.py"
+            test_file.write_text(
+                "import rtest\n"
+                "@rtest.mark.cases('x', [''])\n"
+                "def test_empty(x): assert x == ''\n"
+                "@rtest.mark.cases('x', [1], ids=[''])\n"
+                "def test_explicit(x): assert x == 1\n"
+                "@rtest.mark.cases('text,number', [('', -2), ('a-b', -3)])\n"
+                "def test_row(text, number): assert number < 0\n"
+                "def test_plain(): pass\n"
+            )
+            expected = [
+                "test_ids.py::test_empty[]",
+                "test_ids.py::test_explicit[]",
+                "test_ids.py::test_plain",
+                "test_ids.py::test_row[--2]",
+                "test_ids.py::test_row[a-b--3]",
+            ]
+            collected = run_collection(root)
+            assert collected.returncode == 0, collected.output
+            assert sorted(extract_test_lines(collected.output_lines)) == expected
+            results = run_worker(test_file, root, root / "results.jsonl")
+            assert [result["nodeid"] for result in results] == expected
+            assert all(result["outcome"] == "passed" for result in results)
+
     def test_partial_and_extra_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

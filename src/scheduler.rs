@@ -1,28 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroUsize;
 
-#[derive(Debug, Clone)]
-pub enum SchedulerError {
-    InvalidTestPath(String),
-    InvalidWorkerCount(usize),
-}
-
-impl fmt::Display for SchedulerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SchedulerError::InvalidTestPath(path) => {
-                write!(f, "Invalid test path format: {path}")
-            }
-            SchedulerError::InvalidWorkerCount(count) => {
-                write!(f, "Invalid worker count: {count}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SchedulerError {}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DistributionMode {
     Load,
     LoadScope,
@@ -77,12 +57,12 @@ impl std::str::FromStr for DistributionMode {
 }
 
 pub trait Scheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>>;
+    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>>;
 }
 
 /// Distribute items in input order, returning only nonempty workers.
-pub(crate) fn distribute_round_robin<T>(items: Vec<T>, num_workers: usize) -> Vec<Vec<T>> {
-    let actual_workers = num_workers.min(items.len());
+pub(crate) fn distribute_round_robin<T>(items: Vec<T>, num_workers: NonZeroUsize) -> Vec<Vec<T>> {
+    let actual_workers = num_workers.get().min(items.len());
     let mut workers: Vec<Vec<T>> = (0..actual_workers).map(|_| Vec::new()).collect();
     for (worker, item) in (0..actual_workers).cycle().zip(items) {
         workers[worker].push(item);
@@ -92,11 +72,11 @@ pub(crate) fn distribute_round_robin<T>(items: Vec<T>, num_workers: usize) -> Ve
 
 fn distribute_by_key(
     tests: Vec<String>,
-    num_workers: usize,
+    num_workers: NonZeroUsize,
     key_extractor: impl Fn(&str) -> String,
 ) -> Vec<Vec<String>> {
     // A single worker preserves input order rather than sorting by group key.
-    if num_workers <= 1 {
+    if num_workers == NonZeroUsize::MIN {
         return distribute_round_robin(tests, num_workers);
     }
 
@@ -114,7 +94,7 @@ fn distribute_by_key(
 pub struct LoadScheduler;
 
 impl Scheduler for LoadScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
+    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
         distribute_round_robin(tests, num_workers)
     }
 }
@@ -122,7 +102,7 @@ impl Scheduler for LoadScheduler {
 pub struct LoadScopeScheduler;
 
 impl Scheduler for LoadScopeScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
+    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
         distribute_by_key(tests, num_workers, extract_scope)
     }
 }
@@ -130,7 +110,7 @@ impl Scheduler for LoadScopeScheduler {
 pub struct LoadFileScheduler;
 
 impl Scheduler for LoadFileScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
+    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
         distribute_by_key(tests, num_workers, extract_file)
     }
 }
@@ -144,7 +124,7 @@ impl Scheduler for LoadFileScheduler {
 pub struct WorkStealScheduler;
 
 impl Scheduler for WorkStealScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: usize) -> Vec<Vec<String>> {
+    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
         LoadScheduler.distribute_tests(tests, num_workers)
     }
 }
@@ -152,7 +132,7 @@ impl Scheduler for WorkStealScheduler {
 pub struct NoScheduler;
 
 impl Scheduler for NoScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, _num_workers: usize) -> Vec<Vec<String>> {
+    fn distribute_tests(&self, tests: Vec<String>, _num_workers: NonZeroUsize) -> Vec<Vec<String>> {
         if tests.is_empty() {
             vec![]
         } else {
@@ -220,15 +200,7 @@ mod tests {
     #[test]
     fn test_load_scheduler_empty_tests() {
         let scheduler = LoadScheduler;
-        let result = scheduler.distribute_tests(vec![], 4);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_load_scheduler_zero_workers() {
-        let scheduler = LoadScheduler;
-        let tests = vec!["test1".into(), "test2".into()];
-        let result = scheduler.distribute_tests(tests, 0);
+        let result = scheduler.distribute_tests(vec![], NonZeroUsize::new(4).expect("positive"));
         assert!(result.is_empty());
     }
 
@@ -236,7 +208,8 @@ mod tests {
     fn test_load_scheduler_single_worker() {
         let scheduler = LoadScheduler;
         let tests = vec!["test1".into(), "test2".into(), "test3".into()];
-        let result = scheduler.distribute_tests(tests.clone(), 1);
+        let result =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(1).expect("positive"));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], tests);
     }
@@ -251,7 +224,7 @@ mod tests {
             "test4".into(),
             "test5".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 3);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(3).expect("positive"));
 
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], vec!["test1", "test4"]);
@@ -263,7 +236,7 @@ mod tests {
     fn test_load_scheduler_more_workers_than_tests() {
         let scheduler = LoadScheduler;
         let tests = vec!["test1".into(), "test2".into()];
-        let result = scheduler.distribute_tests(tests, 5);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(5).expect("positive"));
 
         assert_eq!(result.len(), 2); // Only non-empty workers
         assert_eq!(result[0], vec!["test1"]);
@@ -274,7 +247,7 @@ mod tests {
     fn test_create_scheduler() {
         let scheduler = create_scheduler(DistributionMode::Load);
         let tests = vec!["test1".into(), "test2".into()];
-        let result = scheduler.distribute_tests(tests, 2);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
         assert_eq!(result.len(), 2);
     }
 
@@ -289,8 +262,10 @@ mod tests {
         ];
 
         // Test the same distribution multiple times - should be consistent
-        let result1 = scheduler.distribute_tests(tests.clone(), 2);
-        let result2 = scheduler.distribute_tests(tests.clone(), 2);
+        let result1 =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
+        let result2 =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
 
         assert_eq!(result1, result2);
         assert_eq!(result1[0], vec!["test1", "test3"]);
@@ -308,7 +283,8 @@ mod tests {
             "test5".into(),
         ];
 
-        let result = scheduler.distribute_tests(tests.clone(), 3);
+        let result =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(3).expect("positive"));
 
         let mut all_distributed_tests: Vec<String> = Vec::new();
         for worker_tests in result {
@@ -350,7 +326,7 @@ mod tests {
             "tests/test_file2.py::TestClass2::test_method1".into(),
             "tests/test_file2.py::test_function2".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 4);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(4).expect("positive"));
 
         // Should have 4 groups: file1::TestClass1, file1, file2::TestClass2, file2
         assert_eq!(result.len(), 4);
@@ -388,7 +364,8 @@ mod tests {
             "tests/test_file1.py::TestClass1::test_method1".into(),
             "tests/test_file2.py::test_function1".into(),
         ];
-        let result = scheduler.distribute_tests(tests.clone(), 1);
+        let result =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(1).expect("positive"));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].len(), 2);
     }
@@ -405,7 +382,7 @@ mod tests {
             "tests/test_file2.py::test_function2".into(),
             "tests/test_file3.py::test_function3".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 2);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
 
         assert_eq!(result.len(), 2);
 
@@ -444,7 +421,7 @@ mod tests {
             "test5".into(),
             "test6".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 3);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(3).expect("positive"));
 
         assert_eq!(result.len(), 3);
         // Round-robin: test1->worker0, test2->worker1, test3->worker2, test4->worker0, etc.
@@ -463,7 +440,7 @@ mod tests {
             "test4".into(),
             "test5".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 3);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(3).expect("positive"));
 
         assert_eq!(result.len(), 3);
         // Round-robin distribution: some workers get one more test
@@ -485,7 +462,7 @@ mod tests {
             "fast_test2".into(),
             "slow_test2".into(),
         ];
-        let result = scheduler.distribute_tests(tests, 2);
+        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
 
         assert_eq!(result.len(), 2);
         // Tests should be interleaved across workers for better work stealing
@@ -498,7 +475,8 @@ mod tests {
     fn test_no_scheduler_single_group() {
         let scheduler = NoScheduler;
         let tests = vec!["test1".into(), "test2".into(), "test3".into()];
-        let result = scheduler.distribute_tests(tests.clone(), 5);
+        let result =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(5).expect("positive"));
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], tests);
@@ -507,7 +485,7 @@ mod tests {
     #[test]
     fn test_no_scheduler_empty_tests() {
         let scheduler = NoScheduler;
-        let result = scheduler.distribute_tests(vec![], 3);
+        let result = scheduler.distribute_tests(vec![], NonZeroUsize::new(3).expect("positive"));
         assert!(result.is_empty());
     }
 
@@ -522,20 +500,36 @@ mod tests {
 
         let tests = vec!["test1".into(), "test2".into()];
 
-        assert_eq!(load_scheduler.distribute_tests(tests.clone(), 2).len(), 2);
         assert_eq!(
-            loadscope_scheduler.distribute_tests(tests.clone(), 2).len(),
+            load_scheduler
+                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
+                .len(),
             2
         );
         assert_eq!(
-            loadfile_scheduler.distribute_tests(tests.clone(), 2).len(),
+            loadscope_scheduler
+                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
+                .len(),
             2
         );
         assert_eq!(
-            worksteal_scheduler.distribute_tests(tests.clone(), 2).len(),
+            loadfile_scheduler
+                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
+                .len(),
             2
         );
-        assert_eq!(no_scheduler.distribute_tests(tests.clone(), 2).len(), 1);
+        assert_eq!(
+            worksteal_scheduler
+                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
+                .len(),
+            2
+        );
+        assert_eq!(
+            no_scheduler
+                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
+                .len(),
+            1
+        );
     }
 
     // Test deterministic ordering
@@ -551,9 +545,12 @@ mod tests {
         ];
 
         // Run multiple times to ensure deterministic behavior
-        let result1 = scheduler.distribute_tests(tests.clone(), 2);
-        let result2 = scheduler.distribute_tests(tests.clone(), 2);
-        let result3 = scheduler.distribute_tests(tests.clone(), 2);
+        let result1 =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
+        let result2 =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
+        let result3 =
+            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
 
         assert_eq!(result1, result2);
         assert_eq!(result2, result3);

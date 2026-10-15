@@ -1,4 +1,6 @@
+use crate::scheduler::DistributionMode;
 use clap::{Parser, ValueEnum};
+use std::num::NonZeroUsize;
 
 /// Exit codes for the CLI.
 /// These follow standard conventions and match pytest's exit codes where applicable.
@@ -28,17 +30,17 @@ pub struct Args {
     #[arg(long, short)]
     pub env: Vec<String>,
 
-    /// Number of processes to run tests in parallel
+    /// Worker count: a positive integer, auto, or logical
     #[arg(long, short = 'n', alias = "numprocesses")]
-    pub numprocesses: Option<String>,
+    pub numprocesses: Option<NumProcesses>,
 
-    /// Maximum number of worker processes
+    /// Maximum number of worker processes (must be positive)
     #[arg(long)]
-    pub maxprocesses: Option<usize>,
+    pub maxprocesses: Option<NonZeroUsize>,
 
     /// Distribution mode for parallel execution
     #[arg(long, default_value = "load")]
-    pub dist: String,
+    pub dist: DistributionMode,
 
     /// Collect tests only, don't run them
     #[arg(long)]
@@ -53,34 +55,26 @@ pub struct Args {
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumProcesses {
     Auto,
     Logical,
-    Count(usize),
+    Count(NonZeroUsize),
 }
 
-impl Args {
-    pub fn get_num_processes(&self) -> Result<Option<NumProcesses>, String> {
-        self.numprocesses
-            .as_deref()
-            .map(|s| match s {
-                "auto" => Ok(NumProcesses::Auto),
-                "logical" => Ok(NumProcesses::Logical),
-                _ => s
-                    .parse()
-                    .map(NumProcesses::Count)
-                    .map_err(|_| format!("Invalid number: {s}")),
-            })
-            .transpose()
-    }
+impl std::str::FromStr for NumProcesses {
+    type Err = String;
 
-    pub fn validate_dist(&self) -> Result<(), String> {
-        // Use the FromStr implementation which has proper error handling
-        self.dist
-            .parse::<crate::scheduler::DistributionMode>()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "auto" => Ok(Self::Auto),
+            "logical" => Ok(Self::Logical),
+            _ => value.parse().map(Self::Count).map_err(|_| {
+                format!(
+                    "Invalid worker count: {value}; expected a positive integer, auto, or logical"
+                )
+            }),
+        }
     }
 }
 
@@ -96,7 +90,7 @@ mod tests {
         assert!(args.env.is_empty());
         assert!(args.numprocesses.is_none());
         assert!(args.maxprocesses.is_none());
-        assert_eq!(args.dist, "load");
+        assert_eq!(args.dist, DistributionMode::Load);
         assert!(!args.collect_only);
         assert!(args.files.is_empty());
         assert!(matches!(args.runner, Runner::Pytest));
@@ -127,73 +121,41 @@ mod tests {
     #[test]
     fn test_cli_parsing_with_numprocesses() {
         let args = Args::parse_from(["rtest", "-n", "4"]);
-        assert_eq!(args.numprocesses, Some("4".into()));
+        assert_eq!(
+            args.numprocesses,
+            Some(NumProcesses::Count(NonZeroUsize::new(4).expect("positive")))
+        );
 
         let args = Args::parse_from(["rtest", "--numprocesses", "auto"]);
-        assert_eq!(args.numprocesses, Some("auto".into()));
+        assert_eq!(args.numprocesses, Some(NumProcesses::Auto));
+
+        let args = Args::parse_from(["rtest", "-n", "logical"]);
+        assert_eq!(args.numprocesses, Some(NumProcesses::Logical));
     }
 
     #[test]
     fn test_cli_parsing_with_maxprocesses() {
         let args = Args::parse_from(["rtest", "--maxprocesses", "8"]);
-        assert_eq!(args.maxprocesses, Some(8));
+        assert_eq!(args.maxprocesses.map(NonZeroUsize::get), Some(8));
     }
 
     #[test]
     fn test_cli_parsing_with_dist() {
         let args = Args::parse_from(["rtest", "--dist", "load"]);
-        assert_eq!(args.dist, "load");
+        assert_eq!(args.dist, DistributionMode::Load);
     }
 
     #[test]
-    fn test_get_num_processes() {
-        let args = Args::parse_from(["rtest", "-n", "auto"]);
-        assert!(matches!(
-            args.get_num_processes(),
-            Ok(Some(NumProcesses::Auto))
-        ));
-
-        let args = Args::parse_from(["rtest", "-n", "logical"]);
-        assert!(matches!(
-            args.get_num_processes(),
-            Ok(Some(NumProcesses::Logical))
-        ));
-
-        let args = Args::parse_from(["rtest", "-n", "4"]);
-        assert!(matches!(
-            args.get_num_processes(),
-            Ok(Some(NumProcesses::Count(4)))
-        ));
-
-        let args = Args::parse_from(["rtest"]);
-        assert!(matches!(args.get_num_processes(), Ok(None)));
-
-        let args = Args::parse_from(["rtest", "-n", "invalid"]);
-        assert!(args.get_num_processes().is_err());
-    }
-
-    #[test]
-    fn test_validate_dist() {
-        let args = Args::parse_from(["rtest", "--dist", "load"]);
-        assert!(args.validate_dist().is_ok());
-
-        let args = Args::parse_from(["rtest", "--dist", "loadscope"]);
-        assert!(args.validate_dist().is_ok());
-
-        let args = Args::parse_from(["rtest", "--dist", "loadfile"]);
-        assert!(args.validate_dist().is_ok());
-
-        let args = Args::parse_from(["rtest", "--dist", "worksteal"]);
-        assert!(args.validate_dist().is_ok());
-
-        let args = Args::parse_from(["rtest", "--dist", "no"]);
-        assert!(args.validate_dist().is_ok());
-
-        let args = Args::parse_from(["rtest", "--dist", "invalid"]);
-        assert!(args.validate_dist().is_err());
-
-        let args = Args::parse_from(["rtest", "--dist", "loadgroup"]);
-        assert!(args.validate_dist().is_err()); // No longer supported
+    fn test_invalid_cli_configuration_rejected_at_parse_boundary() {
+        for arguments in [
+            ["rtest", "-n", "0"],
+            ["rtest", "-n", "invalid"],
+            ["rtest", "--maxprocesses", "0"],
+            ["rtest", "--dist", "invalid"],
+            ["rtest", "--dist", "loadgroup"],
+        ] {
+            assert!(Args::try_parse_from(arguments).is_err());
+        }
     }
 
     #[test]

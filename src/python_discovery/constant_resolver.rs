@@ -24,20 +24,35 @@ const MAX_IMPORT_DEPTH: usize = 8;
 /// Supports nested classes via recursive structure.
 #[derive(Debug, Default)]
 struct ConstantScope {
-    /// Direct constant assignments in this scope (e.g., `X = 42`).
-    constants: RefCell<HashMap<String, LiteralValue>>,
+    /// Each assignment has exactly one resolution state.
+    bindings: HashMap<String, ConstantBinding>,
     /// Nested class scopes.
     children: HashMap<String, ConstantScope>,
     /// Base class paths (`class Foo(Bar)` → `"Bar"`).
     bases: Vec<String>,
-    /// True when this class inherits from `Enum` / `IntEnum` / `StrEnum` / `Flag`.
-    is_enum: bool,
-    /// Sequence assignments whose elements are literals or attribute paths,
-    /// resolved after imported modules are loaded.
-    pending_sequences: Vec<(String, Vec<PendingElement>)>,
-    /// Track bindings even when their values are unknown. Repeated class bindings
-    /// need decorator evaluation order, so they use collection fallback.
-    assignments: HashMap<String, usize>,
+}
+
+#[derive(Debug)]
+struct ConstantBinding {
+    /// Repeated class assignments need decorator evaluation order and use fallback.
+    reassigned: bool,
+    value: RefCell<BindingValue>,
+}
+
+#[derive(Debug)]
+enum BindingValue {
+    Known(LiteralValue),
+    Pending(Rc<Vec<PendingElement>>),
+    Unknown,
+}
+
+impl ConstantBinding {
+    fn known_value(&self) -> Option<LiteralValue> {
+        match &*self.value.borrow() {
+            BindingValue::Known(value) => Some(value.clone()),
+            BindingValue::Pending(_) | BindingValue::Unknown => None,
+        }
+    }
 }
 
 /// A list/tuple element that could not be folded on the first pass.
@@ -51,9 +66,8 @@ enum PendingElement {
 #[derive(Debug)]
 struct ImportBinding {
     module_path: Vec<String>,
-    /// Empty for `import foo` (the local name is a module). Non-empty for
-    /// `from foo import Bar` (the local name is `Bar` inside `foo`).
-    imported_name: String,
+    /// None for a module import; Some(name) for an imported member.
+    imported_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -119,14 +133,12 @@ impl ConstantScope {
                                 })
                         })
                         .collect();
-                    child.is_enum = child.bases.iter().any(|base| is_enum_class_name(base));
                     scope.children.insert(class_def.name.to_string(), child);
                     continue;
                 }
                 _ => continue,
             };
             if let (Expr::Name(name), Some(value_expr)) = (target, value) {
-                *scope.assignments.entry(name.id.to_string()).or_default() += 1;
                 record_assignment(&mut scope, name.id.as_str(), value_expr);
             }
         }
@@ -138,7 +150,7 @@ impl ConstantScope {
     fn resolve_path(&self, path: &[&str]) -> Option<LiteralValue> {
         let (member, parents) = path.split_last()?;
         match parents.split_last() {
-            None => self.constants.borrow().get(*member).cloned(),
+            None => self.bindings.get(*member)?.known_value(),
             Some((class_name, ancestors)) => {
                 let scope = ancestors
                     .iter()
@@ -150,8 +162,8 @@ impl ConstantScope {
 
     fn lookup_class_member(&self, class_name: &str, member: &str) -> Option<LiteralValue> {
         let class = self.children.get(class_name)?;
-        if class.assignments.contains_key(member) {
-            return class.constants.borrow().get(member).cloned();
+        if let Some(binding) = class.bindings.get(member) {
+            return binding.known_value();
         }
         // Multiple inheritance needs Python's C3 order; leave it to fallback.
         let [base] = class.bases.as_slice() else {
@@ -164,10 +176,8 @@ impl ConstantScope {
         let Some(class) = self.children.get(class_name) else {
             return false;
         };
-        if class.is_enum {
-            return true;
-        }
-        class.bases.iter().any(|base| self.class_is_enum(base))
+        class.bases.iter().any(|base| is_enum_class_name(base))
+            || class.bases.iter().any(|base| self.class_is_enum(base))
     }
 
     fn collect_pending<'a>(
@@ -175,13 +185,12 @@ impl ConstantScope {
         module_path: &'a [String],
         pending: &mut Vec<PendingAssignment<'a>>,
     ) {
-        for (name, elements) in &self.pending_sequences {
-            if !self.constants.borrow().contains_key(name) {
+        for binding in self.bindings.values() {
+            if let BindingValue::Pending(elements) = &*binding.value.borrow() {
                 pending.push(PendingAssignment {
                     module_path,
-                    scope: self,
-                    name,
-                    elements,
+                    value: &binding.value,
+                    elements: Rc::clone(elements),
                 });
             }
         }
@@ -192,17 +201,20 @@ impl ConstantScope {
 }
 
 fn record_assignment(scope: &mut ConstantScope, name: &str, value: &Expr) {
-    scope.constants.get_mut().remove(name);
-    scope
-        .pending_sequences
-        .retain(|(pending, _)| pending != name);
-    if let Some(literal) = try_extract_literal(value) {
-        scope.constants.get_mut().insert(name.to_string(), literal);
-        return;
-    }
-    if let Some(elements) = try_pending_sequence(value) {
-        scope.pending_sequences.push((name.to_string(), elements));
-    }
+    let value = try_extract_literal(value)
+        .map(BindingValue::Known)
+        .or_else(|| {
+            try_pending_sequence(value).map(|elements| BindingValue::Pending(Rc::new(elements)))
+        })
+        .unwrap_or(BindingValue::Unknown);
+    let reassigned = scope.bindings.contains_key(name);
+    scope.bindings.insert(
+        name.into(),
+        ConstantBinding {
+            reassigned,
+            value: RefCell::new(value),
+        },
+    );
 }
 
 fn try_pending_sequence(expr: &Expr) -> Option<Vec<PendingElement>> {
@@ -240,7 +252,7 @@ fn imported_expression_name(
             .module_path
             .iter()
             .map(String::as_str)
-            .chain(std::iter::once(import.imported_name.as_str()).filter(|name| !name.is_empty()))
+            .chain(import.imported_name.iter().map(String::as_str))
             .chain(rest.iter().copied())
             .collect::<Vec<_>>()
             .join("."),
@@ -254,11 +266,20 @@ fn is_enum_class_name(name: &str) -> bool {
     )
 }
 
-fn wrap_enum_member(value: LiteralValue, is_enum: bool, path: &[String]) -> LiteralValue {
-    if is_enum {
-        LiteralValue::EnumMember(path[path.len().saturating_sub(2)..].join("."))
-    } else {
-        value
+/// Enum identity uses the access path, not the discarded underlying value.
+enum ResolvedValue {
+    Literal(LiteralValue),
+    EnumMember,
+}
+
+impl ResolvedValue {
+    fn into_literal(self, path: &[String]) -> LiteralValue {
+        match self {
+            Self::Literal(value) => value,
+            Self::EnumMember => {
+                LiteralValue::EnumMember(path[path.len().saturating_sub(2)..].join("."))
+            }
+        }
     }
 }
 
@@ -316,15 +337,14 @@ impl ConstantResolver {
         expr: &Expr,
     ) -> Option<ResolvedConstant> {
         let name = UnqualifiedName::from_expr(expr)?;
-        let (value, is_enum_member) =
-            self.lookup_path_at(&self.current_path, enclosing_class, name.segments(), 0)?;
+        let value = self.lookup_path_at(&self.current_path, enclosing_class, name.segments(), 0)?;
         let path: Vec<String> = name
             .segments()
             .iter()
             .map(|segment| (*segment).into())
             .collect();
         Some(ResolvedConstant {
-            value: wrap_enum_member(value, is_enum_member, &path),
+            value: value.into_literal(&path),
             source_path: path,
         })
     }
@@ -373,7 +393,7 @@ impl ConstantResolver {
             let updates: Vec<_> = pending
                 .into_iter()
                 .filter_map(|assignment| {
-                    self.resolve_pending_elements(assignment.module_path, assignment.elements, 0)
+                    self.resolve_pending_elements(assignment.module_path, &assignment.elements, 0)
                         .map(|value| (assignment, value))
                 })
                 .collect();
@@ -381,11 +401,7 @@ impl ConstantResolver {
                 break;
             }
             for (assignment, value) in updates {
-                assignment
-                    .scope
-                    .constants
-                    .borrow_mut()
-                    .insert(assignment.name.into(), value);
+                *assignment.value.borrow_mut() = BindingValue::Known(value);
             }
         }
     }
@@ -396,7 +412,7 @@ impl ConstantResolver {
         enclosing_class: Option<&str>,
         path: &[&str],
         depth: usize,
-    ) -> Option<(LiteralValue, bool)> {
+    ) -> Option<ResolvedValue> {
         if depth > MAX_IMPORT_DEPTH {
             return None;
         }
@@ -404,8 +420,8 @@ impl ConstantResolver {
         let module = Rc::clone(self.modules.borrow().get(module_path)?);
         if enclosing_class
             .and_then(|name| module.scope.children.get(name))
-            .and_then(|scope| scope.assignments.get(first))
-            .is_some_and(|count| *count > 1)
+            .and_then(|scope| scope.bindings.get(first))
+            .is_some_and(|binding| binding.reassigned)
         {
             return None;
         }
@@ -417,43 +433,36 @@ impl ConstantResolver {
             }
             if enclosing_class
                 .and_then(|name| module.scope.children.get(name))
-                .is_some_and(|scope| scope.assignments.contains_key(first))
+                .is_some_and(|scope| scope.bindings.contains_key(first))
             {
                 return None;
             }
-            if let Some(value) = module.scope.constants.borrow().get(first) {
-                return Some((value.clone(), false));
-            }
-            let pending = module
-                .scope
-                .pending_sequences
-                .iter()
-                .find(|(name, _)| name == first);
-            if let Some(value) = pending.and_then(|(_, elements)| {
-                self.resolve_pending_elements(module_path, elements, depth + 1)
-            }) {
-                module
-                    .scope
-                    .constants
-                    .borrow_mut()
-                    .insert(first.to_string(), value.clone());
-                return Some((value, false));
-            }
-            if module.scope.assignments.contains_key(first) {
-                return None;
+            if let Some(binding) = module.scope.bindings.get(first) {
+                let elements = match &*binding.value.borrow() {
+                    BindingValue::Known(value) => {
+                        return Some(ResolvedValue::Literal(value.clone()))
+                    }
+                    BindingValue::Pending(elements) => Rc::clone(elements),
+                    BindingValue::Unknown => return None,
+                };
+                let value = self.resolve_pending_elements(module_path, &elements, depth + 1)?;
+                *binding.value.borrow_mut() = BindingValue::Known(value.clone());
+                return Some(ResolvedValue::Literal(value));
             }
         } else if module.scope.children.contains_key(first) {
             return self.lookup_class_path(module_path, first, rest, depth);
         }
 
         let import = module.imports.get(first)?;
-        if import.imported_name.is_empty() && rest.is_empty() {
+        if import.imported_name.is_none() && rest.is_empty() {
             return None;
         }
         let abs = &import.module_path;
         self.ensure_loaded(abs, depth + 1);
-        let imported_path: Vec<&str> = std::iter::once(import.imported_name.as_str())
-            .filter(|name| !name.is_empty())
+        let imported_path: Vec<&str> = import
+            .imported_name
+            .iter()
+            .map(String::as_str)
             .chain(rest.iter().copied())
             .collect();
         self.lookup_path_at(abs, None, &imported_path, depth + 1)
@@ -471,9 +480,8 @@ impl ConstantResolver {
                 PendingElement::Literal(value) => values.push(value.clone()),
                 PendingElement::Path(path) => {
                     let name: UnqualifiedName = path.iter().map(String::as_str).collect();
-                    let (value, is_enum) =
-                        self.lookup_path_at(module_path, None, name.segments(), depth)?;
-                    values.push(wrap_enum_member(value, is_enum, path));
+                    let value = self.lookup_path_at(module_path, None, name.segments(), depth)?;
+                    values.push(value.into_literal(path));
                 }
             }
         }
@@ -486,7 +494,7 @@ impl ConstantResolver {
         class_name: &str,
         rest: &[&str],
         depth: usize,
-    ) -> Option<(LiteralValue, bool)> {
+    ) -> Option<ResolvedValue> {
         match rest {
             [member] => self.lookup_class_member(module_path, class_name, member, depth),
             _ => {
@@ -495,7 +503,7 @@ impl ConstantResolver {
                 let path: Vec<&str> = std::iter::once(class_name)
                     .chain(rest.iter().copied())
                     .collect();
-                module.scope.resolve_path(&path).map(|value| (value, false))
+                module.scope.resolve_path(&path).map(ResolvedValue::Literal)
             }
         }
     }
@@ -506,37 +514,33 @@ impl ConstantResolver {
         class_name: &str,
         member: &str,
         depth: usize,
-    ) -> Option<(LiteralValue, bool)> {
+    ) -> Option<ResolvedValue> {
         let module = Rc::clone(self.modules.borrow().get(module_path)?);
         if let Some(value) = module.scope.lookup_class_member(class_name, member) {
-            return Some((value, module.scope.class_is_enum(class_name)));
+            return Some(if module.scope.class_is_enum(class_name) {
+                ResolvedValue::EnumMember
+            } else {
+                ResolvedValue::Literal(value)
+            });
         }
         let class = module.scope.children.get(class_name)?;
-        if class.assignments.contains_key(member) {
+        if class.bindings.contains_key(member) {
             return None;
         }
         let [base] = class.bases.as_slice() else {
             return None;
         };
         let import = module.imports.get(base)?;
-        if import.imported_name.is_empty() {
-            return None;
-        }
+        let imported_name = import.imported_name.as_deref()?;
         self.ensure_loaded(&import.module_path, depth + 1);
-        self.lookup_class_member(
-            &import.module_path,
-            &import.imported_name,
-            member,
-            depth + 1,
-        )
+        self.lookup_class_member(&import.module_path, imported_name, member, depth + 1)
     }
 }
 
 struct PendingAssignment<'a> {
     module_path: &'a [String],
-    scope: &'a ConstantScope,
-    name: &'a str,
-    elements: &'a [PendingElement],
+    value: &'a RefCell<BindingValue>,
+    elements: Rc<Vec<PendingElement>>,
 }
 
 fn collect_imports(module: &ModModule, context: &[String]) -> HashMap<String, ImportBinding> {
@@ -570,7 +574,7 @@ fn collect_imports(module: &ModModule, context: &[String]) -> HashMap<String, Im
                         local_name,
                         ImportBinding {
                             module_path: module_path.clone(),
-                            imported_name,
+                            imported_name: Some(imported_name),
                         },
                     );
                 }
@@ -583,7 +587,7 @@ fn collect_imports(module: &ModModule, context: &[String]) -> HashMap<String, Im
                             asname.to_string(),
                             ImportBinding {
                                 module_path: parts,
-                                imported_name: String::new(),
+                                imported_name: None,
                             },
                         );
                     } else if let Some(first) = parts.first() {
@@ -591,7 +595,7 @@ fn collect_imports(module: &ModModule, context: &[String]) -> HashMap<String, Im
                             first.clone(),
                             ImportBinding {
                                 module_path: vec![first.clone()],
-                                imported_name: String::new(),
+                                imported_name: None,
                             },
                         );
                     }

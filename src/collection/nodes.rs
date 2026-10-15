@@ -1,8 +1,8 @@
 //! Collection node implementations.
 
 use super::config::CollectionConfig;
-use super::error::{CollectionError, CollectionOutcome, CollectionResult, CollectionWarning};
-use super::types::{Collector, Location};
+use super::error::{CollectionError, CollectionResult, CollectionWarning};
+use super::types::{CollectionNode, Collector, Location};
 use super::utils::glob_match_any;
 use crate::python_discovery::{
     discover_tests_with_inheritance, format_cannot_expand_warning, test_info_to_functions,
@@ -15,14 +15,12 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub struct Session {
     pub rootpath: PathBuf,
-    pub nodeid: String,
     pub config: CollectionConfig,
 }
 
 impl Session {
     pub fn new(rootpath: PathBuf) -> Self {
         Self {
-            nodeid: String::new(),
             rootpath,
             config: CollectionConfig::default(),
         }
@@ -32,11 +30,10 @@ impl Session {
         args.iter().map(|arg| self.rootpath.join(arg)).collect()
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn perform_collect(
         self: Rc<Self>,
         args: &[String],
-    ) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<(String, CollectionError)>)> {
+    ) -> CollectionResult<Vec<CollectionNode>> {
         let paths = if args.is_empty() {
             let pytest_config = crate::config::read_pytest_config(&self.rootpath);
 
@@ -61,44 +58,42 @@ impl Session {
             resolved
         };
 
-        let mut collectors: Vec<Box<dyn Collector>> = Vec::new();
-        let mut path_errors: Vec<(String, CollectionError)> = Vec::new();
-        for path in paths {
-            match self.collect_path(&path) {
-                Ok(items) => collectors.extend(items),
-                Err(e) => path_errors.push((path.to_string_lossy().into_owned(), e)),
-            }
-        }
-        Ok((collectors, path_errors))
+        Ok(paths
+            .iter()
+            .filter_map(|path| self.collect_path(path))
+            .collect())
     }
 
-    fn collect_path(self: &Rc<Self>, path: &Path) -> CollectionResult<Vec<Box<dyn Collector>>> {
-        if self.should_ignore_path(path)? {
-            return Ok(vec![]);
+    fn collect_path(self: &Rc<Self>, path: &Path) -> Option<CollectionNode> {
+        if self.should_ignore_path(path) {
+            return None;
         }
-
         if path.is_dir() {
-            let dir = Directory::new(path.to_path_buf(), Rc::clone(self));
-            Ok(vec![Box::new(dir)])
+            Some(CollectionNode::Branch(Box::new(Directory::new(
+                path.to_path_buf(),
+                Rc::clone(self),
+            ))))
         } else if path.is_file() && self.is_python_file(path) {
-            let module = Module::new(path.to_path_buf(), Rc::clone(self));
-            Ok(vec![Box::new(module)])
+            Some(CollectionNode::Branch(Box::new(Module::new(
+                path.to_path_buf(),
+                Rc::clone(self),
+            ))))
         } else {
-            Ok(vec![])
+            None
         }
     }
 
-    pub fn should_ignore_path(&self, path: &Path) -> CollectionResult<bool> {
+    pub fn should_ignore_path(&self, path: &Path) -> bool {
         // Check __pycache__
         if path.file_name() == Some(std::ffi::OsStr::new("__pycache__")) {
-            return Ok(true);
+            return true;
         }
 
         // Check ignore patterns
         let path_str = path.to_string_lossy();
         for pattern in &self.config.ignore_patterns {
             if path_str.contains(pattern) {
-                return Ok(true);
+                return true;
             }
         }
 
@@ -107,36 +102,17 @@ impl Session {
             let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if glob_match_any(&self.config.norecursedirs, dir_name) {
-                return Ok(true);
+                return true;
             }
         }
 
-        Ok(false)
+        false
     }
 
     pub fn is_python_file(&self, path: &Path) -> bool {
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         glob_match_any(&self.config.python_files, filename)
-    }
-}
-
-impl Collector for Session {
-    fn nodeid(&self) -> &str {
-        &self.nodeid
-    }
-
-    fn parent(&self) -> Option<&dyn Collector> {
-        None
-    }
-
-    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
-        // Session collection is handled by perform_collect
-        Ok((vec![], vec![]))
-    }
-
-    fn path(&self) -> &Path {
-        &self.rootpath
     }
 }
 
@@ -162,10 +138,6 @@ impl Directory {
             parent_session: session,
         }
     }
-
-    fn session(&self) -> &Session {
-        &self.parent_session
-    }
 }
 
 impl Collector for Directory {
@@ -173,11 +145,7 @@ impl Collector for Directory {
         &self.nodeid
     }
 
-    fn parent(&self) -> Option<&dyn Collector> {
-        Some(self.session() as &dyn Collector)
-    }
-
-    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
+    fn collect(&self) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)> {
         let read_dir_result = std::fs::read_dir(&self.path);
         let dir_entries = match read_dir_result {
             Ok(entries) => entries,
@@ -197,14 +165,10 @@ impl Collector for Directory {
                 Err(err) => return Err(err.into()),
             };
 
-            items.extend(self.parent_session.collect_path(&entry.path())?);
+            items.extend(self.parent_session.collect_path(&entry.path()));
         }
 
         Ok((items, vec![]))
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
     }
 }
 
@@ -241,11 +205,7 @@ impl Collector for Module {
         &self.nodeid
     }
 
-    fn parent(&self) -> Option<&dyn Collector> {
-        Some(self.session() as &dyn Collector)
-    }
-
-    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
+    fn collect(&self) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)> {
         // Read the Python file
         let source = std::fs::read_to_string(&self.path)?;
 
@@ -263,7 +223,7 @@ impl Collector for Module {
 
         let mut all_warnings: Vec<CollectionWarning> = discovery_warnings;
 
-        let functions: Vec<Box<dyn Collector>> = tests
+        let functions: Vec<CollectionNode> = tests
             .into_iter()
             .flat_map(|test| {
                 if let CasesExpansion::CannotExpand(reason) = &test.cases_expansion {
@@ -277,14 +237,10 @@ impl Collector for Module {
                 }
                 test_info_to_functions(&test, &self.path, &self.nodeid)
             })
-            .map(|function| Box::new(function) as Box<dyn Collector>)
+            .map(CollectionNode::Test)
             .collect();
 
         Ok((functions, all_warnings))
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
     }
 }
 
@@ -295,83 +251,6 @@ pub struct Function {
     pub name: String,
     pub nodeid: String,
     pub location: Location,
-}
-
-impl Collector for Function {
-    fn nodeid(&self) -> &str {
-        &self.nodeid
-    }
-
-    fn parent(&self) -> Option<&dyn Collector> {
-        None // TODO: Store parent reference
-    }
-
-    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)> {
-        // Functions are leaf nodes, they don't collect
-        Ok((vec![], vec![]))
-    }
-
-    fn path(&self) -> &Path {
-        &self.location.path
-    }
-
-    fn is_item(&self) -> bool {
-        true
-    }
-}
-
-/// Collection report
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct CollectReport {
-    pub nodeid: String,
-    pub outcome: CollectionOutcome,
-    pub longrepr: Option<String>,
-    pub error_type: Option<CollectionError>,
-    pub result: Vec<Box<dyn Collector>>,
-    pub warnings: Vec<CollectionWarning>,
-}
-
-impl CollectReport {
-    pub fn new(
-        nodeid: String,
-        outcome: CollectionOutcome,
-        longrepr: Option<String>,
-        error_type: Option<CollectionError>,
-        result: Vec<Box<dyn Collector>>,
-        warnings: Vec<CollectionWarning>,
-    ) -> Self {
-        Self {
-            nodeid,
-            outcome,
-            longrepr,
-            error_type,
-            result,
-            warnings,
-        }
-    }
-}
-
-/// Collect a single node and return a report
-pub fn collect_one_node(collector: &dyn Collector) -> CollectReport {
-    match collector.collect() {
-        Ok((result, warnings)) => CollectReport::new(
-            collector.nodeid().into(),
-            CollectionOutcome::Passed,
-            None,
-            None,
-            result,
-            warnings,
-        ),
-        Err(e) => CollectReport::new(
-            collector.nodeid().into(),
-            CollectionOutcome::Failed,
-            Some(e.to_string()),
-            Some(e),
-            vec![],
-            vec![],
-        ),
-    }
 }
 
 #[cfg(test)]

@@ -1,14 +1,31 @@
+use std::fmt;
 use std::path::PathBuf;
+use std::process::Output;
 use std::thread;
 
 use crate::pytest_executor::pytest_command;
 
 #[derive(Debug)]
+pub enum WorkerError {
+    Launch(std::io::Error),
+    Panicked,
+}
+
+impl fmt::Display for WorkerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Launch(error) => write!(f, "Failed to execute command: {error}"),
+            Self::Panicked => write!(f, "Worker thread panicked"),
+        }
+    }
+}
+
+impl std::error::Error for WorkerError {}
+
+#[derive(Debug)]
 pub struct WorkerResult {
     pub worker_id: usize,
-    pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
+    pub result: Result<Output, WorkerError>,
 }
 
 /// Configuration for a worker task
@@ -28,7 +45,7 @@ pub struct WorkerPool {
 
 struct WorkerHandle {
     id: usize,
-    handle: thread::JoinHandle<WorkerResult>,
+    handle: thread::JoinHandle<std::io::Result<Output>>,
 }
 
 impl Default for WorkerPool {
@@ -47,7 +64,7 @@ impl WorkerPool {
     pub fn spawn_worker(&mut self, task: WorkerTask) {
         let worker_id = task.worker_id;
         let handle = thread::spawn(move || {
-            match pytest_command(
+            pytest_command(
                 &task.program,
                 &task.initial_args,
                 &task.tests,
@@ -56,20 +73,6 @@ impl WorkerPool {
                 &task.env_vars,
             )
             .output()
-            {
-                Ok(output) => WorkerResult {
-                    worker_id: task.worker_id,
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-                },
-                Err(e) => WorkerResult {
-                    worker_id: task.worker_id,
-                    exit_code: -1,
-                    stdout: String::new(),
-                    stderr: format!("Failed to execute command: {e}"),
-                },
-            }
         });
 
         self.workers.push(WorkerHandle {
@@ -79,23 +82,19 @@ impl WorkerPool {
     }
 
     pub fn wait_for_all(self) -> Vec<WorkerResult> {
-        let mut results = Vec::new();
-
-        for worker in self.workers {
-            match worker.handle.join() {
-                Ok(result) => results.push(result),
-                Err(_) => {
-                    results.push(WorkerResult {
-                        worker_id: worker.id,
-                        exit_code: -1,
-                        stdout: String::new(),
-                        stderr: "Worker thread panicked".into(),
-                    });
-                }
-            }
-        }
-
-        results.sort_by_key(|r| r.worker_id);
+        let mut results: Vec<_> = self
+            .workers
+            .into_iter()
+            .map(|worker| WorkerResult {
+                worker_id: worker.id,
+                result: worker
+                    .handle
+                    .join()
+                    .map_err(|_| WorkerError::Panicked)
+                    .and_then(|result| result.map_err(WorkerError::Launch)),
+            })
+            .collect();
+        results.sort_by_key(|result| result.worker_id);
         results
     }
 

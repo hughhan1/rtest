@@ -69,6 +69,21 @@ class TestCLIErrorHandling:
             )
             assert result.returncode != 0
 
+    @rtest.mark.cases("runner", ["native", "pytest"])
+    @rtest.mark.cases("option", ["-n", "--maxprocesses"])
+    def test_zero_worker_configuration_rejected(self, runner: str, option: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "test_failure.py").write_text("def test_failure(): assert False\n")
+            result = subprocess.run(
+                [sys.executable, "-m", "rtest", "--runner", runner, option, "0"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "invalid value" in result.stderr
+
 
 class TestNativeRunnerEndToEnd:
     """End-to-end tests for native runner."""
@@ -115,6 +130,29 @@ class TestNativeRunnerEndToEnd:
             )
             assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "ModuleNotFoundError" in result.stdout
+
+    @rtest.mark.cases(
+        "source",
+        [
+            "import os\ndef test_exit(): os._exit(0)\n",
+            "from rtest.worker.runner import TestResult\n"
+            "TestResult.to_json = lambda self: '{invalid'\n"
+            "def test_pass(): pass\n",
+        ],
+    )
+    def test_missing_or_malformed_worker_results_fail_the_run(self, source: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "test_worker.py").write_text(source)
+            result = subprocess.run(
+                [sys.executable, "-m", "rtest", "--runner", "native"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == ExitCodeValues.TESTS_FAILED
+            assert "FAILED" in result.stdout
+            assert "1 worker error" in result.stdout
 
 
 class TestPytestEnvironment:

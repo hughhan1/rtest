@@ -23,7 +23,7 @@ use crate::python_discovery::{
 #[derive(Debug, Clone)]
 struct ImportInfo {
     module_path: Vec<String>,
-    imported_name: String,
+    imported_name: Option<String>,
     /// The level of relative import (0 for absolute, 1 for '.', 2 for '..', etc.)
     relative_level: usize,
 }
@@ -33,6 +33,8 @@ struct ImportInfo {
 pub struct ResolvedBaseClass {
     module_path: Vec<String>,
     class_name: String,
+    // Local references use the current discovery cache; imported aliases may
+    // require loading additional classes from the same module.
     is_local: bool,
 }
 
@@ -126,7 +128,6 @@ impl SemanticTestDiscovery {
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
                         line: func.range().start().to_u32() as usize,
-                        is_method: false,
                         class_name: None,
                         cases_expansion,
                     });
@@ -168,7 +169,7 @@ impl SemanticTestDiscovery {
                             local_name,
                             ImportInfo {
                                 module_path: module_path.clone(),
-                                imported_name,
+                                imported_name: Some(imported_name),
                                 relative_level: level,
                             },
                         );
@@ -184,7 +185,7 @@ impl SemanticTestDiscovery {
                             local_name,
                             ImportInfo {
                                 module_path: parts,
-                                imported_name: String::new(),
+                                imported_name: None,
                                 relative_level: 0,
                             },
                         );
@@ -311,7 +312,6 @@ impl SemanticTestDiscovery {
                 TestInfo {
                     name: method.name,
                     line: method.line,
-                    is_method: true,
                     class_name: Some(class_name.to_string()),
                     cases_expansion,
                 }
@@ -493,7 +493,10 @@ impl SemanticTestDiscovery {
                         is_local: true,
                     }));
                 };
-                (import_info, import_info.imported_name.clone())
+                let Some(class_name) = &import_info.imported_name else {
+                    return Ok(None);
+                };
+                (import_info, class_name.clone())
             }
             Expr::Attribute(attr_expr) => {
                 let Expr::Name(module_name) = &*attr_expr.value else {

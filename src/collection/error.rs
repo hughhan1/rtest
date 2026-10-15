@@ -39,15 +39,6 @@ impl From<std::io::Error> for CollectionError {
     }
 }
 
-/// Outcome of a collection operation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum CollectionOutcome {
-    Passed,
-    Failed,
-    Skipped,
-}
-
 /// Collection warnings
 #[derive(Debug, Clone)]
 pub struct CollectionWarning {

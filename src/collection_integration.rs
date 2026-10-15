@@ -2,7 +2,7 @@
 
 use crate::collection::error::{CollectionError, CollectionWarning};
 use crate::collection::nodes::Session;
-use crate::collection::types::Collector;
+use crate::collection::types::CollectionNode;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -24,35 +24,33 @@ pub fn collect_tests_rust(
         warnings: Vec::new(),
     };
 
-    let (collectors, path_errors) = session.perform_collect(args)?;
-    collection_errors.errors.extend(path_errors);
+    let collectors = session.perform_collect(args)?;
     let mut test_nodes = Vec::new();
     for collector in collectors {
-        collect_items_recursive(collector.as_ref(), &mut test_nodes, &mut collection_errors);
+        collect_items_recursive(&collector, &mut test_nodes, &mut collection_errors);
     }
     Ok((test_nodes, collection_errors))
 }
 
 /// Recursively collect all test items
 fn collect_items_recursive(
-    collector: &dyn Collector,
+    node: &CollectionNode,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
 ) {
-    if collector.is_item() {
-        test_nodes.push(collector.nodeid().into());
-    } else {
-        match collector.collect() {
+    match node {
+        CollectionNode::Test(test) => test_nodes.push(test.nodeid.clone()),
+        CollectionNode::Branch(collector) => match collector.collect() {
             Ok((children, warnings)) => {
                 collection_errors.warnings.extend(warnings);
                 for child in children {
-                    collect_items_recursive(child.as_ref(), test_nodes, collection_errors);
+                    collect_items_recursive(&child, test_nodes, collection_errors);
                 }
             }
             Err(error) => collection_errors
                 .errors
                 .push((collector.nodeid().into(), error)),
-        }
+        },
     }
 }
 
