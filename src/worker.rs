@@ -34,8 +34,7 @@ pub struct WorkerTask {
     pub program: String,
     pub initial_args: Vec<String>,
     pub tests: Vec<String>,
-    pub pytest_args: Vec<String>,
-    pub working_dir: Option<PathBuf>,
+    pub working_dir: PathBuf,
     pub env_vars: Vec<(String, String)>,
 }
 
@@ -61,8 +60,8 @@ impl WorkerPool {
                 &task.program,
                 &task.initial_args,
                 &task.tests,
-                &task.pytest_args,
-                task.working_dir.as_deref(),
+                &[],
+                Some(&task.working_dir),
                 &task.env_vars,
             )
             .output()

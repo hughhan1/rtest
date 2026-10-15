@@ -8,26 +8,23 @@ pub(crate) fn split_test_node(node: &str) -> (&str, &str) {
     node.split_at(node.find("::").unwrap_or(node.len()))
 }
 
-/// Groups test nodes by their subproject
+/// Group tests into nonempty subprojects with paths relative to each working directory.
 pub fn group_tests_by_subproject(
     rootpath: &Path,
-    test_nodes: &[String],
+    test_nodes: Vec<String>,
 ) -> HashMap<PathBuf, Vec<String>> {
     let mut groups: HashMap<PathBuf, Vec<String>> = HashMap::new();
     let mut subproject_roots: HashSet<PathBuf> = HashSet::new();
 
     for test_node in test_nodes {
-        let subproject_root = find_subproject_root(rootpath, test_node);
+        let subproject_root = find_subproject_root(rootpath, &test_node);
         let is_subproject = subproject_root != *rootpath;
 
         if is_subproject {
             subproject_roots.insert(subproject_root.clone());
         }
 
-        groups
-            .entry(subproject_root)
-            .or_default()
-            .push(test_node.clone());
+        groups.entry(subproject_root).or_default().push(test_node);
     }
 
     if let Some(root_tests) = groups.get_mut(rootpath) {
@@ -41,6 +38,12 @@ pub fn group_tests_by_subproject(
         });
     }
 
+    groups.retain(|directory, tests| {
+        if directory != rootpath {
+            *tests = make_test_paths_relative(tests, rootpath, directory);
+        }
+        !tests.is_empty()
+    });
     groups
 }
 
@@ -85,6 +88,41 @@ pub fn make_test_paths_relative(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn groups_nonempty_projects_with_paths_relative_to_their_working_directory() {
+        let project = tempfile::tempdir().expect("temporary project");
+        let root = project.path().canonicalize().expect("canonical root");
+        let nested = root.join("nested");
+        std::fs::create_dir(&nested).expect("nested project");
+        for path in [
+            root.join("test_root.py"),
+            nested.join("test_child.py"),
+            nested.join("pyproject.toml"),
+        ] {
+            std::fs::write(path, "").expect("project file");
+        }
+        let groups = group_tests_by_subproject(
+            &root,
+            vec![
+                "test_root.py::test_root".into(),
+                "nested/test_child.py::TestChild::test_method[x::y]".into(),
+                // Existing behavior excludes unresolved nodes under a discovered subproject.
+                "nested/test_missing.py::test_missing".into(),
+            ],
+        );
+        assert_eq!(
+            groups,
+            HashMap::from([
+                (root.clone(), vec!["test_root.py::test_root".into()]),
+                (
+                    nested,
+                    vec!["test_child.py::TestChild::test_method[x::y]".into()]
+                ),
+            ])
+        );
+        assert!(group_tests_by_subproject(&root, vec![]).is_empty());
+    }
 
     #[test]
     fn test_make_test_paths_relative() {

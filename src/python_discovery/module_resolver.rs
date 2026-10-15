@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 /// Information about a parsed Python module
 pub struct ParsedModule {
     pub path: PathBuf,
-    pub source: String,
     pub module: ModModule,
 }
 
@@ -100,14 +99,8 @@ impl ModuleResolver {
 
         Ok(ParsedModule {
             path: path.to_path_buf(),
-            source,
             module: parsed.into_syntax(),
         })
-    }
-
-    /// Clear the module cache
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
     }
 }
 

@@ -294,11 +294,7 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
 
     // TempDir is automatically cleaned up when dropped
 
-    if aggregated.has_failures() {
-        1
-    } else {
-        0
-    }
+    i32::from(aggregated.has_failures())
 }
 
 fn is_hidden_or_ignored(name: &str) -> bool {

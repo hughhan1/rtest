@@ -75,16 +75,9 @@ pub enum CasesExpansion {
     /// No `@cases` or `@parametrize` decorators found.
     NotDecorated,
     /// Successfully expanded to multiple test cases.
-    Expanded(Vec<ExpandedCase>),
+    Expanded(Vec<String>),
     /// Cannot statically expand; fall back to base test name.
     CannotExpand(CannotExpandReason),
-}
-
-/// A single expanded test case.
-#[derive(Debug, Clone)]
-pub struct ExpandedCase {
-    /// The case ID suffix, e.g., `"0"`, `"a-b"`, `"my_custom_id"`.
-    pub case_id: String,
 }
 
 /// Format a warning message for tests that cannot be statically expanded.
@@ -782,12 +775,7 @@ fn expand_cases<'a>(specs: impl DoubleEndedIterator<Item = &'a CasesSpec>) -> Ca
     } else {
         deduplicate_ids(ids)
     };
-    CasesExpansion::Expanded(
-        unique
-            .into_iter()
-            .map(|case_id| ExpandedCase { case_id })
-            .collect(),
-    )
+    CasesExpansion::Expanded(unique)
 }
 
 /// pytest 7.3: every copy of a duplicated ID gets a trailing counter, including the first (`id0`, `id1`).

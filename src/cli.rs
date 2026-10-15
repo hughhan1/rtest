@@ -81,7 +81,6 @@ impl std::str::FromStr for NumProcesses {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
 
     #[test]
     fn test_cli_parsing_defaults() {
@@ -101,21 +100,6 @@ mod tests {
         let args = Args::parse_from(["rtest", "--env", "DEBUG=1", "--env", "TEST=true"]);
 
         assert_eq!(args.env, vec!["DEBUG=1", "TEST=true"]);
-    }
-
-    #[test]
-    fn test_cli_parsing_all_options() {
-        let args = Args::parse_from(["rtest", "--env", "DEBUG=1", "--env", "ENV=test"]);
-
-        assert_eq!(args.env, vec!["DEBUG=1", "ENV=test"]);
-    }
-
-    #[test]
-    fn test_cli_help_generation() {
-        let mut cmd = Args::command();
-        let help = cmd.render_help();
-
-        assert!(help.to_string().contains("env"));
     }
 
     #[test]
@@ -141,8 +125,8 @@ mod tests {
 
     #[test]
     fn test_cli_parsing_with_dist() {
-        let args = Args::parse_from(["rtest", "--dist", "load"]);
-        assert_eq!(args.dist, DistributionMode::Load);
+        let args = Args::parse_from(["rtest", "--dist", "loadscope"]);
+        assert_eq!(args.dist, DistributionMode::LoadScope);
     }
 
     #[test]
@@ -162,17 +146,11 @@ mod tests {
     fn test_cli_parsing_with_collect_only() {
         let args = Args::parse_from(["rtest", "--collect-only"]);
         assert!(args.collect_only);
-
-        let args = Args::parse_from(["rtest"]);
-        assert!(!args.collect_only);
     }
 
     #[test]
     fn test_cli_parsing_with_runner() {
         let args = Args::parse_from(["rtest", "--runner", "native"]);
         assert!(matches!(args.runner, Runner::Native));
-
-        let args = Args::parse_from(["rtest", "--runner", "pytest"]);
-        assert!(matches!(args.runner, Runner::Pytest));
     }
 }

@@ -307,7 +307,7 @@ def run_tests(
             sys.path.insert(0, test_dir)
 
     all_test_cases: list[TestCase] = []
-    import_errors: list[TestResult] = []
+    results: list[TestResult] = []
     loaded_modules: list[str] = []
 
     for file_path in test_files:
@@ -318,7 +318,7 @@ def run_tests(
             test_cases = _discover_tests_in_module(module, file_path, root, python_classes, python_functions)
             all_test_cases.extend(test_cases)
         except Exception as e:
-            import_errors.append(
+            results.append(
                 TestResult(
                     nodeid=f"{_relative_path(file_path, root)}::IMPORT_ERROR",
                     status=Error(TracebackInfo(traceback.format_exc()), type(e).__name__),
@@ -328,12 +328,7 @@ def run_tests(
 
     all_test_cases.sort(key=lambda tc: tc.nodeid)
 
-    results: list[TestResult] = []
-    results.extend(import_errors)
-
-    for test_case in all_test_cases:
-        result = _run_single_test(test_case)
-        results.append(result)
+    results.extend(_run_single_test(test_case) for test_case in all_test_cases)
 
     for loaded_module_name in loaded_modules:
         sys.modules.pop(loaded_module_name, None)
@@ -343,5 +338,4 @@ def run_tests(
         for result in results:
             f.write(result.to_json() + "\n")
 
-    has_failures = any(isinstance(r.status, (Failed, Error)) for r in results)
-    return 1 if has_failures else 0
+    return int(any(isinstance(r.status, (Failed, Error)) for r in results))

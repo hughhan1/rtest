@@ -3,12 +3,13 @@
 use clap::Parser;
 use pyo3::prelude::*;
 use std::env;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 
 use crate::cli::{exit_codes, Args, Runner};
 use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
-use crate::runner::{parse_env_vars, PytestRunner};
+use crate::runner::PytestRunner;
 use crate::scheduler::DistributionMode;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
@@ -35,29 +36,6 @@ fn handle_collection_error(e: CollectionError) -> ! {
     }
 }
 
-impl PytestRunner {
-    pub fn from_current_python(py: Python) -> Self {
-        let initial_args = vec!["-m".to_string(), "pytest".to_string()];
-
-        Self {
-            program: get_python_executable(py),
-            initial_args,
-            env_vars: vec![],
-        }
-    }
-
-    pub fn from_current_python_with_env(py: Python, env_vars: Vec<String>) -> Self {
-        let mut runner = Self::from_current_python(py);
-
-        // Parse environment variables from KEY=VALUE format
-        runner.env_vars = parse_env_vars(&env_vars, |env_str| {
-            eprintln!("Warning: Invalid environment variable format: {}", env_str);
-        });
-
-        runner
-    }
-}
-
 /// Get the current Python executable path from sys.executable
 fn get_python_executable(py: Python) -> String {
     py.import("sys")
@@ -72,7 +50,7 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
     let pytest_args = pytest_args.unwrap_or_default();
 
     // Use the current Python executable
-    let runner = PytestRunner::from_current_python(py);
+    let runner = PytestRunner::new(get_python_executable(py), &[]);
 
     // Determine root path: if the first argument is a path and not a pytest flag, use it
     let (rootpath, filtered_args) = match pytest_args.first() {
@@ -93,24 +71,10 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         },
     };
 
-    let collection_result = collect_tests_rust(rootpath.clone(), &filtered_args);
-
-    let (test_nodes, errors) = match collection_result {
-        Ok((nodes, errs)) => (nodes, errs),
-        Err(e) => handle_collection_error(e),
+    let test_nodes = match collect_and_display(&rootpath, &filtered_args) {
+        ControlFlow::Continue(nodes) => nodes,
+        ControlFlow::Break(code) => return code,
     };
-
-    display_collection_results(&test_nodes, &errors);
-
-    // Exit early if there are collection errors
-    if !errors.errors.is_empty() {
-        return exit_codes::TESTS_FAILED;
-    }
-
-    if test_nodes.is_empty() {
-        println!("No tests found.");
-        return 0;
-    }
 
     execute_tests(
         &runner.program,
@@ -122,8 +86,11 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
     )
 }
 
-fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
-    let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), &args.files) {
+fn collect_and_display(
+    rootpath: &std::path::Path,
+    paths: &[String],
+) -> ControlFlow<i32, Vec<String>> {
+    let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), paths) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => handle_collection_error(e),
     };
@@ -132,13 +99,22 @@ fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
 
     // Exit early if there are collection errors
     if !errors.errors.is_empty() {
-        std::process::exit(exit_codes::TESTS_FAILED);
+        return ControlFlow::Break(exit_codes::TESTS_FAILED);
     }
 
     if test_nodes.is_empty() {
         println!("No tests found.");
-        std::process::exit(exit_codes::OK);
+        return ControlFlow::Break(exit_codes::OK);
     }
+
+    ControlFlow::Continue(test_nodes)
+}
+
+fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
+    let test_nodes = match collect_and_display(rootpath, &args.files) {
+        ControlFlow::Continue(nodes) => nodes,
+        ControlFlow::Break(code) => std::process::exit(code),
+    };
 
     // Exit after collection if --collect-only flag is set
     if args.collect_only {
@@ -201,56 +177,44 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
         }
         Runner::Pytest => {
             // Legacy pytest-based runner
-            let runner = PytestRunner::from_current_python_with_env(py, args.env.clone());
+            let runner = PytestRunner::new(python_executable, &args.env);
 
             let test_nodes = collect_cli_tests(&rootpath, &args);
 
-            let exit_code = if worker_count == NonZeroUsize::MIN
-                || args.dist == DistributionMode::No
-            {
-                // Group tests by subproject
-                let test_groups = subproject::group_tests_by_subproject(&rootpath, &test_nodes);
+            let exit_code =
+                if worker_count == NonZeroUsize::MIN || args.dist == DistributionMode::No {
+                    // Group tests by subproject
+                    let test_groups = subproject::group_tests_by_subproject(&rootpath, test_nodes);
 
-                let mut overall_exit_code = 0;
+                    let mut overall_exit_code = 0;
 
-                for (subproject_root, tests) in test_groups {
-                    if tests.is_empty() {
-                        continue;
+                    for (subproject_root, tests) in test_groups {
+                        let code = execute_tests(
+                            &runner.program,
+                            &runner.initial_args,
+                            tests,
+                            vec![],
+                            Some(&subproject_root),
+                            &runner.env_vars,
+                        );
+
+                        if code != 0 {
+                            overall_exit_code = code;
+                        }
                     }
 
-                    let adjusted_tests = if subproject_root != rootpath {
-                        subproject::make_test_paths_relative(&tests, &rootpath, &subproject_root)
-                    } else {
-                        tests
+                    overall_exit_code
+                } else {
+                    let config = ParallelExecutionConfig {
+                        program: &runner.program,
+                        initial_args: &runner.initial_args,
+                        worker_count,
+                        dist_mode: args.dist,
+                        rootpath: &rootpath,
+                        env_vars: &runner.env_vars,
                     };
-
-                    let code = execute_tests(
-                        &runner.program,
-                        &runner.initial_args,
-                        adjusted_tests,
-                        vec![],
-                        Some(&subproject_root),
-                        &runner.env_vars,
-                    );
-
-                    if code != 0 {
-                        overall_exit_code = code;
-                    }
-                }
-
-                overall_exit_code
-            } else {
-                let config = ParallelExecutionConfig {
-                    program: &runner.program,
-                    initial_args: &runner.initial_args,
-                    worker_count,
-                    dist_mode: args.dist,
-                    rootpath: &rootpath,
-                    use_subprojects: true,
-                    env_vars: &runner.env_vars,
+                    execute_tests_parallel(&config, test_nodes)
                 };
-                execute_tests_parallel(&config, test_nodes)
-            };
             std::process::exit(exit_code);
         }
     }

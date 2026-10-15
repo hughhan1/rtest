@@ -16,7 +16,7 @@ use crate::python_discovery::{
     },
     constant_resolver::ConstantResolver,
     discovery::{class_has_init, collect_test_methods, TestDiscoveryConfig, TestInfo},
-    module_resolver::ModuleResolver,
+    module_resolver::{resolve_relative_import, ModuleResolver},
 };
 
 /// Information about an import
@@ -531,32 +531,15 @@ impl SemanticTestDiscovery {
         relative_level: usize,
         module_parts: &[String],
     ) -> CollectionResult<Vec<String>> {
-        if relative_level == 0 {
-            // Not a relative import
-            return Ok(module_parts.to_vec());
-        }
-
-        // For relative imports, go up the module hierarchy
-        // Level 1 (.) = current package
-        // Level 2 (..) = parent package, etc.
-
-        if current_module_path.len() < relative_level {
-            // Can't resolve beyond top-level package
-            return Err(CollectionError::ImportError(format!(
-                "Attempted relative import beyond top-level package (level {} from depth {})",
-                relative_level,
-                current_module_path.len()
-            )));
-        }
-
-        // Go up the hierarchy by relative_level
-        let base_path = &current_module_path[..current_module_path.len() - relative_level];
-
-        // Combine with the module parts from the import
-        let mut result = base_path.to_vec();
-        result.extend_from_slice(module_parts);
-
-        Ok(result)
+        resolve_relative_import(current_module_path, relative_level, module_parts).ok_or_else(
+            || {
+                CollectionError::ImportError(format!(
+                    "Attempted relative import beyond top-level package (level {} from depth {})",
+                    relative_level,
+                    current_module_path.len()
+                ))
+            },
+        )
     }
 
     /// Check if a module should be skipped for inheritance analysis.
