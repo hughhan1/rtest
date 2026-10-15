@@ -30,6 +30,8 @@ struct ConstantScope {
     children: HashMap<String, ConstantScope>,
     /// Base class paths (`class Foo(Bar)` → `"Bar"`).
     bases: Vec<String>,
+    /// Runtime fixture parametrization cannot be represented by decorator-only IDs.
+    runtime_parameters: bool,
 }
 
 #[derive(Debug)]
@@ -121,6 +123,7 @@ impl ConstantScope {
                 Stmt::AnnAssign(ann) => (ann.target.as_ref(), ann.value.as_deref()),
                 Stmt::ClassDef(class_def) => {
                     let mut child = Self::from_statements(&class_def.body, imports);
+                    scope.runtime_parameters |= child.runtime_parameters;
                     child.bases = class_def
                         .bases()
                         .iter()
@@ -136,9 +139,24 @@ impl ConstantScope {
                     scope.children.insert(class_def.name.to_string(), child);
                     continue;
                 }
+                Stmt::FunctionDef(func) => {
+                    scope.runtime_parameters |= func.name.as_str() == "pytest_generate_tests"
+                        || func.decorator_list.iter().any(|decorator| {
+                            let Expr::Call(call) = &decorator.expression else {
+                                return false;
+                            };
+                            matches!(
+                                imported_expression_name(&call.func, imports).as_deref(),
+                                Some("pytest.fixture" | "pytest.yield_fixture")
+                            ) && call.arguments.find_keyword("params").is_some()
+                        });
+                    continue;
+                }
                 _ => continue,
             };
             if let (Expr::Name(name), Some(value_expr)) = (target, value) {
+                // Global markers may be imported or computed; let pytest apply them.
+                scope.runtime_parameters |= name.id.as_str() == "pytestmark";
                 record_assignment(&mut scope, name.id.as_str(), value_expr);
             }
         }
@@ -328,6 +346,13 @@ impl ConstantResolver {
             expr,
             &self.modules.borrow().get(&self.current_path)?.imports,
         )
+    }
+
+    pub(crate) fn has_runtime_parameters(&self) -> bool {
+        self.modules
+            .borrow()
+            .values()
+            .any(|module| module.scope.runtime_parameters)
     }
 
     /// Resolve an expression, optionally looking up names on an enclosing class first.
@@ -614,12 +639,15 @@ fn is_skipped_module(module_path: &[String]) -> bool {
 /// Try to extract a literal value from an expression.
 ///
 /// This is intentionally limited to simple literals to avoid complexity.
-fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
+pub(crate) fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
     match expr {
         Expr::NumberLiteral(num) => {
             use ruff_python_ast::Number;
             match &num.value {
-                Number::Int(i) => Some(LiteralValue::Int(i.as_i64().unwrap_or(0))),
+                Number::Int(i) => Some(
+                    i.as_i64()
+                        .map_or_else(|| LiteralValue::String(i.to_string()), LiteralValue::Int),
+                ),
                 Number::Float(f) => Some(LiteralValue::Float(*f)),
                 Number::Complex { .. } => None,
             }
@@ -630,12 +658,15 @@ fn try_extract_literal(expr: &Expr) -> Option<LiteralValue> {
                 return None;
             }
             match try_extract_literal(&unary.operand) {
-                Some(LiteralValue::Int(i)) => Some(LiteralValue::Int(-i)),
+                Some(LiteralValue::Int(i)) => i.checked_neg().map(LiteralValue::Int),
                 Some(LiteralValue::Float(f)) => Some(LiteralValue::Float(-f)),
                 _ => None,
             }
         }
         Expr::StringLiteral(s) => Some(LiteralValue::String(s.value.to_str().to_string())),
+        Expr::BytesLiteral(bytes) => Some(LiteralValue::String(
+            bytes.value.bytes().map(char::from).collect(),
+        )),
         Expr::BooleanLiteral(b) => Some(LiteralValue::Bool(b.value)),
         Expr::NoneLiteral(_) => Some(LiteralValue::None),
         Expr::List(ruff_python_ast::ExprList { elts, .. })

@@ -14,6 +14,7 @@ mod visitor;
 
 // Re-export public API
 pub use cases::{format_cannot_expand_warning, CannotExpandReason, CasesExpansion};
+pub(crate) use discovery::DiscoveryCache;
 pub use discovery::{
     discover_tests, discover_tests_with_inheritance, TestDiscoveryConfig, TestInfo,
 };

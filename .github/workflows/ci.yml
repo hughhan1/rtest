@@ -63,10 +63,7 @@ jobs:
         fi
       shell: bash
 
-    - name: Run Rust unit tests
-      run: cargo test --lib
-
-    - name: Run Rust integration tests
+    - name: Run Rust tests
       run: cargo test
 
     - name: Test import
@@ -86,6 +83,22 @@ jobs:
           .venv/bin/rtest tests/ --runner native -n 1
         fi
       shell: bash
+
+    - name: Set up uv for pytest compatibility checks
+      if: matrix.os == 'ubuntu-22.04' && matrix.python-version == '3.12'
+      uses: astral-sh/setup-uv@v10.3.0
+
+    - name: Compare hybrid collection with older pytest versions
+      if: matrix.os == 'ubuntu-22.04' && matrix.python-version == '3.12'
+      shell: bash
+      run: |
+        for version in 7.3.1 8.4.2; do
+          oracle="${RUNNER_TEMP}/pytest-${version}"
+          uv venv --python .venv/bin/python "${oracle}"
+          uv pip install --python "${oracle}/bin/python" "pytest==${version}"
+          RTEST_PARITY_PYTHON="${oracle}/bin/python" \
+            uv run --no-project --python .venv/bin/python rtest tests/test_hybrid_collection.py --runner native -n 1
+        done
 
   lint:
     runs-on: ubuntu-latest

@@ -3,6 +3,9 @@
 use crate::collection::error::{CollectionError, CollectionWarning};
 use crate::collection::nodes::Session;
 use crate::collection::types::CollectionNode;
+use crate::python_discovery::DiscoveryCache;
+#[cfg(feature = "extension-module")]
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 /// Holds errors and warnings encountered during collection
@@ -10,6 +13,17 @@ use std::path::PathBuf;
 pub struct CollectionErrors {
     pub errors: Vec<(String, CollectionError)>,
     pub warnings: Vec<CollectionWarning>,
+}
+
+#[cfg(feature = "extension-module")]
+impl CollectionErrors {
+    pub(crate) fn write_cannot_expand_report(&self, writer: &mut dyn Write) -> io::Result<()> {
+        self.warnings
+            .iter()
+            .filter_map(|warning| warning.cannot_expand_nodeid.as_deref())
+            .try_for_each(|nodeid| writeln!(writer, "rtest-cannot-expand: {nodeid}"))?;
+        writer.flush()
+    }
 }
 
 /// Run the Rust-based collection and return test node IDs
@@ -25,8 +39,15 @@ pub fn collect_tests_rust(
 
     let collectors = session.perform_collect(args)?;
     let mut test_nodes = Vec::new();
+    let mut discovery = DiscoveryCache::default();
     for collector in collectors {
-        collect_items_recursive(&session, collector, &mut test_nodes, &mut collection_errors);
+        collect_items_recursive(
+            &session,
+            collector,
+            &mut test_nodes,
+            &mut collection_errors,
+            &mut discovery,
+        );
     }
     Ok((test_nodes, collection_errors))
 }
@@ -37,14 +58,21 @@ fn collect_items_recursive(
     node: CollectionNode,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
+    discovery: &mut DiscoveryCache,
 ) {
     match node {
         CollectionNode::Test(nodeid) => test_nodes.push(nodeid),
-        CollectionNode::Branch(collector) => match collector.collect(session) {
+        CollectionNode::Branch(collector) => match collector.collect(session, discovery) {
             Ok((children, warnings)) => {
                 collection_errors.warnings.extend(warnings);
                 for child in children {
-                    collect_items_recursive(session, child, test_nodes, collection_errors);
+                    collect_items_recursive(
+                        session,
+                        child,
+                        test_nodes,
+                        collection_errors,
+                        discovery,
+                    );
                 }
             }
             Err(error) => collection_errors

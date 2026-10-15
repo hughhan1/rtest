@@ -15,7 +15,10 @@ use crate::python_discovery::{
         MethodCasesInfo,
     },
     constant_resolver::ConstantResolver,
-    discovery::{class_has_init, collect_test_methods, TestDiscoveryConfig, TestInfo},
+    discovery::{
+        class_has_init, collect_test_methods, require_pytest_collection, TestDiscoveryConfig,
+        TestInfo,
+    },
     module_resolver::{resolve_relative_import, ModuleResolver},
 };
 
@@ -69,6 +72,7 @@ pub(crate) struct SemanticTestDiscovery {
     warnings: Vec<CollectionWarning>,
     /// Current file path for warning generation
     current_file_path: String,
+    runtime_parameters: bool,
 }
 
 impl SemanticTestDiscovery {
@@ -79,6 +83,7 @@ impl SemanticTestDiscovery {
             loaded_modules: HashSet::new(),
             warnings: Vec::new(),
             current_file_path: String::new(),
+            runtime_parameters: false,
         }
     }
 
@@ -137,6 +142,13 @@ impl SemanticTestDiscovery {
             all_tests.extend(self.collect_class_tests(class_def, &info, module_resolver)?);
         }
 
+        if self.runtime_parameters || resolver.has_runtime_parameters() {
+            require_pytest_collection(
+                &mut all_tests,
+                "runtime fixtures, markers, or pytest_generate_tests",
+            );
+        }
+
         Ok((all_tests, std::mem::take(&mut self.warnings)))
     }
 
@@ -150,17 +162,14 @@ impl SemanticTestDiscovery {
                     let level = import_from.level as usize;
 
                     // Get module path, handling both absolute and relative imports
-                    let module_path = if let Some(module_name) = &import_from.module {
-                        module_name.split('.').map(String::from).collect()
-                    } else {
-                        // Pure relative import (e.g., "from . import something")
-                        Vec::new()
-                    };
+                    let module_path: Vec<String> = import_from
+                        .module
+                        .as_ref()
+                        .map_or_else(Vec::new, |name| name.split('.').map(String::from).collect());
 
                     for alias in &import_from.names {
                         let imported_name = alias.name.to_string();
-                        let local_name =
-                            Self::get_alias_name_or_default(alias.asname.as_ref(), &imported_name);
+                        let local_name = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
 
                         imports.insert(
                             local_name,
@@ -175,8 +184,7 @@ impl SemanticTestDiscovery {
                 Stmt::Import(import) => {
                     for alias in &import.names {
                         let parts: Vec<String> = alias.name.split('.').map(String::from).collect();
-                        let local_name =
-                            Self::get_alias_name_or_default(alias.asname.as_ref(), &alias.name);
+                        let local_name = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
 
                         imports.insert(
                             local_name,
@@ -238,24 +246,15 @@ impl SemanticTestDiscovery {
                 resolver,
                 Some(class_def.name.as_str()),
             ),
-            base_classes: self.collect_base_class_names(class_def, module_path, imports)?,
+            base_classes: class_def
+                .bases()
+                .iter()
+                .filter_map(|base| {
+                    self.resolve_base_class(base, module_path, imports)
+                        .transpose()
+                })
+                .collect::<CollectionResult<_>>()?,
         })
-    }
-
-    /// Collect base class names from a class definition
-    fn collect_base_class_names(
-        &self,
-        class_def: &StmtClassDef,
-        current_module_path: &[String],
-        imports: &HashMap<String, ImportInfo>,
-    ) -> CollectionResult<Vec<ResolvedBaseClass>> {
-        let mut base_classes = Vec::new();
-
-        for base in class_def.arguments.iter().flat_map(|args| args.args.iter()) {
-            base_classes.extend(self.resolve_base_class(base, current_module_path, imports)?);
-        }
-
-        Ok(base_classes)
     }
 
     /// Collect all tests from a class, including inherited ones
@@ -267,8 +266,9 @@ impl SemanticTestDiscovery {
     ) -> CollectionResult<Vec<TestInfo>> {
         let class_name = class_def.name.as_str();
 
-        // Check if this class or any parent has __init__
-        if self.should_skip_class(info, module_resolver, &mut HashSet::new())? {
+        let Some(methods) =
+            self.collect_class_members(info, module_resolver, &mut HashSet::new())?
+        else {
             // Add warning about skipped class
             let warning = CollectionWarning {
                 file_path: self.current_file_path.clone(),
@@ -277,34 +277,17 @@ impl SemanticTestDiscovery {
                     "cannot collect test class '{}' because it has a __init__ constructor",
                     class_name
                 ),
+                cannot_expand_nodeid: None,
             };
             self.warnings.push(warning);
             return Ok(vec![]);
-        }
+        };
 
-        let class_specs = &info.class_specs;
-        let own_methods = &info.test_methods;
-        let own_method_names: HashSet<&str> = own_methods
-            .iter()
-            .map(|method| method.name.as_str())
-            .collect();
-
-        let mut inherited_methods = Vec::new();
-
-        // Collect inherited methods
-        for base in &info.base_classes {
-            inherited_methods.extend(
-                self.get_base_class_methods(base, module_resolver, &mut HashSet::new())?
-                    .into_iter()
-                    .filter(|method| !own_method_names.contains(method.name.as_str())),
-            );
-        }
-
-        Ok(inherited_methods
+        Ok(methods
             .into_iter()
-            .chain(own_methods.iter().cloned())
             .map(|method| {
-                let cases_expansion = combine_and_expand_specs(class_specs, &method.method_specs);
+                let cases_expansion =
+                    combine_and_expand_specs(&info.class_specs, &method.method_specs);
                 TestInfo {
                     name: method.name,
                     class_name: Some(class_name.to_string()),
@@ -314,55 +297,34 @@ impl SemanticTestDiscovery {
             .collect())
     }
 
-    /// Check if a class should be skipped (has __init__ or inherits from class with __init__)
-    fn should_skip_class(
+    /// None means a constructor excludes this class and its descendants from collection.
+    fn collect_class_members(
         &mut self,
         info: &TestClassInfo,
         module_resolver: &ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
-    ) -> CollectionResult<bool> {
-        // Check if this class has __init__
+    ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
         if info.has_init {
-            return Ok(true);
+            return Ok(None);
         }
-
-        // Check parent classes
+        let own_names: HashSet<_> = info
+            .test_methods
+            .iter()
+            .map(|method| method.name.as_str())
+            .collect();
+        let mut methods = Vec::new();
         for base in &info.base_classes {
-            if self.base_class_has_init(base, module_resolver, visited)? {
-                return Ok(true);
-            }
+            let Some(parent) = self.get_base_class_members(base, module_resolver, visited)? else {
+                return Ok(None);
+            };
+            methods.extend(
+                parent
+                    .into_iter()
+                    .filter(|method| !own_names.contains(method.name.as_str())),
+            );
         }
-
-        Ok(false)
-    }
-
-    /// Check if a base class has __init__ (recursively checking ancestors)
-    fn base_class_has_init(
-        &mut self,
-        resolved: &ResolvedBaseClass,
-        module_resolver: &ModuleResolver,
-        visited: &mut HashSet<(Vec<String>, String)>,
-    ) -> CollectionResult<bool> {
-        if self.is_stdlib_module_to_skip(&resolved.module_path) {
-            return Ok(false);
-        }
-
-        // Check for cycles
-        let key = (resolved.module_path.clone(), resolved.class_name.clone());
-        if !visited.insert(key.clone()) {
-            // Cycle detected - assume no init to break the cycle
-            return Ok(false);
-        }
-
-        let has_init = match self.load_base_class(resolved, module_resolver)? {
-            Some(info) => self.should_skip_class(&info, module_resolver, visited)?,
-            None => false,
-        };
-
-        // Remove from visited after processing to allow sibling branches in diamond
-        // inheritance patterns to revisit this class without false cycle detection
-        visited.remove(&key);
-        Ok(has_init)
+        methods.extend(info.test_methods.iter().cloned());
+        Ok(Some(methods))
     }
 
     fn load_base_class(
@@ -380,14 +342,14 @@ impl SemanticTestDiscovery {
     }
 
     /// Get inherited test methods, detecting cycles along the current ancestry path.
-    fn get_base_class_methods(
+    fn get_base_class_members(
         &mut self,
         resolved: &ResolvedBaseClass,
         module_resolver: &ModuleResolver,
         visited: &mut HashSet<(Vec<String>, String)>,
-    ) -> CollectionResult<Vec<TestMethodInfo>> {
+    ) -> CollectionResult<Option<Vec<TestMethodInfo>>> {
         if self.is_stdlib_module_to_skip(&resolved.module_path) {
-            return Ok(vec![]);
+            return Ok(Some(Vec::new()));
         }
 
         // Check for cycles
@@ -400,24 +362,16 @@ impl SemanticTestDiscovery {
             )));
         }
 
-        let mut all_methods = Vec::new();
-        if let Some(base_info) = self.load_base_class(resolved, module_resolver)? {
-            // First collect inherited methods, then this class's own methods.
-            for base_class in &base_info.base_classes {
-                all_methods.extend(self.get_base_class_methods(
-                    base_class,
-                    module_resolver,
-                    visited,
-                )?);
-            }
-            all_methods.extend(base_info.test_methods.clone());
-        }
+        let members = match self.load_base_class(resolved, module_resolver)? {
+            Some(info) => self.collect_class_members(&info, module_resolver, visited)?,
+            None => Some(Vec::new()),
+        };
 
         // Remove from visited after processing to allow sibling branches in diamond
         // inheritance patterns to revisit this class without false cycle detection
         visited.remove(&key);
 
-        Ok(all_methods)
+        Ok(members)
     }
 
     /// Ensure a module is loaded and its test classes are cached
@@ -440,6 +394,7 @@ impl SemanticTestDiscovery {
                     module_resolver.clone(),
                     &parsed_module.path,
                 );
+                self.runtime_parameters |= external_resolver.has_runtime_parameters();
                 let imports = self.collect_imports(&parsed_module.module);
 
                 // Extract test class information without storing the module
@@ -547,15 +502,5 @@ impl SemanticTestDiscovery {
         module_path
             .first()
             .is_some_and(|name| is_known_standard_library(11, name))
-    }
-
-    /// Helper to get alias name with fallback to the original name
-    fn get_alias_name_or_default(
-        alias_name: Option<&ruff_python_ast::Identifier>,
-        default: &str,
-    ) -> String {
-        alias_name
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| default.to_string())
     }
 }
