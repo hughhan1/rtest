@@ -10,20 +10,20 @@ use ruff_python_stdlib::sys::is_builtin_module;
 use std::path::{Path, PathBuf};
 
 /// Information about a parsed Python module
-pub struct ParsedModule {
-    pub path: PathBuf,
-    pub module: ModModule,
+pub(crate) struct ParsedModule {
+    pub(crate) path: PathBuf,
+    pub(crate) module: ModModule,
 }
 
 /// Resolves Python module imports to file paths and loads modules
 #[derive(Clone)]
-pub struct ModuleResolver {
+pub(crate) struct ModuleResolver {
     /// Search paths for module resolution
     search_paths: Vec<PathBuf>,
 }
 
 impl ModuleResolver {
-    pub fn new(project_root: &Path) -> Self {
+    pub(crate) fn new(project_root: &Path) -> Self {
         let mut search_paths = Vec::new();
 
         // Add PYTHONPATH from environment first (takes precedence)
@@ -37,16 +37,24 @@ impl ModuleResolver {
 
     /// Load an owned AST so callers can drop it after caching their extracted metadata.
     /// Callers track loaded modules; retaining another cache here duplicates that state.
-    pub fn resolve_and_load(&self, module_path: &[String]) -> CollectionResult<ParsedModule> {
-        let path = Self::resolve_with_search_paths(&self.search_paths, module_path)?;
-        Self::load_module(&path)
+    pub(crate) fn resolve_and_load(
+        &self,
+        module_path: &[String],
+    ) -> CollectionResult<ParsedModule> {
+        let path = self.resolve(module_path)?;
+        let source = std::fs::read_to_string(&path)?;
+        let parsed = parse_module(&source).map_err(|e| {
+            CollectionError::ParseError(format!("Failed to parse {}: {:?}", path.display(), e))
+        })?;
+
+        Ok(ParsedModule {
+            path,
+            module: parsed.into_syntax(),
+        })
     }
 
     /// Resolve module using search paths
-    fn resolve_with_search_paths(
-        search_paths: &[PathBuf],
-        module_path: &[String],
-    ) -> CollectionResult<PathBuf> {
+    fn resolve(&self, module_path: &[String]) -> CollectionResult<PathBuf> {
         if module_path.is_empty() {
             return Err(CollectionError::ImportError("Empty module path".into()));
         }
@@ -61,7 +69,7 @@ impl ModuleResolver {
             )));
         }
 
-        search_paths
+        self.search_paths
             .iter()
             .flat_map(|root| {
                 let base = root.join(module_path.iter().collect::<PathBuf>());
@@ -71,19 +79,6 @@ impl ModuleResolver {
             .ok_or_else(|| {
                 CollectionError::ImportError(format!("Could not find module: {}", module_name))
             })
-    }
-
-    /// Load and parse a Python module
-    fn load_module(path: &Path) -> CollectionResult<ParsedModule> {
-        let source = std::fs::read_to_string(path)?;
-        let parsed = parse_module(&source).map_err(|e| {
-            CollectionError::ParseError(format!("Failed to parse {}: {:?}", path.display(), e))
-        })?;
-
-        Ok(ParsedModule {
-            path: path.to_path_buf(),
-            module: parsed.into_syntax(),
-        })
     }
 }
 

@@ -7,9 +7,9 @@
 mod cases;
 mod constant_resolver;
 mod discovery;
-pub mod module_resolver;
+mod module_resolver;
 mod pattern;
-pub mod semantic_analyzer;
+mod semantic_analyzer;
 mod visitor;
 
 // Re-export public API
@@ -17,5 +17,3 @@ pub use cases::{format_cannot_expand_warning, CannotExpandReason, CasesExpansion
 pub use discovery::{
     discover_tests, discover_tests_with_inheritance, TestDiscoveryConfig, TestInfo,
 };
-pub use module_resolver::{ModuleResolver, ParsedModule};
-pub use semantic_analyzer::{SemanticTestDiscovery, TestClassInfo};
