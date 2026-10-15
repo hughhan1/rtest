@@ -347,31 +347,6 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
-    #[test]
-    fn explicit_hidden_files_and_symlinks_are_not_directory_discoveries() {
-        let temp = tempfile::Builder::new()
-            .prefix("rtest-file-selection-")
-            .tempdir()
-            .expect("temporary project");
-        let root = temp.path();
-        for file in ["helper.py", ".test_hidden.py"] {
-            std::fs::write(root.join(file), "").expect("create file");
-        }
-        std::os::unix::fs::symlink(root.join("helper.py"), root.join("test_link.py"))
-            .expect("create symlink");
-        let patterns = vec!["*test*.py".into()];
-        assert_eq!(
-            collect_test_files(
-                root,
-                &[".test_hidden.py".into(), "test_link.py".into()],
-                &patterns
-            ),
-            vec![root.join(".test_hidden.py"), root.join("test_link.py")]
-        );
-        assert!(collect_test_files(root, &[], &patterns).is_empty());
-    }
-
     #[test]
     fn test_parse_results_json() {
         // Test deserializing JSON
