@@ -605,7 +605,7 @@ class TestCollectionIntegration(unittest.TestCase):
             # Currently we get "Empty module path" as the final error
             # This happens because the error path eventually leads to an empty module path
             self.assertIn(
-                "ImportError: Attempted relative import beyond top-level package (level 3 from depth 2)",
+                "Import error: Attempted relative import beyond top-level package (level 3 from depth 2)",
                 error_text,
             )
 
@@ -2496,7 +2496,7 @@ class TestCollectionErrorPropagation(unittest.TestCase):
     """Test that collection errors from invalid files are reported, not silently dropped."""
 
     def test_collection_errors_reported_for_invalid_files(self) -> None:
-        """Test that collection errors from files with syntax errors are reported."""
+        """Mixed errors keep their diagnostics and leave valid tests in the collection."""
         files = {
             "test_valid.py": textwrap.dedent("""
                 def test_ok():
@@ -2506,21 +2506,28 @@ class TestCollectionErrorPropagation(unittest.TestCase):
                 def test_broken(
                     # missing closing paren and colon - syntax error
             """),
+            "test_import_error.py": textwrap.dedent("""
+                from ..base import Base
+
+                class TestChild(Base):
+                    def test_method(self): pass
+            """),
         }
 
         with create_test_project(files) as project_path:
+            (project_path / "test_io_error.py").write_bytes(b"\xff")
             result = run_collection(project_path)
 
-            # The valid test should still be collected
-            assert_tests_found(
-                result.output_lines,
-                ["test_valid.py::test_ok"],
+            self.assertEqual(result.returncode, ExitCodeValues.TESTS_FAILED)
+            self.assertEqual(extract_test_lines(result.output_lines), ["test_valid.py::test_ok"])
+            self.assertIn("collected 1 item / 3 errors", result.output)
+            self.assertEqual(result.output.count("ERROR collecting"), 3)
+            self.assertRegex(result.output, r"E   Parse error: Failed to parse [^\n]*test_syntax_error\.py:")
+            self.assertIn(
+                "E   Import error: Attempted relative import beyond top-level package (level 2 from depth 1)",
+                result.output,
             )
-
-            # The syntax error should be reported in the output
-            assert any("ERROR collecting" in line or "error" in line.lower() for line in result.output_lines), (
-                f"Expected collection error to be reported, got:\n{result.output}"
-            )
+            self.assertIn("E   IO error:", result.output)
 
 
 if __name__ == "__main__":

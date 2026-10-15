@@ -68,23 +68,7 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
         );
         for (nodeid, error) in &errors.errors {
             println!("{BOLD_RED}_ ERROR collecting {nodeid} _{RESET}");
-            match error {
-                CollectionError::ParseError(msg) => {
-                    println!("{RED}E   {msg}{RESET}");
-                }
-                CollectionError::ImportError(msg) => {
-                    println!("{RED}E   ImportError: {msg}{RESET}");
-                }
-                CollectionError::IoError(e) => {
-                    println!("{RED}E   IO Error: {e}{RESET}");
-                }
-                CollectionError::FileNotFound(path) => {
-                    println!(
-                        "{RED}E   file or directory not found: {}{RESET}",
-                        path.display()
-                    );
-                }
-            }
+            println!("{RED}E   {error}{RESET}");
         }
         println!(
             "!!!!!!!!!!!!!!!!!!!!! Warning: {} errors during collection !!!!!!!!!!!!!!!!!!!!!",
