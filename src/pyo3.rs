@@ -9,11 +9,13 @@ use crate::cli::{exit_codes, Args, Runner};
 use crate::collection::error::CollectionError;
 use crate::config::read_pytest_config;
 use crate::runner::{parse_env_vars, PytestRunner};
+use crate::scheduler::DistributionMode;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
     default_python_functions, determine_worker_count, display_collection_results, execute_native,
     execute_tests, execute_tests_parallel, subproject, NativeRunnerConfig, ParallelExecutionConfig,
 };
+use std::num::NonZeroUsize;
 
 /// Get the current working directory, returning an error message on failure.
 fn get_current_dir() -> Result<PathBuf, String> {
@@ -153,19 +155,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
     full_args.extend(argv);
     let args = Args::parse_from(full_args);
 
-    if let Err(e) = args.validate_dist() {
-        eprintln!("Error: {e}");
-        std::process::exit(exit_codes::TESTS_FAILED);
-    }
-
-    let num_processes = match args.get_num_processes() {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exit_codes::TESTS_FAILED);
-        }
-    };
-    let worker_count = determine_worker_count(num_processes, args.maxprocesses);
+    let worker_count = determine_worker_count(args.numprocesses, args.maxprocesses);
 
     let rootpath = match get_current_dir() {
         Ok(dir) => dir,
@@ -215,7 +205,9 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
 
             let test_nodes = collect_cli_tests(&rootpath, &args);
 
-            let exit_code = if worker_count == 1 || args.dist == "no" {
+            let exit_code = if worker_count == NonZeroUsize::MIN
+                || args.dist == DistributionMode::No
+            {
                 // Group tests by subproject
                 let test_groups = subproject::group_tests_by_subproject(&rootpath, &test_nodes);
 
@@ -252,7 +244,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                     program: &runner.program,
                     initial_args: &runner.initial_args,
                     worker_count,
-                    dist_mode: &args.dist,
+                    dist_mode: args.dist,
                     rootpath: &rootpath,
                     use_subprojects: true,
                     env_vars: &runner.env_vars,

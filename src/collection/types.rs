@@ -1,7 +1,8 @@
 //! Collection types and traits.
 
 use super::error::{CollectionResult, CollectionWarning};
-use std::path::{Path, PathBuf};
+use super::nodes::Function;
+use std::path::PathBuf;
 
 /// Location information for a test item
 #[derive(Debug, Clone)]
@@ -12,28 +13,14 @@ pub struct Location {
     pub name: String,
 }
 
-/// Base trait for all collectible nodes
+/// A leaf test has no collection operation; only branches can have children.
+#[derive(Debug)]
+pub enum CollectionNode {
+    Branch(Box<dyn Collector>),
+    Test(Function),
+}
+
 pub trait Collector: std::fmt::Debug {
-    /// Unique identifier for this node
     fn nodeid(&self) -> &str;
-
-    /// Parent collector, if any
-    #[allow(dead_code)]
-    fn parent(&self) -> Option<&dyn Collector>;
-
-    /// Collect child nodes
-    #[expect(
-        clippy::type_complexity,
-        reason = "returns both child nodes and warnings"
-    )]
-    fn collect(&self) -> CollectionResult<(Vec<Box<dyn Collector>>, Vec<CollectionWarning>)>;
-
-    /// Get the path associated with this collector
-    #[allow(dead_code)]
-    fn path(&self) -> &Path;
-
-    /// Check if this is a test item (leaf node)
-    fn is_item(&self) -> bool {
-        false
-    }
+    fn collect(&self) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)>;
 }

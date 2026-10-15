@@ -81,7 +81,6 @@ impl TestDiscoveryVisitor {
             self.tests.push(TestInfo {
                 name: name.into(),
                 line: func.range.start().to_u32() as usize,
-                is_method: false,
                 class_name: None,
                 cases_expansion,
             });
@@ -121,7 +120,6 @@ impl TestDiscoveryVisitor {
             self.tests.push(TestInfo {
                 name: method.name,
                 line: method.line,
-                is_method: true,
                 class_name: Some(class_name.into()),
                 cases_expansion,
             });

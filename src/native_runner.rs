@@ -4,50 +4,70 @@ use crate::collection::glob_match_any;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use tempfile::TempDir;
 use walkdir::WalkDir;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct TestResult {
-    pub nodeid: String,
-    pub outcome: String,
-    pub duration_ms: f64,
-    #[serde(default)]
-    pub stdout: String,
-    #[serde(default)]
-    pub stderr: String,
-    pub error: Option<ErrorInfo>,
-    #[serde(default)]
-    pub error_type: Option<String>,
+#[derive(Debug, Deserialize)]
+struct TestResult {
+    nodeid: String,
+    duration_ms: f64,
+    #[serde(flatten)]
+    outcome: TestOutcome,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ErrorInfo {
-    #[serde(default)]
-    pub traceback: Option<String>,
-    #[serde(default)]
-    pub reason: Option<String>,
+/// Each outcome owns exactly the diagnostics that can accompany it.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "outcome", rename_all = "lowercase")]
+enum TestOutcome {
+    Passed,
+    Failed(FailureInfo),
+    Error(FailureInfo),
+    Skipped,
+}
+
+#[derive(Debug, Deserialize)]
+struct FailureInfo {
+    error: TracebackInfo,
+    // Deserialized even though only Python consumers currently display the type.
+    #[serde(rename = "error_type")]
+    _error_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TracebackInfo {
+    traceback: String,
+}
+
+#[derive(Debug)]
+struct FailedTest {
+    nodeid: String,
+    info: FailureInfo,
 }
 
 #[derive(Debug, Default)]
-pub struct AggregatedResults {
-    pub passed: usize,
-    pub failed: usize,
-    pub error: usize,
-    pub skipped: usize,
-    pub total: usize,
-    pub total_duration_ms: f64,
-    pub failures: Vec<TestResult>,
-    pub errors: Vec<TestResult>,
+struct AggregatedResults {
+    passed: usize,
+    skipped: usize,
+    total_duration_ms: f64,
+    failures: Vec<FailedTest>,
+    errors: Vec<FailedTest>,
+    worker_errors: Vec<String>,
+}
+
+impl AggregatedResults {
+    fn has_failures(&self) -> bool {
+        !self.failures.is_empty() || !self.errors.is_empty() || !self.worker_errors.is_empty()
+    }
 }
 
 pub struct NativeRunnerConfig {
     pub python_executable: String,
     pub root_path: PathBuf,
-    pub num_workers: usize,
+    pub num_workers: NonZeroUsize,
     pub python_files: Vec<String>,
     pub python_classes: Vec<String>,
     pub python_functions: Vec<String>,
@@ -95,38 +115,25 @@ fn aggregate_results(all_results: Vec<Vec<TestResult>>) -> AggregatedResults {
     let mut aggregated = AggregatedResults::default();
 
     for result in all_results.into_iter().flatten() {
-        aggregated.total += 1;
         aggregated.total_duration_ms += result.duration_ms;
-
-        match result.outcome.as_str() {
-            "passed" => aggregated.passed += 1,
-            "failed" => {
-                aggregated.failed += 1;
-                aggregated.failures.push(result);
-            }
-            "error" => {
-                aggregated.error += 1;
-                aggregated.errors.push(result);
-            }
-            "skipped" => aggregated.skipped += 1,
-            _ => aggregated.error += 1,
+        match result.outcome {
+            TestOutcome::Passed => aggregated.passed += 1,
+            TestOutcome::Failed(info) => aggregated.failures.push(FailedTest {
+                nodeid: result.nodeid,
+                info,
+            }),
+            TestOutcome::Error(info) => aggregated.errors.push(FailedTest {
+                nodeid: result.nodeid,
+                info,
+            }),
+            TestOutcome::Skipped => aggregated.skipped += 1,
         }
     }
 
     aggregated
 }
 
-fn print_error_info(error: &ErrorInfo) {
-    if let Some(traceback) = &error.traceback {
-        for line in traceback.lines() {
-            println!("    {}", line);
-        }
-    } else if let Some(reason) = &error.reason {
-        println!("    {}", reason);
-    }
-}
-
-fn print_test_results(label: &str, results: &[TestResult]) {
+fn print_test_results(label: &str, results: &[FailedTest]) {
     if results.is_empty() {
         return;
     }
@@ -134,8 +141,8 @@ fn print_test_results(label: &str, results: &[TestResult]) {
     println!("{}:", label);
     for result in results {
         println!("  {}", result.nodeid);
-        if let Some(error) = &result.error {
-            print_error_info(error);
+        for line in result.info.error.traceback.lines() {
+            println!("    {}", line);
         }
     }
 }
@@ -146,14 +153,18 @@ fn print_summary(results: &AggregatedResults) {
 
     print_test_results("FAILURES", &results.failures);
     print_test_results("ERRORS", &results.errors);
+    for error in &results.worker_errors {
+        eprintln!("{error}");
+    }
 
     println!();
     let duration_secs = results.total_duration_ms / 1000.0;
 
     let parts: Vec<String> = [
         (results.passed, "passed"),
-        (results.failed, "failed"),
-        (results.error, "error"),
+        (results.failures.len(), "failed"),
+        (results.errors.len(), "error"),
+        (results.worker_errors.len(), "worker error"),
         (results.skipped, "skipped"),
     ]
     .into_iter()
@@ -161,7 +172,7 @@ fn print_summary(results: &AggregatedResults) {
     .map(|(count, label)| format!("{count} {label}"))
     .collect();
 
-    let status = if results.failed > 0 || results.error > 0 {
+    let status = if results.has_failures() {
         "FAILED"
     } else {
         "PASSED"
@@ -183,7 +194,7 @@ fn run_worker(
     files: &[PathBuf],
     python_classes: &[String],
     python_functions: &[String],
-) -> Result<(), String> {
+) -> Result<Vec<TestResult>, String> {
     let mut cmd = Command::new(python);
     cmd.arg("-m")
         .arg("rtest.worker")
@@ -209,20 +220,20 @@ fn run_worker(
         .output()
         .map_err(|e| format!("Worker {} failed to start: {}", worker_id, e))?;
 
-    let exit_code = output.status.code().unwrap_or(-1);
+    let exit_code = output.status.code();
     // Exit code 1 is expected when tests fail, only report unexpected codes.
-    if !matches!(exit_code, 0 | 1) {
+    if !matches!(exit_code, Some(0 | 1)) {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.trim().is_empty() {
             eprintln!("Worker {} stderr:\n{}", worker_id, stderr);
         }
         return Err(format!(
-            "Worker {} crashed with exit code {} (expected 0 or 1)",
-            worker_id, exit_code
+            "Worker {} exited with {} (expected exit code 0 or 1)",
+            worker_id, output.status
         ));
     }
 
-    Ok(())
+    parse_results_file(output_file)
 }
 
 pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> i32 {
@@ -231,7 +242,7 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         return 0;
     }
 
-    let num_workers = config.num_workers.max(1);
+    let num_workers = config.num_workers;
     println!(
         "Running {} test file(s) with {} worker(s)",
         test_files.len(),
@@ -247,15 +258,11 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
     };
 
     let shards = crate::scheduler::distribute_round_robin(test_files, num_workers);
-    let output_files: Vec<PathBuf> = (0..shards.len())
-        .map(|i| temp_dir.path().join(format!("worker-{}.jsonl", i)))
-        .collect();
-
     let mut handles = Vec::new();
-    for (i, (shard, output_file)) in shards.into_iter().zip(output_files.iter()).enumerate() {
+    for (i, shard) in shards.into_iter().enumerate() {
+        let output_file = temp_dir.path().join(format!("worker-{}.jsonl", i));
         let python = config.python_executable.clone();
         let root = config.root_path.clone();
-        let output_file = output_file.clone();
         let python_classes = config.python_classes.clone();
         let python_functions = config.python_functions.clone();
         let handle = thread::spawn(move || {
@@ -273,34 +280,22 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
     }
 
     let mut worker_errors = Vec::new();
+    let mut all_results = Vec::new();
     for (i, handle) in handles.into_iter().enumerate() {
         match handle.join() {
-            Ok(Ok(())) => {}
+            Ok(Ok(results)) => all_results.push(results),
             Ok(Err(e)) => worker_errors.push(format!("Worker {}: {}", i, e)),
             Err(_) => worker_errors.push(format!("Worker {} panicked", i)),
         }
     }
 
-    for error in &worker_errors {
-        eprintln!("{}", error);
-    }
-
-    let mut all_results = Vec::new();
-    for output_file in &output_files {
-        if output_file.exists() {
-            match parse_results_file(output_file) {
-                Ok(results) => all_results.push(results),
-                Err(e) => eprintln!("Warning: {}", e),
-            }
-        }
-    }
-
-    let aggregated = aggregate_results(all_results);
+    let mut aggregated = aggregate_results(all_results);
+    aggregated.worker_errors = worker_errors;
     print_summary(&aggregated);
 
     // TempDir is automatically cleaned up when dropped
 
-    if aggregated.failed > 0 || aggregated.error > 0 || !worker_errors.is_empty() {
+    if aggregated.has_failures() {
         1
     } else {
         0
@@ -371,7 +366,35 @@ mod tests {
         let json = r#"{"nodeid":"test::foo","outcome":"passed","duration_ms":1.5,"stdout":"","stderr":"","error":null}"#;
         let result: TestResult = serde_json::from_str(json).unwrap();
         assert_eq!(result.nodeid, "test::foo");
-        assert_eq!(result.outcome, "passed");
+        assert!(matches!(result.outcome, TestOutcome::Passed));
         assert_eq!(result.duration_ms, 1.5);
+    }
+
+    #[test]
+    fn rejects_invalid_worker_json_at_the_protocol_boundary() {
+        for json in [
+            r#"{"nodeid":"test::foo","outcome":"unknown","duration_ms":0}"#,
+            r#"{"nodeid":"test::foo","outcome":"failed","duration_ms":0}"#,
+            r#"{"nodeid":"test::foo","outcome":"error","duration_ms":0,"error":{"reason":"skip"},"error_type":"ValueError"}"#,
+        ] {
+            assert!(serde_json::from_str::<TestResult>(json).is_err());
+        }
+    }
+
+    #[test]
+    fn aggregates_worker_outcomes_with_their_diagnostics() {
+        let results = [
+            r#"{"nodeid":"passed","outcome":"passed","duration_ms":1}"#,
+            r#"{"nodeid":"skipped","outcome":"skipped","duration_ms":0,"error":{"reason":"later"}}"#,
+            r#"{"nodeid":"failed","outcome":"failed","duration_ms":2,"error":{"traceback":"assertion"},"error_type":"AssertionError"}"#,
+            r#"{"nodeid":"error","outcome":"error","duration_ms":3,"error":{"traceback":"exception"},"error_type":"ValueError"}"#,
+        ].into_iter().map(|json| serde_json::from_str(json).expect("valid worker JSON")).collect();
+        let summary = aggregate_results(vec![results]);
+        assert_eq!(summary.passed, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.total_duration_ms, 6.0);
+        assert_eq!(summary.failures[0].info.error.traceback, "assertion");
+        assert_eq!(summary.errors[0].info.error.traceback, "exception");
+        assert!(summary.has_failures());
     }
 }

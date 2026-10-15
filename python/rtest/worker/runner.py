@@ -10,37 +10,77 @@ import sys
 import time
 import traceback
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from types import FunctionType, MappingProxyType, ModuleType
 from typing import Callable, Literal
 
-from rtest.mark import ExpandedCase, get_case_nodeid_suffix
+from rtest.mark import ExpandedCase, SkipInfo, get_case_nodeid_suffix
 
 
-@dataclass
+@dataclass(frozen=True)
+class Passed:
+    outcome: Literal["passed"] = field(default="passed", init=False)
+
+
+@dataclass(frozen=True)
+class TracebackInfo:
+    traceback: str
+
+
+@dataclass(frozen=True)
+class Failed:
+    error: TracebackInfo
+    error_type: str
+    outcome: Literal["failed"] = field(default="failed", init=False)
+
+
+@dataclass(frozen=True)
+class Error:
+    error: TracebackInfo
+    error_type: str
+    outcome: Literal["error"] = field(default="error", init=False)
+
+
+@dataclass(frozen=True)
+class Skipped:
+    error: SkipInfo
+    outcome: Literal["skipped"] = field(default="skipped", init=False)
+
+
+Outcome = Passed | Failed | Error | Skipped
+
+
+@dataclass(frozen=True)
 class TestResult:
-    """Result of a single test execution."""
+    """Common execution metadata paired with one complete outcome."""
 
     nodeid: str
-    outcome: Literal["passed", "failed", "error", "skipped"]
+    status: Outcome
     duration_ms: float
     stdout: str = ""
     stderr: str = ""
-    error: dict[str, str] | None = None
-    error_type: str | None = None  # Exception type name for structured matching
+
+    def to_json(self) -> str:
+        data = asdict(self)
+        data.update(data.pop("status"))
+        return json.dumps(data)
 
 
-@dataclass
+@dataclass(frozen=True)
+class MethodTarget:
+    test_class: type
+    name: str
+
+
+@dataclass(frozen=True)
 class TestCase:
     """A single test case to execute."""
 
     nodeid: str
-    func: FunctionType
+    target: FunctionType | MethodTarget
     kwargs: dict[str, object] = field(default_factory=dict)
-    skip: bool = False
-    skip_reason: str = ""
-    test_class: type | None = None
+    skip: SkipInfo | None = None
 
 
 def _relative_path(file_path: Path, root: Path) -> str:
@@ -82,15 +122,14 @@ def _is_test_class(name: str, obj: object, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(name, p) for p in patterns)
 
 
-def _is_skipped(obj: object) -> tuple[bool, str]:
+def _skip_info(obj: object) -> SkipInfo | None:
     """Check if an object has the skip marker (rtest or pytest)."""
     from rtest.mark import SKIP_DEPRECATION_MSG
 
     # Check rtest marker first
-    skip_flag: bool = bool(getattr(obj, "__rtest_skip__", False))
-    if skip_flag:
-        skip_reason_attr: str = str(getattr(obj, "__rtest_skip_reason__", ""))
-        return True, skip_reason_attr
+    skip = getattr(obj, "__rtest_skip__", None)
+    if isinstance(skip, SkipInfo):
+        return skip
 
     # Check pytest marker (with deprecation warning)
     pytest_marks: list[object] = getattr(obj, "pytestmark", [])
@@ -109,21 +148,16 @@ def _is_skipped(obj: object) -> tuple[bool, str]:
                 mark_args: tuple[object, ...] = getattr(pytest_mark, "args", ())
                 if mark_args:
                     reason = str(mark_args[0])
-            return True, reason
+            return SkipInfo(reason)
 
-    return False, ""
+    return None
 
 
-def _parametrize_test_case(test_case: TestCase, cases: list[ExpandedCase]) -> list[TestCase]:
+def _parametrize_test_case(test_case: TestCase, cases: list[ExpandedCase] | None) -> list[TestCase]:
+    if cases is None:
+        return [test_case]
     return [
-        TestCase(
-            nodeid=f"{test_case.nodeid}{get_case_nodeid_suffix(case_id)}",
-            func=test_case.func,
-            kwargs=kwargs,
-            skip=test_case.skip,
-            skip_reason=test_case.skip_reason,
-            test_class=test_case.test_class,
-        )
+        replace(test_case, nodeid=f"{test_case.nodeid}{get_case_nodeid_suffix(case_id)}", kwargs=kwargs)
         for case_id, kwargs in cases
     ]
 
@@ -145,15 +179,14 @@ def _discover_tests_in_module(
     for name, obj in inspect.getmembers(module):
         if _is_test_function(name, obj, python_functions):
             func_obj: FunctionType = obj  # type: ignore[assignment]
-            func_skip, func_skip_reason = _is_skipped(func_obj)
+            func_skip = _skip_info(func_obj)
 
             test_cases.extend(
                 _parametrize_test_case(
                     TestCase(
                         nodeid=f"{rel_path}::{name}",
-                        func=func_obj,
+                        target=func_obj,
                         skip=func_skip,
-                        skip_reason=func_skip_reason,
                     ),
                     expand_parametrize(func_obj),
                 )
@@ -162,7 +195,7 @@ def _discover_tests_in_module(
         elif _is_test_class(name, obj, python_classes):
             # obj is a class at this point
             class_obj: type = obj
-            class_skip, class_skip_reason = _is_skipped(class_obj)
+            class_skip = _skip_info(class_obj)
 
             # Walk MRO explicitly to discover inherited test methods
             seen_methods: set[str] = set()
@@ -179,18 +212,14 @@ def _discover_tests_in_module(
                     method_func: FunctionType = method_obj  # type: ignore[assignment]
                     seen_methods.add(method_name)
 
-                    method_skip, method_skip_reason = _is_skipped(method_func)
-                    skip = method_skip or class_skip
-                    skip_reason = method_skip_reason if method_skip else class_skip_reason
+                    skip = _skip_info(method_func) or class_skip
 
                     test_cases.extend(
                         _parametrize_test_case(
                             TestCase(
                                 nodeid=f"{rel_path}::{name}::{method_name}",
-                                func=method_func,
+                                target=MethodTarget(class_obj, method_name),
                                 skip=skip,
-                                skip_reason=skip_reason,
-                                test_class=class_obj,
                             ),
                             expand_parametrize(method_func),
                         )
@@ -201,33 +230,30 @@ def _discover_tests_in_module(
 
 def _run_single_test(test_case: TestCase) -> TestResult:
     """Execute a single test case and capture results."""
-    if test_case.skip:
+    if test_case.skip is not None:
         return TestResult(
             nodeid=test_case.nodeid,
-            outcome="skipped",
+            status=Skipped(test_case.skip),
             duration_ms=0.0,
-            error={"reason": test_case.skip_reason} if test_case.skip_reason else None,
         )
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
 
-    outcome = "passed"
-    error_info: dict[str, str] | None = None
-    error_type: str | None = None
+    status: Outcome = Passed()
     start_time = time.perf_counter()
 
     try:
         with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-            if test_case.test_class is not None:
-                instance: object = test_case.test_class()
+            if isinstance(test_case.target, MethodTarget):
+                instance: object = test_case.target.test_class()
                 setup: Callable[[], object] | None = getattr(instance, "setup_method", None) or getattr(
                     instance, "setUp", None
                 )
                 if setup is not None:
                     setup()
                 try:
-                    bound_method: Callable[..., object] = getattr(instance, test_case.func.__name__)
+                    bound_method: Callable[..., object] = getattr(instance, test_case.target.name)
                     bound_method(**test_case.kwargs)
                 finally:
                     teardown: Callable[[], object] | None = getattr(instance, "teardown_method", None) or getattr(
@@ -236,26 +262,20 @@ def _run_single_test(test_case: TestCase) -> TestResult:
                     if teardown is not None:
                         teardown()
             else:
-                test_case.func(**test_case.kwargs)
+                test_case.target(**test_case.kwargs)
     except AssertionError as e:
-        outcome = "failed"
-        error_info = {"traceback": traceback.format_exc()}
-        error_type = type(e).__name__
+        status = Failed(TracebackInfo(traceback.format_exc()), type(e).__name__)
     except Exception as e:
-        outcome = "error"
-        error_info = {"traceback": traceback.format_exc()}
-        error_type = type(e).__name__
+        status = Error(TracebackInfo(traceback.format_exc()), type(e).__name__)
 
     duration_ms = (time.perf_counter() - start_time) * 1000
 
     return TestResult(
         nodeid=test_case.nodeid,
-        outcome=outcome,
+        status=status,
         duration_ms=duration_ms,
         stdout=stdout_capture.getvalue(),
         stderr=stderr_capture.getvalue(),
-        error=error_info,
-        error_type=error_type,
     )
 
 
@@ -304,10 +324,8 @@ def run_tests(
             import_errors.append(
                 TestResult(
                     nodeid=f"{_relative_path(file_path, root)}::IMPORT_ERROR",
-                    outcome="error",
+                    status=Error(TracebackInfo(traceback.format_exc()), type(e).__name__),
                     duration_ms=0.0,
-                    error={"traceback": traceback.format_exc()},
-                    error_type=type(e).__name__,
                 )
             )
 
@@ -326,8 +344,7 @@ def run_tests(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open("w") as f:
         for result in results:
-            result_dict: dict[str, object] = asdict(result)
-            f.write(json.dumps(result_dict) + "\n")
+            f.write(result.to_json() + "\n")
 
-    has_failures = any(r.outcome in ("failed", "error") for r in results)
+    has_failures = any(isinstance(r.status, (Failed, Error)) for r in results)
     return 1 if has_failures else 0

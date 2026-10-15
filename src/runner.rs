@@ -1,4 +1,5 @@
 use crate::{create_scheduler, subproject, DistributionMode, WorkerPool, WorkerTask};
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 pub struct PytestRunner {
@@ -11,8 +12,8 @@ pub struct PytestRunner {
 pub struct ParallelExecutionConfig<'a> {
     pub program: &'a str,
     pub initial_args: &'a [String],
-    pub worker_count: usize,
-    pub dist_mode: &'a str,
+    pub worker_count: NonZeroUsize,
+    pub dist_mode: DistributionMode,
     pub rootpath: &'a Path,
     pub use_subprojects: bool,
     pub env_vars: &'a [(String, String)],
@@ -59,20 +60,12 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
         config.dist_mode
     );
 
-    let distribution_mode = match config.dist_mode.parse::<DistributionMode>() {
-        Ok(mode) => mode,
-        Err(e) => {
-            log::warn!("Invalid distribution mode '{}': {e}", config.dist_mode);
-            return 1;
-        }
-    };
-
     let test_groups = if config.use_subprojects {
         subproject::group_tests_by_subproject(config.rootpath, &test_nodes)
     } else {
         [(config.rootpath.to_path_buf(), test_nodes)].into()
     };
-    let scheduler = create_scheduler(distribution_mode);
+    let scheduler = create_scheduler(config.dist_mode);
     let mut worker_pool = WorkerPool::new();
     let mut worker_id = 0;
 
@@ -106,10 +99,22 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
     let mut overall_exit_code = 0;
     for result in worker_pool.wait_for_all() {
         println!("=== Worker {} ===", result.worker_id);
-        print!("{}", result.stdout);
-        eprint!("{}", result.stderr);
-        if result.exit_code != 0 {
-            overall_exit_code = result.exit_code;
+        let code = match result.result {
+            Ok(output) => {
+                print!("{}", String::from_utf8_lossy(&output.stdout));
+                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                output.status.code().unwrap_or_else(|| {
+                    eprintln!("Worker terminated: {}", output.status);
+                    1
+                })
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                1
+            }
+        };
+        if code != 0 {
+            overall_exit_code = code;
         }
     }
 

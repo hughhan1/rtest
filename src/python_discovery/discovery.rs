@@ -18,8 +18,6 @@ use std::path::Path;
 pub struct TestInfo {
     pub name: String,
     pub line: usize,
-    #[allow(dead_code)]
-    pub is_method: bool,
     pub class_name: Option<String>,
     /// Test cases expansion result from parsing decorators.
     pub cases_expansion: CasesExpansion,
@@ -124,7 +122,7 @@ pub fn discover_tests_with_inheritance(
     root_path: &Path,
 ) -> CollectionResult<(Vec<TestInfo>, Vec<CollectionWarning>)> {
     let module_path = path_to_module_path(path, root_path);
-    let mut module_resolver = ModuleResolver::new(root_path)?;
+    let mut module_resolver = ModuleResolver::new(root_path);
     let mut discovery = SemanticTestDiscovery::new(config.clone());
 
     discovery.discover_tests(path, source, module_path, &mut module_resolver)
@@ -235,11 +233,9 @@ mod tests {
         assert_eq!(tests.len(), 2);
 
         assert_eq!(tests[0].name, "test_simple");
-        assert!(!tests[0].is_method);
         assert_eq!(tests[0].class_name, None);
 
         assert_eq!(tests[1].name, "test_method");
-        assert!(tests[1].is_method);
         assert_eq!(tests[1].class_name, Some("TestClass".into()));
     }
 
