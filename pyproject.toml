@@ -7,7 +7,7 @@ build-backend = "maturin"
 
 [project]
 name = "rtest"
-version = "0.0.46"
+version = "0.0.47"
 description = "Python test runner built in Rust"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -76,6 +76,7 @@ include = ["python/", "tests/", "scripts/"]
 features = ["extension-module"]
 python-source = "python"
 module-name = "rtest._rtest"
+include = [{ path = "ruff/Cargo.toml", format = "sdist" }]
 
 [dependency-groups]
 dev = [

@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.47] - 2026-10-15
+
+### Added
+- Resolve project-local imported constants and enums when collecting parametrized tests.
+
 ### Fixed
+- Include Ruff's workspace manifest so source distributions can build independently.
 - Restore `--cannot-expand-report` for hybrid pytest collectors, with structured fallback records and fresh reports even on empty or failed collections.
 - Route detected fixture parametrization, global markers, generation hooks, empty tables, and version-sensitive duplicate IDs through pytest fallback instead of emitting incomplete or incompatible nodeids; cache ancestor conftest analysis per collection run.
 - Allow complete explicit IDs to describe opaque values without evaluating constructor/helper calls; share scalar parsing and inheritance traversal to reduce collection decisions.
 
 ### Changed
+- Simplify collection and execution, consolidate redundant tests, and refresh dependency versions and reproducible benchmarks.
 - **Breaking (Rust API):** The `python_discovery::module_resolver` and `python_discovery::semantic_analyzer` modules and their re-exported helper types are now internal. Use `python_discovery::discover_tests_with_inheritance` for import-aware discovery or `collect_tests_rust` for collection. Imported ASTs are released after metadata extraction instead of being cached by the resolver.
 
 ## [0.0.46] - 2026-02-20
