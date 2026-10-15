@@ -6,31 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from test_utils import run_rtest
-
-
-class CollectionResult:
-    """Result from running test collection.
-
-    Provides flexible access to output as either string or list of lines.
-    """
-
-    def __init__(self, returncode: int, stdout: str, stderr: str = "") -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-        self._output = stdout + stderr if stderr else stdout
-        self._output_lines = self._output.split("\n")
-
-    @property
-    def output(self) -> str:
-        """Get output as a single string."""
-        return self._output
-
-    @property
-    def output_lines(self) -> list[str]:
-        """Get output as a list of lines."""
-        return self._output_lines
+from test_utils import RtestResult, run_rtest
 
 
 @contextmanager
@@ -50,11 +26,7 @@ def create_test_project(files: dict[str, str]) -> Generator[Path]:
             full_path = project_path / file_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if file_path.endswith(".py"):
-                full_path.write_text(content, encoding="utf-8")
-            else:
-                # Handle non-Python files (like README.md)
-                full_path.write_bytes(content.encode() if isinstance(content, str) else content)
+            full_path.write_text(content, encoding="utf-8")
 
         yield project_path
 
@@ -63,7 +35,7 @@ def run_collection(
     project_path: Path,
     paths: list[str] | None = None,
     env: dict[str, str] | None = None,
-) -> CollectionResult:
+) -> RtestResult:
     """Run test collection and return result with flexible output access.
 
     Args:
@@ -72,13 +44,12 @@ def run_collection(
         env: Optional environment variables to use
 
     Returns:
-        CollectionResult with returncode, output as string, and output as lines
+        RtestResult with returncode, output as string, and output as lines
     """
     args = ["--collect-only"]
     if paths:
         args.extend(paths)
-    returncode, stdout, stderr = run_rtest(args, cwd=str(project_path), env=env)
-    return CollectionResult(returncode, stdout, stderr)
+    return run_rtest(args, cwd=str(project_path), env=env)
 
 
 def assert_tests_found(output_lines: list[str], expected_tests: list[str]) -> None:
@@ -101,18 +72,6 @@ def assert_patterns_not_found(output: str, patterns: list[str]) -> None:
     """
     for pattern in patterns:
         assert pattern not in output, f"Should not find: {pattern}"
-
-
-def count_collected_tests(output_lines: list[str]) -> int:
-    """Count the number of collected tests from output lines.
-
-    Args:
-        output_lines: List of output lines from test collection
-
-    Returns:
-        Number of collected tests
-    """
-    return len([line for line in output_lines if "::" in line and "test_" in line])
 
 
 def extract_test_lines(output_lines: list[str]) -> list[str]:

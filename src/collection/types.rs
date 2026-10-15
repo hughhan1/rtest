@@ -1,15 +1,15 @@
-//! Collection types and traits.
+//! Collection nodes. Only directory and module branches can have children.
 
-use super::error::{CollectionResult, CollectionWarning};
+use std::path::PathBuf;
 
-/// A leaf test has no collection operation; only branches can have children.
 #[derive(Debug)]
 pub enum CollectionNode {
-    Branch(Box<dyn Collector>),
+    Branch(CollectionBranch),
     Test(String),
 }
 
-pub trait Collector: std::fmt::Debug {
-    fn nodeid(&self) -> &str;
-    fn collect(&self) -> CollectionResult<(Vec<CollectionNode>, Vec<CollectionWarning>)>;
+#[derive(Debug)]
+pub enum CollectionBranch {
+    Directory(PathBuf),
+    Module(PathBuf),
 }

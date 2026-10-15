@@ -34,10 +34,9 @@ impl TestInfo {
         let base = self.base_nodeid(module_nodeid);
         match &self.cases_expansion {
             CasesExpansion::NotDecorated | CasesExpansion::CannotExpand(_) => vec![base],
-            CasesExpansion::Expanded(cases) => cases
-                .iter()
-                .map(|case| format!("{base}[{}]", case.case_id))
-                .collect(),
+            CasesExpansion::Expanded(cases) => {
+                cases.iter().map(|id| format!("{base}[{id}]")).collect()
+            }
         }
     }
 }
@@ -400,59 +399,6 @@ class TestDerived(TestBase):
     }
 
     #[test]
-    fn test_inherited_method_with_class_parametrize() {
-        let source = r#"
-import pytest
-
-class TestParent:
-    def test_inherited(self, x):
-        pass
-
-@pytest.mark.parametrize("x", [1, 2])
-class TestChild(TestParent):
-    pass
-"#;
-
-        let config = TestDiscoveryConfig::default();
-        let tests = discover_tests(&PathBuf::from("test.py"), source, &config).unwrap();
-
-        // Should have 2 TestInfo:
-        // - TestParent::test_inherited (no parametrize)
-        // - TestChild::test_inherited (with parametrize expansion)
-        assert_eq!(tests.len(), 2, "Expected 2 TestInfo, got: {:?}", tests);
-
-        // Check parent test (no expansion)
-        let parent_tests: Vec<&TestInfo> = tests
-            .iter()
-            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestParent"))
-            .collect();
-        assert_eq!(parent_tests.len(), 1);
-        assert!(matches!(
-            parent_tests[0].cases_expansion,
-            CasesExpansion::NotDecorated
-        ));
-
-        // Check child test (should have Expanded with 2 cases)
-        let child_tests: Vec<&TestInfo> = tests
-            .iter()
-            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestChild"))
-            .collect();
-        assert_eq!(child_tests.len(), 1, "Child should have 1 TestInfo");
-
-        // The expansion should produce [1] and [2]
-        if let CasesExpansion::Expanded(cases) = &child_tests[0].cases_expansion {
-            assert_eq!(cases.len(), 2, "Expected 2 cases in expansion");
-            assert_eq!(cases[0].case_id, "1");
-            assert_eq!(cases[1].case_id, "2");
-        } else {
-            panic!(
-                "Expected child test to have Expanded cases, got: {:?}",
-                child_tests[0].cases_expansion
-            );
-        }
-    }
-
-    #[test]
     fn test_stdlib_inheritance_graceful() {
         use std::fs;
         use tempfile::TempDir;
@@ -518,63 +464,44 @@ class TestDerived(SomeBase):
     }
 
     #[test]
-    fn test_inherited_method_with_class_parametrize_semantic() {
-        use std::fs;
-        use tempfile::TempDir;
+    fn both_discovery_paths_apply_child_class_parameters_to_inherited_methods() {
+        let project = tempfile::tempdir().expect("temporary project");
+        let path = project.path().join("test_inherit.py");
+        let source = indoc! {r#"
+            import pytest
 
-        // Create a temp directory
-        let temp_dir = TempDir::new().unwrap();
-        let test_path = temp_dir.path().join("test_inherit.py");
+            class TestParent:
+                def test_inherited(self, x):
+                    pass
 
-        let source = r#"
-import pytest
-
-class TestParent:
-    def test_inherited(self, x):
-        pass
-
-@pytest.mark.parametrize("x", [1, 2])
-class TestChild(TestParent):
-    pass
-"#;
-        fs::write(&test_path, source).unwrap();
-
+            @pytest.mark.parametrize("x", [1, 2])
+            class TestChild(TestParent):
+                pass
+        "#};
+        std::fs::write(&path, source).expect("write test module");
         let config = TestDiscoveryConfig::default();
-        let (tests, _warnings) =
-            discover_tests_with_inheritance(&test_path, source, &config, temp_dir.path()).unwrap();
 
-        // Should have 2 TestInfo:
-        // - TestParent::test_inherited (no parametrize)
-        // - TestChild::test_inherited (with parametrize expansion)
-        assert_eq!(tests.len(), 2, "Expected 2 TestInfo, got: {:?}", tests);
-
-        // Check parent test (no expansion)
-        let parent_tests: Vec<&TestInfo> = tests
-            .iter()
-            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestParent"))
-            .collect();
-        assert_eq!(parent_tests.len(), 1);
-        assert!(matches!(
-            parent_tests[0].cases_expansion,
-            CasesExpansion::NotDecorated
-        ));
-
-        // Check child test (should have Expanded with 2 cases)
-        let child_tests: Vec<&TestInfo> = tests
-            .iter()
-            .filter(|t| t.class_name.as_ref().is_some_and(|c| c == "TestChild"))
-            .collect();
-        assert_eq!(child_tests.len(), 1, "Child should have 1 TestInfo");
-
-        // The expansion should produce [1] and [2]
-        if let CasesExpansion::Expanded(cases) = &child_tests[0].cases_expansion {
-            assert_eq!(cases.len(), 2, "Expected 2 cases in expansion");
-            assert_eq!(cases[0].case_id, "1");
-            assert_eq!(cases[1].case_id, "2");
-        } else {
-            panic!(
-                "Expected child test to have Expanded cases, got: {:?}",
-                child_tests[0].cases_expansion
+        for tests in [
+            discover_tests(&path, source, &config).expect("local discovery"),
+            discover_tests_with_inheritance(&path, source, &config, project.path())
+                .expect("semantic discovery")
+                .0,
+        ] {
+            assert!(matches!(
+                tests[0].cases_expansion,
+                CasesExpansion::NotDecorated
+            ));
+            let ids: Vec<_> = tests
+                .iter()
+                .flat_map(|test| test.nodeids("test_inherit.py"))
+                .collect();
+            assert_eq!(
+                ids,
+                [
+                    "test_inherit.py::TestParent::test_inherited",
+                    "test_inherit.py::TestChild::test_inherited[1]",
+                    "test_inherit.py::TestChild::test_inherited[2]",
+                ]
             );
         }
     }

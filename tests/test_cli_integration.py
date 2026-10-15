@@ -103,6 +103,7 @@ class TestNativeRunnerEndToEnd:
             assert result.returncode == ExitCodeValues.TESTS_FAILED
             assert "1 passed" in result.stdout
             assert "1 failed" in result.stdout
+            assert "FAILED" in result.stdout
 
     def test_native_runner_empty_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -114,7 +115,7 @@ class TestNativeRunnerEndToEnd:
                 cwd=str(tmp_path),
             )
             assert result.returncode == ExitCodeValues.OK
-            assert "No tests" in result.stdout
+            assert "No tests found" in result.stdout
 
     def test_native_runner_import_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -7,10 +7,6 @@ from rtest.raises import RaisesContext, raises
 
 
 class TestRaisesBasic:
-    def test_suppresses_expected_exception(self) -> None:
-        with rtest.raises(ValueError):
-            raise ValueError("expected")
-
     def test_sets_value_attribute(self) -> None:
         with rtest.raises(ValueError) as ctx:
             raise ValueError("captured")
@@ -33,10 +29,6 @@ class TestRaisesBasic:
 
 
 class TestRaisesMatch:
-    def test_match_succeeds(self) -> None:
-        with rtest.raises(ValueError, match="boom"):
-            raise ValueError("big boom")
-
     def test_match_uses_re_search(self) -> None:
         with rtest.raises(ValueError, match="oo"):
             raise ValueError("boom")

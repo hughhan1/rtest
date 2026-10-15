@@ -42,13 +42,6 @@ SKIP_DEPRECATION_MSG = (
 )
 
 
-class PytestMarkerArgs(NamedTuple):
-    """Extracted arguments from a pytest marker."""
-
-    argnames: object
-    argvalues: object
-
-
 class ExpandedCase(NamedTuple):
     """A single expanded test case with its ID and kwargs."""
 
@@ -204,12 +197,6 @@ def _expand_cases(
     return tuple(entries)
 
 
-def _extract_pytest_marker_args(mark_args: tuple[object, ...]) -> PytestMarkerArgs:
-    """Extract argnames and argvalues, with defaults for missing marker arguments."""
-    args_iter = iter(mark_args)
-    return PytestMarkerArgs(next(args_iter, ""), next(args_iter, []))
-
-
 def _get_case_groups(func: FunctionType) -> list[tuple[ExpandedCase, ...]]:
     """Get parametrize specs from rtest or pytest markers."""
     # Check rtest markers first
@@ -230,7 +217,8 @@ def _get_case_groups(func: FunctionType) -> list[tuple[ExpandedCase, ...]]:
             # Normalize the external pytest marker into executable cases
             mark_args: tuple[object, ...] = getattr(pytest_mark, "args", ())
             mark_kwargs: MappingProxyType[str, object] = getattr(pytest_mark, "kwargs", MappingProxyType({}))
-            argnames_raw, argvalues_raw = _extract_pytest_marker_args(mark_args)
+            args = iter(mark_args)
+            argnames_raw, argvalues_raw = next(args, ""), next(args, [])
             ids_raw: object = mark_kwargs.get("ids")
 
             if isinstance(argnames_raw, str):

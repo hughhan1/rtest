@@ -6,8 +6,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct CollectionConfig {
     pub ignore_patterns: Vec<String>,
-    #[allow(dead_code)]
-    pub ignore_glob_patterns: Vec<String>,
     pub norecursedirs: Vec<String>,
     pub testpaths: Vec<PathBuf>,
     pub python_files: Vec<String>,
@@ -19,7 +17,6 @@ impl Default for CollectionConfig {
     fn default() -> Self {
         Self {
             ignore_patterns: vec![],
-            ignore_glob_patterns: vec![],
             norecursedirs: vec![
                 "*.egg".into(),
                 ".*".into(),

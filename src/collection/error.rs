@@ -8,12 +8,10 @@ pub type CollectionResult<T> = Result<T, CollectionError>;
 
 /// Collection-specific errors
 #[derive(Debug)]
-#[allow(dead_code, clippy::enum_variant_names)]
 pub enum CollectionError {
     IoError(std::io::Error),
     ParseError(String),
     ImportError(String),
-    SkipError(String),
     FileNotFound(PathBuf),
 }
 
@@ -23,7 +21,6 @@ impl fmt::Display for CollectionError {
             Self::IoError(e) => write!(f, "IO error: {e}"),
             Self::ParseError(e) => write!(f, "Parse error: {e}"),
             Self::ImportError(e) => write!(f, "Import error: {e}"),
-            Self::SkipError(e) => write!(f, "Skip: {e}"),
             Self::FileNotFound(path) => {
                 write!(f, "file or directory not found: {}", path.display())
             }

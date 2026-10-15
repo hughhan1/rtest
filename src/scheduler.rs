@@ -23,26 +23,8 @@ impl fmt::Display for DistributionMode {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ParseDistributionModeError {
-    UnknownMode(String),
-}
-
-impl fmt::Display for ParseDistributionModeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseDistributionModeError::UnknownMode(mode) => write!(
-                f,
-                "Unsupported distribution mode: '{mode}'. Supported modes: load, loadscope, loadfile, worksteal, no"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ParseDistributionModeError {}
-
 impl std::str::FromStr for DistributionMode {
-    type Err = ParseDistributionModeError;
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -51,7 +33,7 @@ impl std::str::FromStr for DistributionMode {
             "loadfile" => Ok(DistributionMode::LoadFile),
             "worksteal" => Ok(DistributionMode::WorkSteal),
             "no" => Ok(DistributionMode::No),
-            other => Err(ParseDistributionModeError::UnknownMode(other.to_string())),
+            other => Err(format!("Unsupported distribution mode: '{other}'. Supported modes: load, loadscope, loadfile, worksteal, no")),
         }
     }
 }
@@ -232,33 +214,18 @@ mod tests {
         ];
         let result = scheduler.distribute_tests(tests, NonZeroUsize::new(4).expect("positive"));
 
-        // Should have 4 groups: file1::TestClass1, file1, file2::TestClass2, file2
-        assert_eq!(result.len(), 4);
-
-        // Verify that tests with same scope are grouped together
-        let mut scope_to_worker: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-
-        for (worker_idx, worker_tests) in result.iter().enumerate() {
-            for test in worker_tests {
-                let scope = extract_scope(test);
-                if let Some(&existing_worker) = scope_to_worker.get(&scope) {
-                    assert_eq!(
-                        existing_worker, worker_idx,
-                        "Test {test} should be in same worker as other tests from scope {scope}"
-                    );
-                } else {
-                    scope_to_worker.insert(scope, worker_idx);
-                }
-            }
-        }
-
-        // Verify all tests are distributed
-        let total_tests: usize = result.iter().map(|w| w.len()).sum();
-        assert_eq!(total_tests, 5);
-
-        // Verify the class methods are grouped together
-        assert_eq!(scope_to_worker.len(), 4); // Should have 4 different scopes
+        assert_eq!(
+            result,
+            vec![
+                vec!["tests/test_file1.py::test_function1"],
+                vec![
+                    "tests/test_file1.py::TestClass1::test_method1",
+                    "tests/test_file1.py::TestClass1::test_method2"
+                ],
+                vec!["tests/test_file2.py::test_function2"],
+                vec!["tests/test_file2.py::TestClass2::test_method1"],
+            ]
+        );
     }
 
     #[test]
@@ -280,38 +247,30 @@ mod tests {
     fn test_loadfile_scheduler_groups_by_file() {
         let scheduler = DistributionMode::LoadFile;
         let tests = vec![
-            "tests/test_file1.py::TestClass1::test_method1".into(),
-            "tests/test_file1.py::TestClass1::test_method2".into(),
-            "tests/test_file1.py::test_function1".into(),
-            "tests/test_file2.py::TestClass2::test_method1".into(),
-            "tests/test_file2.py::test_function2".into(),
             "tests/test_file3.py::test_function3".into(),
+            "tests/test_file1.py::TestClass1::test_method1".into(),
+            "tests/test_file2.py::TestClass2::test_method1".into(),
+            "tests/test_file1.py::TestClass1::test_method2".into(),
+            "tests/test_file2.py::test_function2".into(),
+            "tests/test_file1.py::test_function1".into(),
         ];
         let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
 
-        assert_eq!(result.len(), 2);
-
-        // Verify that each file's tests are kept together
-        let mut file_to_worker: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-
-        for (worker_idx, worker_tests) in result.iter().enumerate() {
-            for test in worker_tests {
-                let file = extract_file(test);
-                if let Some(&existing_worker) = file_to_worker.get(&file) {
-                    assert_eq!(
-                        existing_worker, worker_idx,
-                        "Test {test} should be in same worker as other tests from {file}"
-                    );
-                } else {
-                    file_to_worker.insert(file, worker_idx);
-                }
-            }
-        }
-
-        // Verify all tests are distributed
-        let total_tests: usize = result.iter().map(|w| w.len()).sum();
-        assert_eq!(total_tests, 6);
+        assert_eq!(
+            result,
+            vec![
+                vec![
+                    "tests/test_file1.py::TestClass1::test_method1",
+                    "tests/test_file1.py::TestClass1::test_method2",
+                    "tests/test_file1.py::test_function1",
+                    "tests/test_file3.py::test_function3"
+                ],
+                vec![
+                    "tests/test_file2.py::TestClass2::test_method1",
+                    "tests/test_file2.py::test_function2"
+                ],
+            ]
+        );
     }
 
     // WorkSteal scheduler tests
@@ -352,51 +311,5 @@ mod tests {
         let scheduler = DistributionMode::No;
         let result = scheduler.distribute_tests(vec![], NonZeroUsize::new(3).expect("positive"));
         assert!(result.is_empty());
-    }
-
-    // Test deterministic ordering
-    #[test]
-    fn test_deterministic_distribution() {
-        let scheduler = DistributionMode::LoadFile;
-        let tests = vec![
-            "z_file.py::test1".into(),
-            "a_file.py::test2".into(),
-            "m_file.py::test3".into(),
-            "z_file.py::test4".into(),
-            "a_file.py::test5".into(),
-        ];
-
-        // Run multiple times to ensure deterministic behavior
-        let result1 =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
-        let result2 =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
-        let result3 =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
-
-        assert_eq!(result1, result2);
-        assert_eq!(result2, result3);
-
-        // Verify that the same files end up together across runs
-        // This tests the key benefit: deterministic grouping
-        for (worker_idx, worker_tests) in result1.iter().enumerate() {
-            let mut files_in_worker: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
-            for test in worker_tests {
-                files_in_worker.insert(extract_file(test));
-            }
-
-            // Verify the same files are in the same worker in all runs
-            let mut files_in_worker2: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
-            for test in &result2[worker_idx] {
-                files_in_worker2.insert(extract_file(test));
-            }
-
-            assert_eq!(
-                files_in_worker, files_in_worker2,
-                "Worker {worker_idx} should have the same files across runs"
-            );
-        }
     }
 }

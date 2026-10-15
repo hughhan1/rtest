@@ -88,24 +88,6 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_read_pytest_config_with_testpaths() {
-        let temp_dir = TempDir::new().unwrap();
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
-
-        let content = indoc! {r#"
-            [tool.pytest.ini_options]
-            testpaths = ["tests", "test"]
-        "#};
-
-        fs::write(&pyproject_path, content).unwrap();
-
-        let config = read_pytest_config(temp_dir.path());
-        assert_eq!(config.testpaths.len(), 2);
-        assert_eq!(config.testpaths[0], PathBuf::from("tests"));
-        assert_eq!(config.testpaths[1], PathBuf::from("test"));
-    }
-
-    #[test]
     fn test_read_pytest_config_no_file() {
         let temp_dir = TempDir::new().unwrap();
         let config = read_pytest_config(temp_dir.path());
@@ -135,59 +117,30 @@ mod tests {
     }
 
     #[test]
-    fn test_read_pytest_config_with_python_files() {
-        let temp_dir = TempDir::new().unwrap();
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
-
-        let content = indoc! {r#"
+    fn reads_all_configured_paths_and_patterns() {
+        let temp_dir = TempDir::new().expect("temporary project");
+        fs::write(
+            temp_dir.path().join("pyproject.toml"),
+            indoc! {r#"
             [tool.pytest.ini_options]
+            testpaths = ["tests", "test"]
             python_files = ["test_*.py", "*_test.py", "check_*.py"]
-        "#};
-
-        fs::write(&pyproject_path, content).unwrap();
-
-        let config = read_pytest_config(temp_dir.path());
-        assert_eq!(config.python_files.len(), 3);
-        assert_eq!(config.python_files[0], "test_*.py");
-        assert_eq!(config.python_files[1], "*_test.py");
-        assert_eq!(config.python_files[2], "check_*.py");
-    }
-
-    #[test]
-    fn test_read_pytest_config_with_python_classes() {
-        let temp_dir = TempDir::new().unwrap();
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
-
-        let content = indoc! {r#"
-            [tool.pytest.ini_options]
             python_classes = ["Test*", "Check*", "*Suite"]
-        "#};
-
-        fs::write(&pyproject_path, content).unwrap();
-
-        let config = read_pytest_config(temp_dir.path());
-        assert_eq!(config.python_classes.len(), 3);
-        assert_eq!(config.python_classes[0], "Test*");
-        assert_eq!(config.python_classes[1], "Check*");
-        assert_eq!(config.python_classes[2], "*Suite");
-    }
-
-    #[test]
-    fn test_read_pytest_config_with_python_functions() {
-        let temp_dir = TempDir::new().unwrap();
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
-
-        let content = indoc! {r#"
-            [tool.pytest.ini_options]
             python_functions = ["test*", "check_*", "*_test"]
-        "#};
-
-        fs::write(&pyproject_path, content).unwrap();
+        "#},
+        )
+        .expect("write configuration");
 
         let config = read_pytest_config(temp_dir.path());
-        assert_eq!(config.python_functions.len(), 3);
-        assert_eq!(config.python_functions[0], "test*");
-        assert_eq!(config.python_functions[1], "check_*");
-        assert_eq!(config.python_functions[2], "*_test");
+        assert_eq!(
+            config.testpaths,
+            [PathBuf::from("tests"), PathBuf::from("test")]
+        );
+        assert_eq!(
+            config.python_files,
+            ["test_*.py", "*_test.py", "check_*.py"]
+        );
+        assert_eq!(config.python_classes, ["Test*", "Check*", "*Suite"]);
+        assert_eq!(config.python_functions, ["test*", "check_*", "*_test"]);
     }
 }

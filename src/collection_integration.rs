@@ -4,7 +4,6 @@ use crate::collection::error::{CollectionError, CollectionWarning};
 use crate::collection::nodes::Session;
 use crate::collection::types::CollectionNode;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 /// Holds errors and warnings encountered during collection
 #[derive(Debug)]
@@ -18,7 +17,7 @@ pub fn collect_tests_rust(
     rootpath: PathBuf,
     args: &[String],
 ) -> Result<(Vec<String>, CollectionErrors), CollectionError> {
-    let session = Rc::new(Session::new(rootpath));
+    let session = Session::new(rootpath);
     let mut collection_errors = CollectionErrors {
         errors: Vec::new(),
         warnings: Vec::new(),
@@ -27,29 +26,30 @@ pub fn collect_tests_rust(
     let collectors = session.perform_collect(args)?;
     let mut test_nodes = Vec::new();
     for collector in collectors {
-        collect_items_recursive(collector, &mut test_nodes, &mut collection_errors);
+        collect_items_recursive(&session, collector, &mut test_nodes, &mut collection_errors);
     }
     Ok((test_nodes, collection_errors))
 }
 
 /// Recursively collect all test items
 fn collect_items_recursive(
+    session: &Session,
     node: CollectionNode,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
 ) {
     match node {
         CollectionNode::Test(nodeid) => test_nodes.push(nodeid),
-        CollectionNode::Branch(collector) => match collector.collect() {
+        CollectionNode::Branch(collector) => match collector.collect(session) {
             Ok((children, warnings)) => {
                 collection_errors.warnings.extend(warnings);
                 for child in children {
-                    collect_items_recursive(child, test_nodes, collection_errors);
+                    collect_items_recursive(session, child, test_nodes, collection_errors);
                 }
             }
             Err(error) => collection_errors
                 .errors
-                .push((collector.nodeid().into(), error)),
+                .push((collector.nodeid(session), error)),
         },
     }
 }
@@ -77,9 +77,6 @@ pub fn display_collection_results(test_nodes: &[String], errors: &CollectionErro
                 }
                 CollectionError::IoError(e) => {
                     println!("{RED}E   IO Error: {e}{RESET}");
-                }
-                CollectionError::SkipError(msg) => {
-                    println!("{RED}E   Skipped: {msg}{RESET}");
                 }
                 CollectionError::FileNotFound(path) => {
                     println!(

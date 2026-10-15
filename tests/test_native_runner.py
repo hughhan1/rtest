@@ -7,7 +7,6 @@ import tempfile
 from pathlib import Path
 from typing import TypedDict
 
-import rtest
 from rtest.exit_code import ExitCodeValues
 from rtest.mark import PARAMETRIZE_DEPRECATION_MSG, SKIP_DEPRECATION_MSG
 
@@ -26,7 +25,7 @@ class WorkerResultDict(TypedDict, total=False):
     error_type: str | None
 
 
-def run_worker(test_file: Path, root: Path, output_file: Path) -> list[WorkerResultDict]:
+def run_worker(test_file: Path, root: Path, output_file: Path, expected_exit: int = 0) -> list[WorkerResultDict]:
     """Run the worker on a test file and return results."""
     result = subprocess.run(
         [
@@ -43,6 +42,8 @@ def run_worker(test_file: Path, root: Path, output_file: Path) -> list[WorkerRes
         text=True,
         cwd=str(root),
     )
+
+    assert result.returncode == expected_exit, result.stderr
 
     # Parse results
     if not output_file.exists():
@@ -115,177 +116,78 @@ class TestParametrizeIntegration:
             ]
             assert all(result["outcome"] == "passed" for result in results)
 
-    def test_single_param_generates_correct_nodeids(self) -> None:
-        """Single @parametrize generates correct number of test cases."""
+    def test_parameterized_fixture_ids_and_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
             results = run_worker(
-                FIXTURES_DIR / "test_parametrize.py",
-                FIXTURES_DIR.parent.parent,  # rtest root
-                output_file,
+                FIXTURES_DIR / "test_parametrize.py", FIXTURES_DIR.parent.parent, Path(tmp_dir) / "results.jsonl"
             )
 
-            # Find the single param tests
-            single_param_results = [r for r in results if "::test_single_param[" in r["nodeid"]]
-            assert len(single_param_results) == 3
-
-            # Check nodeids have correct format - extract param suffixes
-            nodeids = [r["nodeid"] for r in single_param_results]
-            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
-            assert suffixes == {"1", "2", "3"}
-
-            # All should pass
-            assert all(r["outcome"] == "passed" for r in single_param_results)
-
-    def test_multi_param_generates_correct_cases(self) -> None:
-        """Multiple parameter @parametrize works correctly."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_parametrize.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            multi_param_results = [r for r in results if "::test_multi_param[" in r["nodeid"]]
-            assert len(multi_param_results) == 3
-            assert all(r["outcome"] == "passed" for r in multi_param_results)
-
-    def test_stacked_params_cartesian_product(self) -> None:
-        """Stacked @parametrize produces cartesian product."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_parametrize.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            stacked_results = [r for r in results if "::test_stacked_params[" in r["nodeid"]]
-            # 2 values for a * 2 values for b = 4 cases
-            assert len(stacked_results) == 4
-            assert all(r["outcome"] == "passed" for r in stacked_results)
-
-            # Check case IDs are cartesian product - extract param suffixes
-            nodeids = [r["nodeid"] for r in stacked_results]
-            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
-            assert suffixes == {"1-10", "1-20", "2-10", "2-20"}
-
-    def test_explicit_ids(self) -> None:
-        """Explicit ids are used in nodeids."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_parametrize.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            id_results = [r for r in results if "::test_with_ids[" in r["nodeid"]]
-            nodeids = [r["nodeid"] for r in id_results]
-            suffixes = {n.split("[")[1].rstrip("]") for n in nodeids}
-            assert suffixes == {"one", "two"}
-
-    def test_runtime_evaluated_params(self) -> None:
-        """Runtime-evaluated Python values work as parameters."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_parametrize.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            # Function call params
-            func_results = [r for r in results if "::test_function_call_params[" in r["nodeid"]]
-            assert len(func_results) == 3
-            assert all(r["outcome"] == "passed" for r in func_results)
-
-            # Object params
-            obj_results = [r for r in results if "::test_object_params[" in r["nodeid"]]
-            assert len(obj_results) == 2
-            assert all(r["outcome"] == "passed" for r in obj_results)
-
-            # Stdlib object params
-            dt_results = [r for r in results if "::test_stdlib_object_params[" in r["nodeid"]]
-            assert len(dt_results) == 2
-            assert all(r["outcome"] == "passed" for r in dt_results)
+        by_test: dict[str, list[str]] = {}
+        for result in results:
+            name = result["nodeid"].split("::", 1)[1]
+            by_test.setdefault(name.partition("[")[0], []).append(name)
+        assert {name: len(ids) for name, ids in by_test.items()} == {
+            "test_single_param": 3,
+            "test_multi_param": 3,
+            "test_stacked_params": 4,
+            "test_with_ids": 2,
+            "test_no_params": 1,
+            "test_function_call_params": 3,
+            "test_object_params": 2,
+            "test_stdlib_object_params": 2,
+        }
+        for name, suffixes in {
+            "test_single_param": ["1", "2", "3"],
+            "test_multi_param": ["1-2", "3-4", "5-6"],
+            "test_stacked_params": ["1-10", "1-20", "2-10", "2-20"],
+            "test_with_ids": ["one", "two"],
+            "test_function_call_params": ["4", "6", "8"],
+        }.items():
+            assert by_test[name] == [f"{name}[{suffix}]" for suffix in suffixes]
+        assert by_test["test_no_params"] == ["test_no_params"]
+        assert all(result["outcome"] == "passed" for result in results)
 
 
 class TestSkipIntegration:
     """Integration tests for skip functionality."""
 
-    def test_skipped_tests_marked_as_skipped(self) -> None:
-        """@skip decorator marks tests as skipped."""
+    def test_function_and_class_skips_preserve_reasons(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
             results = run_worker(
-                FIXTURES_DIR / "test_skip.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
+                FIXTURES_DIR / "test_skip.py", FIXTURES_DIR.parent.parent, Path(tmp_dir) / "results.jsonl"
             )
-
-            skipped_with_reason = [r for r in results if r["nodeid"].endswith("::test_skipped_with_reason")]
-            assert len(skipped_with_reason) == 1
-            assert skipped_with_reason[0]["outcome"] == "skipped"
-            error_dict = skipped_with_reason[0].get("error")
-            assert error_dict is not None
-            assert error_dict["reason"] == "not implemented"
-
-    def test_class_skip_skips_all_methods(self) -> None:
-        """@skip on class skips all methods."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_skip.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            class_methods = [r for r in results if "::TestSkippedClass::" in r["nodeid"]]
-            assert len(class_methods) == 2
-            assert all(r["outcome"] == "skipped" for r in class_methods)
+        assert len(results) == 5
+        assert {
+            result["nodeid"].split("::", 1)[1]: (result["outcome"], (result.get("error") or {}).get("reason"))
+            for result in results
+        } == {
+            "TestSkippedClass::test_method1": ("skipped", "entire class skipped"),
+            "TestSkippedClass::test_method2": ("skipped", "entire class skipped"),
+            "test_skipped_with_reason": ("skipped", "not implemented"),
+            "test_skipped_without_reason": ("skipped", ""),
+            "test_not_skipped": ("passed", None),
+        }
 
 
 class TestClassDiscovery:
     """Integration tests for test class discovery."""
 
-    def test_discovers_class_methods(self) -> None:
-        """Test methods in classes are discovered."""
+    def test_class_methods_parameters_skips_and_setup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
             results = run_worker(
-                FIXTURES_DIR / "test_class.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
+                FIXTURES_DIR / "test_class.py", FIXTURES_DIR.parent.parent, Path(tmp_dir) / "results.jsonl"
             )
-
-            basic_class = [r for r in results if "::TestBasicClass::" in r["nodeid"]]
-            assert len(basic_class) == 2
-            assert all(r["outcome"] == "passed" for r in basic_class)
-
-    def test_parametrized_class_methods(self) -> None:
-        """Parametrized methods in classes work correctly."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            results = run_worker(
-                FIXTURES_DIR / "test_class.py",
-                FIXTURES_DIR.parent.parent,
-                output_file,
-            )
-
-            param_method = [r for r in results if "::TestParametrizedClass::test_param_method[" in r["nodeid"]]
-            assert len(param_method) == 2
-            assert all(r["outcome"] == "passed" for r in param_method)
+        assert len(results) == 8
+        assert {result["nodeid"].split("::", 1)[1]: result["outcome"] for result in results} == {
+            "TestBasicClass::test_method1": "passed",
+            "TestBasicClass::test_method2": "passed",
+            "TestParametrizedClass::test_param_method[1]": "passed",
+            "TestParametrizedClass::test_param_method[2]": "passed",
+            "TestParametrizedClass::test_normal_method": "passed",
+            "TestMixedClass::test_normal": "passed",
+            "TestMixedClass::test_skipped": "skipped",
+            "TestWithSetup::test_uses_setup": "passed",
+        }
 
 
 class TestOutcomes:
@@ -300,30 +202,21 @@ class TestOutcomes:
                 FIXTURES_DIR / "test_outcomes.py",
                 FIXTURES_DIR.parent.parent,
                 output_file,
+                expected_exit=1,
             )
 
-            # Pass
-            passed = [r for r in results if r["nodeid"].endswith("::test_pass")]
-            assert len(passed) == 1
-            assert passed[0]["outcome"] == "passed"
-
-            # Fail
-            failed = [r for r in results if r["nodeid"].endswith("::test_fail")]
-            assert len(failed) == 1
-            assert failed[0]["outcome"] == "failed"
-            assert failed[0]["error_type"] == AssertionError.__name__
-
-            # Error
-            error = [r for r in results if r["nodeid"].endswith("::test_error")]
-            assert len(error) == 1
-            assert error[0]["outcome"] == "error"
-            assert error[0]["error_type"] == RuntimeError.__name__
-
-            # Stdout/stderr capture
-            with_output = [r for r in results if r["nodeid"].endswith("::test_pass_with_output")]
-            assert len(with_output) == 1
-            assert with_output[0]["stdout"].strip() == "stdout message"
-            assert with_output[0]["stderr"].strip() == "stderr message"
+            assert len(results) == 4
+            by_name = {result["nodeid"].split("::", 1)[1]: result for result in results}
+            assert {name: result["outcome"] for name, result in by_name.items()} == {
+                "test_pass": "passed",
+                "test_fail": "failed",
+                "test_error": "error",
+                "test_pass_with_output": "passed",
+            }
+            assert by_name["test_fail"]["error_type"] == AssertionError.__name__
+            assert by_name["test_error"]["error_type"] == RuntimeError.__name__
+            assert by_name["test_pass_with_output"]["stdout"].strip() == "stdout message"
+            assert by_name["test_pass_with_output"]["stderr"].strip() == "stderr message"
 
 
 class TestRaisesIntegration:
@@ -335,53 +228,24 @@ class TestRaisesIntegration:
                 FIXTURES_DIR / "test_raises.py",
                 FIXTURES_DIR.parent.parent,
                 output_file,
+                expected_exit=1,
             )
 
-            def outcome_for(name: str) -> str:
-                matches = [r for r in results if r["nodeid"].endswith(f"::{name}")]
-                assert len(matches) == 1, f"Expected 1 result for {name}, got {len(matches)}"
-                return matches[0]["outcome"]
-
-            assert outcome_for("test_raises_expected") == "passed"
-            assert outcome_for("test_raises_with_match") == "passed"
-            assert outcome_for("test_raises_no_exception") == "failed"
-            assert outcome_for("test_raises_wrong_exception") == "error"
-            assert outcome_for("test_raises_match_fails") == "failed"
-            assert outcome_for("test_raises_value_attribute") == "passed"
-            assert outcome_for("test_raises_exception_tuple") == "passed"
-            assert outcome_for("test_raises_subclass") == "passed"
+            assert len(results) == 8
+            assert {result["nodeid"].split("::", 1)[1]: result["outcome"] for result in results} == {
+                "test_raises_expected": "passed",
+                "test_raises_with_match": "passed",
+                "test_raises_no_exception": "failed",
+                "test_raises_wrong_exception": "error",
+                "test_raises_match_fails": "failed",
+                "test_raises_value_attribute": "passed",
+                "test_raises_exception_tuple": "passed",
+                "test_raises_subclass": "passed",
+            }
 
 
 class TestWorkerExitCode:
     """Tests for worker exit code behavior."""
-
-    @rtest.mark.cases(
-        "test_file,expected_code",
-        [
-            ("test_parametrize.py", 0),  # all pass
-            ("test_outcomes.py", 1),  # has failures
-        ],
-    )
-    def test_exit_code(self, test_file: str, expected_code: int) -> None:
-        """Worker exit code reflects test results."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            output_file = tmp_path / "results.jsonl"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "rtest.worker",
-                    "--root",
-                    str(FIXTURES_DIR.parent.parent),
-                    "--out",
-                    str(output_file),
-                    str(FIXTURES_DIR / test_file),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode == expected_code
 
     def test_exit_code_zero_on_skip_only(self) -> None:
         """Worker exits with 0 when tests are only skipped (no failures)."""
@@ -392,21 +256,9 @@ class TestWorkerExitCode:
                 'import rtest\n\n@rtest.mark.skip(reason="skip")\ndef test_skipped():\n    assert False\n'
             )
             output_file = tmp_path / "results.jsonl"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "rtest.worker",
-                    "--root",
-                    str(tmp_path),
-                    "--out",
-                    str(output_file),
-                    str(skip_only),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode == ExitCodeValues.OK
+            results = run_worker(skip_only, tmp_path, output_file)
+            assert len(results) == 1
+            assert results[0]["outcome"] == "skipped"
 
 
 class TestNativeRunnerCLI:
@@ -428,38 +280,6 @@ class TestNativeRunnerCLI:
             assert result.returncode == ExitCodeValues.OK
             assert "test_one" in result.stdout
             assert "test_two" in result.stdout
-
-    def test_native_runner_passes_with_passing_tests(self) -> None:
-        """--runner native exits 0 when all tests pass."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            test_file = tmp_path / "test_pass.py"
-            test_file.write_text("def test_pass(): assert True\n")
-
-            result = subprocess.run(
-                [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
-                capture_output=True,
-                text=True,
-                cwd=str(tmp_path),
-            )
-            assert result.returncode == ExitCodeValues.OK
-            assert "PASSED" in result.stdout
-
-    def test_native_runner_fails_with_failing_tests(self) -> None:
-        """--runner native exits 1 when tests fail."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            test_file = tmp_path / "test_fail.py"
-            test_file.write_text("def test_fail(): assert False\n")
-
-            result = subprocess.run(
-                [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
-                capture_output=True,
-                text=True,
-                cwd=str(tmp_path),
-            )
-            assert result.returncode == ExitCodeValues.TESTS_FAILED
-            assert "FAILED" in result.stdout
 
     def test_native_runner_with_multiple_workers(self) -> None:
         """--runner native distributes work across multiple workers."""
@@ -514,35 +334,6 @@ class TestNativeRunnerCLI:
             assert result.returncode == ExitCodeValues.OK
             assert "1 passed" in result.stdout
             assert "1 skipped" in result.stdout
-
-    def test_native_runner_no_tests_found(self) -> None:
-        """--runner native handles empty test directory gracefully."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            result = subprocess.run(
-                [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
-                capture_output=True,
-                text=True,
-                cwd=str(tmp_path),
-            )
-            assert result.returncode == ExitCodeValues.OK
-            assert "No tests found" in result.stdout
-
-    def test_native_runner_class_tests(self) -> None:
-        """--runner native discovers and runs test class methods."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            test_file = tmp_path / "test_class.py"
-            test_file.write_text("class TestExample:\n    def test_method(self): assert True\n")
-
-            result = subprocess.run(
-                [sys.executable, "-m", "rtest", "--runner", "native", "-n", "1"],
-                capture_output=True,
-                text=True,
-                cwd=str(tmp_path),
-            )
-            assert result.returncode == ExitCodeValues.OK
-            assert "1 passed" in result.stdout
 
 
 class TestPytestMarkerCompatibility:

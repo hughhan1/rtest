@@ -11,6 +11,14 @@ class RtestResult(NamedTuple):
     stdout: str
     stderr: str
 
+    @property
+    def output(self) -> str:
+        return self.stdout + self.stderr
+
+    @property
+    def output_lines(self) -> list[str]:
+        return self.output.split("\n")
+
 
 def run_rtest(args: list[str], cwd: str | None = None, env: dict[str, str] | None = None) -> RtestResult:
     """Helper to run rtest binary and capture output.
