@@ -45,7 +45,6 @@ pub struct ResolvedBaseClass {
 #[derive(Debug, Clone)]
 pub struct TestMethodInfo {
     pub name: String,
-    pub line: usize,
     /// Method-level decorator specs (not yet combined with class decorators)
     pub method_specs: MethodCasesInfo,
 }
@@ -127,7 +126,6 @@ impl SemanticTestDiscovery {
                         parse_decorators_for_cases(&func.decorator_list, &resolver, None);
                     all_tests.push(TestInfo {
                         name: func.name.to_string(),
-                        line: func.range().start().to_u32() as usize,
                         class_name: None,
                         cases_expansion,
                     });
@@ -311,7 +309,6 @@ impl SemanticTestDiscovery {
                 let cases_expansion = combine_and_expand_specs(class_specs, &method.method_specs);
                 TestInfo {
                     name: method.name,
-                    line: method.line,
                     class_name: Some(class_name.to_string()),
                     cases_expansion,
                 }

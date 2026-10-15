@@ -15,8 +15,7 @@ mod visitor;
 // Re-export public API
 pub use cases::{format_cannot_expand_warning, CannotExpandReason, CasesExpansion, ExpandedCase};
 pub use discovery::{
-    discover_tests, discover_tests_with_inheritance, test_info_to_functions, TestDiscoveryConfig,
-    TestInfo,
+    discover_tests, discover_tests_with_inheritance, TestDiscoveryConfig, TestInfo,
 };
 pub use module_resolver::{ModuleResolver, ParsedModule};
 pub use semantic_analyzer::{SemanticTestDiscovery, TestClassInfo};

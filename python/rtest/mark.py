@@ -281,11 +281,3 @@ def expand_parametrize(func: FunctionType) -> list[ExpandedCase] | None:
         result.append(ExpandedCase("-".join(tokens), merged_kwargs))
 
     return result
-
-
-def get_case_nodeid_suffix(case_id: str) -> str:
-    """Get the nodeid suffix for a case ID.
-
-    Empty IDs are valid and produce [].
-    """
-    return f"[{case_id}]"

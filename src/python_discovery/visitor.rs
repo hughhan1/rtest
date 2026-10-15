@@ -80,7 +80,6 @@ impl TestDiscoveryVisitor {
             let cases_expansion = parse_decorators_for_cases(&func.decorator_list, resolver, None);
             self.tests.push(TestInfo {
                 name: name.into(),
-                line: func.range.start().to_u32() as usize,
                 class_name: None,
                 cases_expansion,
             });
@@ -119,7 +118,6 @@ impl TestDiscoveryVisitor {
             let cases_expansion = combine_and_expand_specs(&class_specs, &method.method_specs);
             self.tests.push(TestInfo {
                 name: method.name,
-                line: method.line,
                 class_name: Some(class_name.into()),
                 cases_expansion,
             });

@@ -1,8 +1,6 @@
 //! Test discovery types and main entry point.
 
 use crate::collection::error::{CollectionError, CollectionResult, CollectionWarning};
-use crate::collection::nodes::Function;
-use crate::collection::types::Location;
 use crate::python_discovery::cases::{parse_decorators_to_specs, CasesExpansion};
 use crate::python_discovery::constant_resolver::ConstantResolver;
 use crate::python_discovery::module_resolver::ModuleResolver;
@@ -17,7 +15,6 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct TestInfo {
     pub name: String,
-    pub line: usize,
     pub class_name: Option<String>,
     /// Test cases expansion result from parsing decorators.
     pub cases_expansion: CasesExpansion,
@@ -29,6 +26,18 @@ impl TestInfo {
             format!("{}::{}::{}", module_nodeid, class_name, self.name)
         } else {
             format!("{}::{}", module_nodeid, self.name)
+        }
+    }
+
+    /// Expand static cases into node IDs, keeping a base ID for runtime fallback.
+    pub(crate) fn nodeids(&self, module_nodeid: &str) -> Vec<String> {
+        let base = self.base_nodeid(module_nodeid);
+        match &self.cases_expansion {
+            CasesExpansion::NotDecorated | CasesExpansion::CannotExpand(_) => vec![base],
+            CasesExpansion::Expanded(cases) => cases
+                .iter()
+                .map(|case| format!("{base}[{}]", case.case_id))
+                .collect(),
         }
     }
 }
@@ -85,7 +94,6 @@ pub(crate) fn collect_test_methods(
             Stmt::FunctionDef(func) if config.is_test_function(func.name.as_str()) => {
                 Some(TestMethodInfo {
                     name: func.name.to_string(),
-                    line: func.range.start().to_u32() as usize,
                     method_specs: parse_decorators_to_specs(
                         &func.decorator_list,
                         resolver,
@@ -156,48 +164,6 @@ fn path_to_module_path(file_path: &Path, root_path: &Path) -> Vec<String> {
     }
 
     parts
-}
-
-/// Convert TestInfo to one or more Function collectors.
-///
-/// Returns multiple Functions if the test has expanded cases (e.g., `test_foo[0]`, `test_foo[1]`).
-/// Returns a single Function if not decorated or if cases cannot be statically expanded.
-pub fn test_info_to_functions(
-    test: &TestInfo,
-    module_path: &Path,
-    module_nodeid: &str,
-) -> Vec<Function> {
-    let base_nodeid = test.base_nodeid(module_nodeid);
-
-    match &test.cases_expansion {
-        CasesExpansion::NotDecorated | CasesExpansion::CannotExpand(_) => {
-            vec![Function {
-                name: test.name.clone(),
-                nodeid: base_nodeid,
-                location: Location {
-                    path: module_path.to_path_buf(),
-                    line: Some(test.line),
-                    name: test.name.clone(),
-                },
-            }]
-        }
-        CasesExpansion::Expanded(cases) => cases
-            .iter()
-            .map(|case| {
-                let nodeid = format!("{}[{}]", base_nodeid, case.case_id);
-                let name_with_case = format!("{}[{}]", test.name, case.case_id);
-                Function {
-                    name: name_with_case.clone(),
-                    nodeid,
-                    location: Location {
-                        path: module_path.to_path_buf(),
-                        line: Some(test.line),
-                        name: name_with_case,
-                    },
-                }
-            })
-            .collect(),
-    }
 }
 
 #[cfg(test)]

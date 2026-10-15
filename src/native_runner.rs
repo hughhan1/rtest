@@ -111,26 +111,24 @@ fn parse_results_file(path: &Path) -> Result<Vec<TestResult>, String> {
     Ok(results)
 }
 
-fn aggregate_results(all_results: Vec<Vec<TestResult>>) -> AggregatedResults {
-    let mut aggregated = AggregatedResults::default();
-
-    for result in all_results.into_iter().flatten() {
-        aggregated.total_duration_ms += result.duration_ms;
-        match result.outcome {
-            TestOutcome::Passed => aggregated.passed += 1,
-            TestOutcome::Failed(info) => aggregated.failures.push(FailedTest {
-                nodeid: result.nodeid,
-                info,
-            }),
-            TestOutcome::Error(info) => aggregated.errors.push(FailedTest {
-                nodeid: result.nodeid,
-                info,
-            }),
-            TestOutcome::Skipped => aggregated.skipped += 1,
+impl Extend<TestResult> for AggregatedResults {
+    fn extend<T: IntoIterator<Item = TestResult>>(&mut self, results: T) {
+        for result in results {
+            self.total_duration_ms += result.duration_ms;
+            match result.outcome {
+                TestOutcome::Passed => self.passed += 1,
+                TestOutcome::Failed(info) => self.failures.push(FailedTest {
+                    nodeid: result.nodeid,
+                    info,
+                }),
+                TestOutcome::Error(info) => self.errors.push(FailedTest {
+                    nodeid: result.nodeid,
+                    info,
+                }),
+                TestOutcome::Skipped => self.skipped += 1,
+            }
         }
     }
-
-    aggregated
 }
 
 fn print_test_results(label: &str, results: &[FailedTest]) {
@@ -279,18 +277,19 @@ pub fn execute_native(config: &NativeRunnerConfig, test_files: Vec<PathBuf>) -> 
         handles.push(handle);
     }
 
-    let mut worker_errors = Vec::new();
-    let mut all_results = Vec::new();
+    let mut aggregated = AggregatedResults::default();
     for (i, handle) in handles.into_iter().enumerate() {
         match handle.join() {
-            Ok(Ok(results)) => all_results.push(results),
-            Ok(Err(e)) => worker_errors.push(format!("Worker {}: {}", i, e)),
-            Err(_) => worker_errors.push(format!("Worker {} panicked", i)),
+            Ok(Ok(results)) => aggregated.extend(results),
+            Ok(Err(e)) => aggregated
+                .worker_errors
+                .push(format!("Worker {}: {}", i, e)),
+            Err(_) => aggregated
+                .worker_errors
+                .push(format!("Worker {} panicked", i)),
         }
     }
 
-    let mut aggregated = aggregate_results(all_results);
-    aggregated.worker_errors = worker_errors;
     print_summary(&aggregated);
 
     // TempDir is automatically cleaned up when dropped
@@ -388,8 +387,9 @@ mod tests {
             r#"{"nodeid":"skipped","outcome":"skipped","duration_ms":0,"error":{"reason":"later"}}"#,
             r#"{"nodeid":"failed","outcome":"failed","duration_ms":2,"error":{"traceback":"assertion"},"error_type":"AssertionError"}"#,
             r#"{"nodeid":"error","outcome":"error","duration_ms":3,"error":{"traceback":"exception"},"error_type":"ValueError"}"#,
-        ].into_iter().map(|json| serde_json::from_str(json).expect("valid worker JSON")).collect();
-        let summary = aggregate_results(vec![results]);
+        ].into_iter().map(|json| serde_json::from_str(json).expect("valid worker JSON"));
+        let mut summary = AggregatedResults::default();
+        summary.extend(results);
         assert_eq!(summary.passed, 1);
         assert_eq!(summary.skipped, 1);
         assert_eq!(summary.total_duration_ms, 6.0);

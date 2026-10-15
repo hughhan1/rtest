@@ -39,6 +39,7 @@ pub struct WorkerTask {
     pub env_vars: Vec<(String, String)>,
 }
 
+#[derive(Default)]
 pub struct WorkerPool {
     workers: Vec<WorkerHandle>,
 }
@@ -48,17 +49,9 @@ struct WorkerHandle {
     handle: thread::JoinHandle<std::io::Result<Output>>,
 }
 
-impl Default for WorkerPool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl WorkerPool {
     pub fn new() -> Self {
-        Self {
-            workers: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn spawn_worker(&mut self, task: WorkerTask) {
@@ -96,10 +89,5 @@ impl WorkerPool {
             .collect();
         results.sort_by_key(|result| result.worker_id);
         results
-    }
-
-    #[allow(dead_code)]
-    pub fn worker_count(&self) -> usize {
-        self.workers.len()
     }
 }

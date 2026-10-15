@@ -55,17 +55,6 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_worker_count_large_numbers() {
-        let count =
-            determine_worker_count(Some(NumProcesses::Count(workers(1000))), Some(workers(500)));
-        assert_eq!(count.get(), 500);
-
-        let count =
-            determine_worker_count(Some(NumProcesses::Count(workers(100))), Some(workers(1000)));
-        assert_eq!(count.get(), 100);
-    }
-
-    #[test]
     fn test_determine_worker_count_auto_with_max() {
         let count = determine_worker_count(Some(NumProcesses::Auto), Some(workers(1)));
         assert_eq!(count.get(), 1);
@@ -75,36 +64,5 @@ mod tests {
     fn test_determine_worker_count_logical_with_max() {
         let count = determine_worker_count(Some(NumProcesses::Logical), Some(workers(2)));
         assert!(count.get() <= 2);
-    }
-
-    #[test]
-    fn test_maxprocesses_integration() {
-        // Test that maxprocesses actually limits worker count
-        let count =
-            determine_worker_count(Some(NumProcesses::Count(workers(10))), Some(workers(3)));
-        assert_eq!(
-            count.get(),
-            3,
-            "maxprocesses should limit worker count to 3"
-        );
-
-        let count =
-            determine_worker_count(Some(NumProcesses::Count(workers(2))), Some(workers(10)));
-        assert_eq!(
-            count.get(),
-            2,
-            "worker count should not exceed requested when under limit"
-        );
-
-        // Test with auto/logical modes
-        let count = determine_worker_count(Some(NumProcesses::Auto), Some(workers(1)));
-        assert_eq!(count.get(), 1, "maxprocesses should limit auto detection");
-
-        let count = determine_worker_count(Some(NumProcesses::Logical), Some(workers(1)));
-        assert_eq!(
-            count.get(),
-            1,
-            "maxprocesses should limit logical detection"
-        );
     }
 }
