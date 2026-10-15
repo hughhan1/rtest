@@ -7,7 +7,6 @@ use crate::collection::error::{CollectionError, CollectionResult};
 use ruff_python_ast::ModModule;
 use ruff_python_parser::parse_module;
 use ruff_python_stdlib::sys::is_builtin_module;
-use std::collections::{hash_map::Entry, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Information about a parsed Python module
@@ -17,11 +16,10 @@ pub struct ParsedModule {
 }
 
 /// Resolves Python module imports to file paths and loads modules
+#[derive(Clone)]
 pub struct ModuleResolver {
     /// Search paths for module resolution
     search_paths: Vec<PathBuf>,
-    /// Cache of already loaded modules
-    cache: HashMap<Vec<String>, ParsedModule>,
 }
 
 impl ModuleResolver {
@@ -34,29 +32,14 @@ impl ModuleResolver {
         // Then add the project root
         search_paths.push(project_root.to_path_buf());
 
-        Self {
-            search_paths,
-            cache: HashMap::new(),
-        }
+        Self { search_paths }
     }
 
-    /// Copy of this resolver's search paths with an empty module cache.
-    pub fn with_search_paths(&self) -> Self {
-        Self {
-            search_paths: self.search_paths.clone(),
-            cache: HashMap::new(),
-        }
-    }
-
-    /// Resolve a module path to a file and load it
-    pub fn resolve_and_load(&mut self, module_path: &[String]) -> CollectionResult<&ParsedModule> {
-        match self.cache.entry(module_path.to_vec()) {
-            Entry::Occupied(entry) => Ok(entry.into_mut()),
-            Entry::Vacant(entry) => {
-                let path = Self::resolve_with_search_paths(&self.search_paths, module_path)?;
-                Ok(entry.insert(Self::load_module(&path)?))
-            }
-        }
+    /// Load an owned AST so callers can drop it after caching their extracted metadata.
+    /// Callers track loaded modules; retaining another cache here duplicates that state.
+    pub fn resolve_and_load(&self, module_path: &[String]) -> CollectionResult<ParsedModule> {
+        let path = Self::resolve_with_search_paths(&self.search_paths, module_path)?;
+        Self::load_module(&path)
     }
 
     /// Resolve module using search paths
@@ -150,7 +133,7 @@ mod tests {
         fs::write(root.join("package/subpackage/__init__.py"), "").unwrap();
         fs::write(root.join("package/module.py"), "# module").unwrap();
 
-        let mut resolver = ModuleResolver::new(root);
+        let resolver = ModuleResolver::new(root);
 
         // Test simple module
         let path = resolver
