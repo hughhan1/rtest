@@ -2,11 +2,11 @@
 
 use super::config::CollectionConfig;
 use super::error::{CollectionError, CollectionResult, CollectionWarning};
-use super::types::{CollectionNode, Collector, Location};
+use super::types::{CollectionNode, Collector};
 use super::utils::glob_match_any;
 use crate::python_discovery::{
-    discover_tests_with_inheritance, format_cannot_expand_warning, test_info_to_functions,
-    CasesExpansion, TestDiscoveryConfig,
+    discover_tests_with_inheritance, format_cannot_expand_warning, CasesExpansion,
+    TestDiscoveryConfig,
 };
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -223,7 +223,7 @@ impl Collector for Module {
 
         let mut all_warnings: Vec<CollectionWarning> = discovery_warnings;
 
-        let functions: Vec<CollectionNode> = tests
+        let nodes: Vec<CollectionNode> = tests
             .into_iter()
             .flat_map(|test| {
                 if let CasesExpansion::CannotExpand(reason) = &test.cases_expansion {
@@ -235,22 +235,13 @@ impl Collector for Module {
                         message: warning_str,
                     });
                 }
-                test_info_to_functions(&test, &self.path, &self.nodeid)
+                test.nodeids(&self.nodeid)
             })
             .map(CollectionNode::Test)
             .collect();
 
-        Ok((functions, all_warnings))
+        Ok((nodes, all_warnings))
     }
-}
-
-/// Test function item
-#[derive(Debug)]
-pub struct Function {
-    #[allow(dead_code)]
-    pub name: String,
-    pub nodeid: String,
-    pub location: Location,
 }
 
 #[cfg(test)]

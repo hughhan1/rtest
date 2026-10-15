@@ -15,7 +15,7 @@ from pathlib import Path
 from types import FunctionType, MappingProxyType, ModuleType
 from typing import Callable, Literal
 
-from rtest.mark import ExpandedCase, SkipInfo, get_case_nodeid_suffix
+from rtest.mark import ExpandedCase, SkipInfo
 
 
 @dataclass(frozen=True)
@@ -156,10 +156,7 @@ def _skip_info(obj: object) -> SkipInfo | None:
 def _parametrize_test_case(test_case: TestCase, cases: list[ExpandedCase] | None) -> list[TestCase]:
     if cases is None:
         return [test_case]
-    return [
-        replace(test_case, nodeid=f"{test_case.nodeid}{get_case_nodeid_suffix(case_id)}", kwargs=kwargs)
-        for case_id, kwargs in cases
-    ]
+    return [replace(test_case, nodeid=f"{test_case.nodeid}[{case_id}]", kwargs=kwargs) for case_id, kwargs in cases]
 
 
 def _discover_tests_in_module(

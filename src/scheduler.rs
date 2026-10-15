@@ -56,8 +56,27 @@ impl std::str::FromStr for DistributionMode {
     }
 }
 
-pub trait Scheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>>;
+impl DistributionMode {
+    /// Assign tests to nonempty batches for this distribution mode.
+    pub fn distribute_tests(
+        self,
+        tests: Vec<String>,
+        num_workers: NonZeroUsize,
+    ) -> Vec<Vec<String>> {
+        match self {
+            // Work stealing currently uses static round-robin assignment.
+            Self::Load | Self::WorkSteal => distribute_round_robin(tests, num_workers),
+            Self::LoadScope => distribute_by_key(tests, num_workers, extract_scope),
+            Self::LoadFile => distribute_by_key(tests, num_workers, extract_file),
+            Self::No => {
+                if tests.is_empty() {
+                    vec![]
+                } else {
+                    vec![tests]
+                }
+            }
+        }
+    }
 }
 
 /// Distribute items in input order, returning only nonempty workers.
@@ -91,56 +110,6 @@ fn distribute_by_key(
         .collect()
 }
 
-pub struct LoadScheduler;
-
-impl Scheduler for LoadScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
-        distribute_round_robin(tests, num_workers)
-    }
-}
-
-pub struct LoadScopeScheduler;
-
-impl Scheduler for LoadScopeScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
-        distribute_by_key(tests, num_workers, extract_scope)
-    }
-}
-
-pub struct LoadFileScheduler;
-
-impl Scheduler for LoadFileScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
-        distribute_by_key(tests, num_workers, extract_file)
-    }
-}
-
-/// WorkStealScheduler implements a round-robin distribution that's optimized for
-/// work stealing scenarios. While true work stealing requires runtime coordination
-/// between workers, this scheduler provides better load balancing by:
-/// 1. Using round-robin assignment (avoiding clustering of slow tests)
-/// 2. Interleaving tests across workers to maximize stealing opportunities
-/// 3. Ensuring each worker gets a good mix of tests from different parts of the suite
-pub struct WorkStealScheduler;
-
-impl Scheduler for WorkStealScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, num_workers: NonZeroUsize) -> Vec<Vec<String>> {
-        LoadScheduler.distribute_tests(tests, num_workers)
-    }
-}
-
-pub struct NoScheduler;
-
-impl Scheduler for NoScheduler {
-    fn distribute_tests(&self, tests: Vec<String>, _num_workers: NonZeroUsize) -> Vec<Vec<String>> {
-        if tests.is_empty() {
-            vec![]
-        } else {
-            vec![tests]
-        }
-    }
-}
-
 fn extract_scope(test_path: &str) -> String {
     // Extract module/class scope from test path
     // Format: path/to/file.py::TestClass::test_method or path/to/file.py::test_function
@@ -155,16 +124,6 @@ fn extract_file(test_path: &str) -> String {
     // Extract file path from test path
     // Format: path/to/file.py::TestClass::test_method or path/to/file.py::test_function
     crate::subproject::split_test_node(test_path).0.into()
-}
-
-pub fn create_scheduler(mode: DistributionMode) -> Box<dyn Scheduler> {
-    match mode {
-        DistributionMode::Load => Box::new(LoadScheduler),
-        DistributionMode::LoadScope => Box::new(LoadScopeScheduler),
-        DistributionMode::LoadFile => Box::new(LoadFileScheduler),
-        DistributionMode::WorkSteal => Box::new(WorkStealScheduler),
-        DistributionMode::No => Box::new(NoScheduler),
-    }
 }
 
 #[cfg(test)]
@@ -199,14 +158,14 @@ mod tests {
 
     #[test]
     fn test_load_scheduler_empty_tests() {
-        let scheduler = LoadScheduler;
+        let scheduler = DistributionMode::Load;
         let result = scheduler.distribute_tests(vec![], NonZeroUsize::new(4).expect("positive"));
         assert!(result.is_empty());
     }
 
     #[test]
     fn test_load_scheduler_single_worker() {
-        let scheduler = LoadScheduler;
+        let scheduler = DistributionMode::Load;
         let tests = vec!["test1".into(), "test2".into(), "test3".into()];
         let result =
             scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(1).expect("positive"));
@@ -216,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_load_scheduler_round_robin() {
-        let scheduler = LoadScheduler;
+        let scheduler = DistributionMode::Load;
         let tests = vec![
             "test1".into(),
             "test2".into(),
@@ -234,68 +193,13 @@ mod tests {
 
     #[test]
     fn test_load_scheduler_more_workers_than_tests() {
-        let scheduler = LoadScheduler;
+        let scheduler = DistributionMode::Load;
         let tests = vec!["test1".into(), "test2".into()];
         let result = scheduler.distribute_tests(tests, NonZeroUsize::new(5).expect("positive"));
 
         assert_eq!(result.len(), 2); // Only non-empty workers
         assert_eq!(result[0], vec!["test1"]);
         assert_eq!(result[1], vec!["test2"]);
-    }
-
-    #[test]
-    fn test_create_scheduler() {
-        let scheduler = create_scheduler(DistributionMode::Load);
-        let tests = vec!["test1".into(), "test2".into()];
-        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_load_scheduler_consistent_distribution() {
-        let scheduler = LoadScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-            "test4".into(),
-        ];
-
-        // Test the same distribution multiple times - should be consistent
-        let result1 =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
-        let result2 =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"));
-
-        assert_eq!(result1, result2);
-        assert_eq!(result1[0], vec!["test1", "test3"]);
-        assert_eq!(result1[1], vec!["test2", "test4"]);
-    }
-
-    #[test]
-    fn test_load_scheduler_all_tests_distributed() {
-        let scheduler = LoadScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-            "test4".into(),
-            "test5".into(),
-        ];
-
-        let result =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(3).expect("positive"));
-
-        let mut all_distributed_tests: Vec<String> = Vec::new();
-        for worker_tests in result {
-            all_distributed_tests.extend(worker_tests);
-        }
-
-        all_distributed_tests.sort();
-        let mut expected_tests = tests.clone();
-        expected_tests.sort();
-
-        assert_eq!(all_distributed_tests, expected_tests);
     }
 
     #[test]
@@ -318,7 +222,7 @@ mod tests {
     // LoadScope scheduler tests
     #[test]
     fn test_loadscope_scheduler_groups_by_scope() {
-        let scheduler = LoadScopeScheduler;
+        let scheduler = DistributionMode::LoadScope;
         let tests = vec![
             "tests/test_file1.py::TestClass1::test_method1".into(),
             "tests/test_file1.py::TestClass1::test_method2".into(),
@@ -358,22 +262,23 @@ mod tests {
     }
 
     #[test]
-    fn test_loadscope_scheduler_single_worker() {
-        let scheduler = LoadScopeScheduler;
+    fn grouped_modes_preserve_input_order_with_one_worker() {
         let tests = vec![
-            "tests/test_file1.py::TestClass1::test_method1".into(),
-            "tests/test_file2.py::test_function1".into(),
+            "z_file.py::TestClass::test_method".into(),
+            "a_file.py::test_function".into(),
         ];
-        let result =
-            scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(1).expect("positive"));
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].len(), 2);
+        for mode in [DistributionMode::LoadScope, DistributionMode::LoadFile] {
+            assert_eq!(
+                mode.distribute_tests(tests.clone(), NonZeroUsize::MIN),
+                vec![tests.clone()]
+            );
+        }
     }
 
     // LoadFile scheduler tests
     #[test]
     fn test_loadfile_scheduler_groups_by_file() {
-        let scheduler = LoadFileScheduler;
+        let scheduler = DistributionMode::LoadFile;
         let tests = vec![
             "tests/test_file1.py::TestClass1::test_method1".into(),
             "tests/test_file1.py::TestClass1::test_method2".into(),
@@ -412,7 +317,7 @@ mod tests {
     // WorkSteal scheduler tests
     #[test]
     fn test_worksteal_scheduler_round_robin() {
-        let scheduler = WorkStealScheduler;
+        let scheduler = DistributionMode::WorkSteal;
         let tests = vec![
             "test1".into(),
             "test2".into(),
@@ -430,50 +335,10 @@ mod tests {
         assert_eq!(result[2], vec!["test3", "test6"]);
     }
 
-    #[test]
-    fn test_worksteal_scheduler_uneven_distribution() {
-        let scheduler = WorkStealScheduler;
-        let tests = vec![
-            "test1".into(),
-            "test2".into(),
-            "test3".into(),
-            "test4".into(),
-            "test5".into(),
-        ];
-        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(3).expect("positive"));
-
-        assert_eq!(result.len(), 3);
-        // Round-robin distribution: some workers get one more test
-        assert_eq!(result[0], vec!["test1", "test4"]);
-        assert_eq!(result[1], vec!["test2", "test5"]);
-        assert_eq!(result[2], vec!["test3"]);
-
-        // Verify all tests are distributed
-        let total_tests: usize = result.iter().map(|w| w.len()).sum();
-        assert_eq!(total_tests, 5);
-    }
-
-    #[test]
-    fn test_worksteal_scheduler_interleaving() {
-        let scheduler = WorkStealScheduler;
-        let tests = vec![
-            "fast_test1".into(),
-            "slow_test1".into(),
-            "fast_test2".into(),
-            "slow_test2".into(),
-        ];
-        let result = scheduler.distribute_tests(tests, NonZeroUsize::new(2).expect("positive"));
-
-        assert_eq!(result.len(), 2);
-        // Tests should be interleaved across workers for better work stealing
-        assert_eq!(result[0], vec!["fast_test1", "fast_test2"]);
-        assert_eq!(result[1], vec!["slow_test1", "slow_test2"]);
-    }
-
     // No scheduler tests
     #[test]
     fn test_no_scheduler_single_group() {
-        let scheduler = NoScheduler;
+        let scheduler = DistributionMode::No;
         let tests = vec!["test1".into(), "test2".into(), "test3".into()];
         let result =
             scheduler.distribute_tests(tests.clone(), NonZeroUsize::new(5).expect("positive"));
@@ -484,58 +349,15 @@ mod tests {
 
     #[test]
     fn test_no_scheduler_empty_tests() {
-        let scheduler = NoScheduler;
+        let scheduler = DistributionMode::No;
         let result = scheduler.distribute_tests(vec![], NonZeroUsize::new(3).expect("positive"));
         assert!(result.is_empty());
-    }
-
-    // Create scheduler tests for all modes
-    #[test]
-    fn test_create_scheduler_all_modes() {
-        let load_scheduler = create_scheduler(DistributionMode::Load);
-        let loadscope_scheduler = create_scheduler(DistributionMode::LoadScope);
-        let loadfile_scheduler = create_scheduler(DistributionMode::LoadFile);
-        let worksteal_scheduler = create_scheduler(DistributionMode::WorkSteal);
-        let no_scheduler = create_scheduler(DistributionMode::No);
-
-        let tests = vec!["test1".into(), "test2".into()];
-
-        assert_eq!(
-            load_scheduler
-                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
-                .len(),
-            2
-        );
-        assert_eq!(
-            loadscope_scheduler
-                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
-                .len(),
-            2
-        );
-        assert_eq!(
-            loadfile_scheduler
-                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
-                .len(),
-            2
-        );
-        assert_eq!(
-            worksteal_scheduler
-                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
-                .len(),
-            2
-        );
-        assert_eq!(
-            no_scheduler
-                .distribute_tests(tests.clone(), NonZeroUsize::new(2).expect("positive"))
-                .len(),
-            1
-        );
     }
 
     // Test deterministic ordering
     #[test]
     fn test_deterministic_distribution() {
-        let scheduler = LoadFileScheduler;
+        let scheduler = DistributionMode::LoadFile;
         let tests = vec![
             "z_file.py::test1".into(),
             "a_file.py::test2".into(),

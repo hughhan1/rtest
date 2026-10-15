@@ -1,4 +1,4 @@
-use crate::{create_scheduler, subproject, DistributionMode, WorkerPool, WorkerTask};
+use crate::{subproject, DistributionMode, WorkerPool, WorkerTask};
 use std::num::NonZeroUsize;
 use std::path::Path;
 
@@ -65,7 +65,6 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
     } else {
         [(config.rootpath.to_path_buf(), test_nodes)].into()
     };
-    let scheduler = create_scheduler(config.dist_mode);
     let mut worker_pool = WorkerPool::new();
     let mut worker_id = 0;
 
@@ -76,8 +75,10 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
             tests
         };
 
-        // Schedulers return only nonempty batches.
-        for tests in scheduler.distribute_tests(adjusted_tests, config.worker_count) {
+        for tests in config
+            .dist_mode
+            .distribute_tests(adjusted_tests, config.worker_count)
+        {
             worker_pool.spawn_worker(WorkerTask {
                 worker_id,
                 program: config.program.to_string(),
@@ -89,11 +90,6 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
             });
             worker_id += 1;
         }
-    }
-
-    if worker_id == 0 {
-        log::info!("No test batches to execute.");
-        return 0;
     }
 
     let mut overall_exit_code = 0;

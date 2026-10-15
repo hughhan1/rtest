@@ -27,24 +27,24 @@ pub fn collect_tests_rust(
     let collectors = session.perform_collect(args)?;
     let mut test_nodes = Vec::new();
     for collector in collectors {
-        collect_items_recursive(&collector, &mut test_nodes, &mut collection_errors);
+        collect_items_recursive(collector, &mut test_nodes, &mut collection_errors);
     }
     Ok((test_nodes, collection_errors))
 }
 
 /// Recursively collect all test items
 fn collect_items_recursive(
-    node: &CollectionNode,
+    node: CollectionNode,
     test_nodes: &mut Vec<String>,
     collection_errors: &mut CollectionErrors,
 ) {
     match node {
-        CollectionNode::Test(test) => test_nodes.push(test.nodeid.clone()),
+        CollectionNode::Test(nodeid) => test_nodes.push(nodeid),
         CollectionNode::Branch(collector) => match collector.collect() {
             Ok((children, warnings)) => {
                 collection_errors.warnings.extend(warnings);
                 for child in children {
-                    collect_items_recursive(&child, test_nodes, collection_errors);
+                    collect_items_recursive(child, test_nodes, collection_errors);
                 }
             }
             Err(error) => collection_errors
