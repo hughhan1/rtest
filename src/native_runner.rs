@@ -312,41 +312,33 @@ fn is_test_file(path: &Path, patterns: &[String]) -> bool {
     glob_match_any(patterns, file_name)
 }
 
-fn collect_test_files_in_dir(dir: &Path, patterns: &[String]) -> Vec<PathBuf> {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_entry(|e| {
-            e.file_name()
-                .to_str()
-                .map(|n| !is_hidden_or_ignored(n))
-                .unwrap_or(false)
-        })
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file() && is_test_file(e.path(), patterns))
-        .map(|e| e.into_path())
-        .collect()
-}
-
 pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) -> Vec<PathBuf> {
-    let mut test_files = if paths.is_empty() {
-        collect_test_files_in_dir(root, patterns)
+    let search_paths = if paths.is_empty() {
+        vec![root.to_path_buf()]
     } else {
-        paths
-            .iter()
-            .flat_map(|path_str| {
-                let full_path = root.join(path_str);
-
-                if full_path.is_file() && is_test_file(&full_path, patterns) {
-                    vec![full_path]
-                } else if full_path.is_dir() {
-                    collect_test_files_in_dir(&full_path, patterns)
-                } else {
-                    vec![]
-                }
-            })
-            .collect()
+        paths.iter().map(|path| root.join(path)).collect()
     };
 
+    let mut test_files: Vec<PathBuf> = search_paths
+        .into_iter()
+        .flat_map(|path| {
+            // Explicit files include hidden names and symlinks; directory walks do not.
+            let explicit_file = !paths.is_empty() && path.is_file();
+            WalkDir::new(path)
+                .follow_links(explicit_file)
+                .into_iter()
+                .filter_entry(move |entry| {
+                    explicit_file
+                        || entry
+                            .file_name()
+                            .to_str()
+                            .is_some_and(|name| !is_hidden_or_ignored(name))
+                })
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_file() && is_test_file(entry.path(), patterns))
+                .map(|entry| entry.into_path())
+        })
+        .collect();
     test_files.sort();
     test_files
 }
@@ -354,6 +346,53 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_selection_preserves_explicit_and_recursive_rules() {
+        let temp = tempfile::Builder::new()
+            .prefix("rtest-file-selection-")
+            .tempdir()
+            .expect("temporary project");
+        let root = temp.path();
+        std::fs::create_dir(root.join("nested")).expect("create directory");
+        for file in ["nested/test_a.py", ".test_hidden.py"] {
+            std::fs::write(root.join(file), "").expect("create file");
+        }
+        let patterns = vec!["*test*.py".into()];
+        let inputs = [
+            "nested",
+            ".test_hidden.py",
+            "nested/test_a.py",
+            "missing.py",
+        ]
+        .map(String::from);
+        assert_eq!(
+            collect_test_files(root, &inputs, &patterns),
+            vec![
+                root.join(".test_hidden.py"),
+                root.join("nested/test_a.py"),
+                root.join("nested/test_a.py"),
+            ]
+        );
+        assert_eq!(
+            collect_test_files(root, &[], &patterns),
+            vec![root.join("nested/test_a.py")]
+        );
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("nested/test_a.py"), root.join("test_link.py"))
+                .expect("create symlink");
+            assert_eq!(
+                collect_test_files(root, &["test_link.py".into()], &patterns),
+                vec![root.join("test_link.py")]
+            );
+            assert_eq!(
+                collect_test_files(root, &[], &patterns),
+                vec![root.join("nested/test_a.py")]
+            );
+        }
+    }
 
     #[test]
     fn test_parse_results_json() {
