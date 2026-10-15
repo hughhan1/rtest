@@ -30,7 +30,7 @@ struct ImportInfo {
 
 /// Resolved base class information
 #[derive(Debug, Clone)]
-pub struct ResolvedBaseClass {
+struct ResolvedBaseClass {
     module_path: Vec<String>,
     class_name: String,
     // Local references use the current discovery cache; imported aliases may
@@ -43,25 +43,24 @@ pub struct ResolvedBaseClass {
 /// Stores method-level specs (not expanded) so they can be combined with
 /// child class decorators during inheritance.
 #[derive(Debug, Clone)]
-pub struct TestMethodInfo {
-    pub name: String,
+pub(crate) struct TestMethodInfo {
+    pub(crate) name: String,
     /// Method-level decorator specs (not yet combined with class decorators)
-    pub method_specs: MethodCasesInfo,
+    pub(crate) method_specs: MethodCasesInfo,
 }
 
 /// Test class information including methods
 #[derive(Debug, Clone)]
-pub struct TestClassInfo {
-    pub name: String,
-    pub has_init: bool,
-    pub test_methods: Vec<TestMethodInfo>,
-    pub base_classes: Vec<ResolvedBaseClass>,
+struct TestClassInfo {
+    has_init: bool,
+    test_methods: Vec<TestMethodInfo>,
+    base_classes: Vec<ResolvedBaseClass>,
     /// Class-level decorator specs
-    pub class_specs: MethodCasesInfo,
+    class_specs: MethodCasesInfo,
 }
 
 /// Enhanced test discovery with semantic analysis
-pub struct SemanticTestDiscovery {
+pub(crate) struct SemanticTestDiscovery {
     config: TestDiscoveryConfig,
     /// Cache of test classes by module path and class name
     class_cache: HashMap<(Vec<String>, String), Rc<TestClassInfo>>,
@@ -73,7 +72,7 @@ pub struct SemanticTestDiscovery {
 }
 
 impl SemanticTestDiscovery {
-    pub fn new(config: TestDiscoveryConfig) -> Self {
+    pub(crate) fn new(config: TestDiscoveryConfig) -> Self {
         Self {
             config,
             class_cache: HashMap::new(),
@@ -84,7 +83,7 @@ impl SemanticTestDiscovery {
     }
 
     /// Discover tests in a module with full import resolution
-    pub fn discover_tests(
+    pub(crate) fn discover_tests(
         &mut self,
         path: &Path,
         source: &str,
@@ -232,7 +231,6 @@ impl SemanticTestDiscovery {
         resolver: &ConstantResolver,
     ) -> CollectionResult<TestClassInfo> {
         Ok(TestClassInfo {
-            name: class_def.name.to_string(),
             has_init: class_has_init(class_def),
             test_methods: collect_test_methods(class_def, &self.config, resolver),
             class_specs: parse_decorators_to_specs(
