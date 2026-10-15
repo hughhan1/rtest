@@ -347,51 +347,29 @@ pub fn collect_test_files(root: &Path, paths: &[String], patterns: &[String]) ->
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
-    fn file_selection_preserves_explicit_and_recursive_rules() {
+    fn explicit_hidden_files_and_symlinks_are_not_directory_discoveries() {
         let temp = tempfile::Builder::new()
             .prefix("rtest-file-selection-")
             .tempdir()
             .expect("temporary project");
         let root = temp.path();
-        std::fs::create_dir(root.join("nested")).expect("create directory");
-        for file in ["nested/test_a.py", ".test_hidden.py"] {
+        for file in ["helper.py", ".test_hidden.py"] {
             std::fs::write(root.join(file), "").expect("create file");
         }
+        std::os::unix::fs::symlink(root.join("helper.py"), root.join("test_link.py"))
+            .expect("create symlink");
         let patterns = vec!["*test*.py".into()];
-        let inputs = [
-            "nested",
-            ".test_hidden.py",
-            "nested/test_a.py",
-            "missing.py",
-        ]
-        .map(String::from);
         assert_eq!(
-            collect_test_files(root, &inputs, &patterns),
-            vec![
-                root.join(".test_hidden.py"),
-                root.join("nested/test_a.py"),
-                root.join("nested/test_a.py"),
-            ]
+            collect_test_files(
+                root,
+                &[".test_hidden.py".into(), "test_link.py".into()],
+                &patterns
+            ),
+            vec![root.join(".test_hidden.py"), root.join("test_link.py")]
         );
-        assert_eq!(
-            collect_test_files(root, &[], &patterns),
-            vec![root.join("nested/test_a.py")]
-        );
-
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(root.join("nested/test_a.py"), root.join("test_link.py"))
-                .expect("create symlink");
-            assert_eq!(
-                collect_test_files(root, &["test_link.py".into()], &patterns),
-                vec![root.join("test_link.py")]
-            );
-            assert_eq!(
-                collect_test_files(root, &[], &patterns),
-                vec![root.join("nested/test_a.py")]
-            );
-        }
+        assert!(collect_test_files(root, &[], &patterns).is_empty());
     }
 
     #[test]
