@@ -1,0 +1,47 @@
+name: Python 3.15 wheels
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: '2_28'
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: '2_28'
+          - os: macos-15
+            target: aarch64-apple-darwin
+            manylinux: 'off'
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            manylinux: 'off'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.15'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: PyO3/maturin-action@v1.51.0
+        with:
+          args: --release --out dist --interpreter python3.15
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: rtest-python315-${{ runner.os }}-${{ runner.arch }}
+          path: dist/*.whl
+          if-no-files-found: error
